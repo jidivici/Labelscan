@@ -47,7 +47,27 @@ export function useIngestionResult(ingestionId: string | null | undefined): Inge
         const runs = result.ingestion.extraction_runs;
         const latest = runs.find((r) => r.is_latest) ?? runs[runs.length - 1];
         let run: ExtractionRunResponse | null = null;
-        if (latest) {
+        const embedded = result.ingestion.latest_fields;
+        if (latest && embedded) {
+          // Fast path (audit §1.3): the status response already carries the latest run's
+          // fields, so build the run locally — NO second round-trip at the exact moment the
+          // operator is waiting on the result.
+          run = {
+            run_id: latest.run_id,
+            ingestion_id: result.ingestion.ingestion_id,
+            attempt_no: latest.attempt_no,
+            outcome: latest.outcome,
+            extractor_version: latest.extractor_version,
+            prompt_version: '',
+            ocr_provider: latest.ocr_provider,
+            llm_model: latest.llm_model,
+            ocr_raw_ref: null,
+            rule_set_version: '',
+            created_at: latest.created_at,
+            fields: embedded,
+          };
+        } else if (latest) {
+          // Fallback (older server without latest_fields): fetch the run body.
           try {
             run = await getExtractionRun(latest.run_id, { signal: controller.signal });
           } catch {

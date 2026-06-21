@@ -164,6 +164,28 @@ def test_get_ingestion_shows_all_runs_and_audit(client, seeded):
     )
 
 
+def test_get_ingestion_embeds_latest_fields(client, engine, raw_store):
+    # Self-contained (unique content + Idempotency-Key) so it does NOT inherit the shared
+    # `seeded` idempotency/rawstore state. §1.3: the status response carries the latest
+    # run's fields, so the polling client renders Review without a 2nd round-trip.
+    _quiesce(engine)
+    r = client.post(
+        "/v1/ingestions",
+        files={"image": ("l.jpg", b"embed-latest-fields-1", "image/jpeg")},
+        headers={"Idempotency-Key": "embed-latest-fields", **AUTH},
+    )
+    ingestion_id = r.json()["ingestion_id"]
+    _extraction_only_worker(engine, raw_store).run_once()
+
+    resp = client.get(f"/v1/ingestions/{ingestion_id}", headers=AUTH)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["latest_fields"] is not None
+    sci = next(f for f in body["latest_fields"] if f["field_name"] == "scientific_name")
+    assert sci["value"] == "Gadus morhua"  # the latest run's value, embedded
+    assert sci["source"] in ("llm", "gs1", "human")
+
+
 def test_get_extraction_run_shows_provenance_and_status(client, engine, seeded):
     with engine.connect() as c:
         run_id = c.execute(

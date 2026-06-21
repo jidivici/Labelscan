@@ -47,6 +47,11 @@ export interface IngestionStatusResponse {
   correlation_id: string;
   trace_id: string;
   extraction_runs: ExtractionRunSummary[];
+  /**
+   * The latest run's fields, embedded so the polling client can render Review without a
+   * 2nd GET /extraction-runs round-trip (audit §1.3). Null/absent until a run exists.
+   */
+  latest_fields?: ExtractionField[] | null;
 }
 
 /** Per-field validation status (extraction.v1). */
