@@ -7,7 +7,7 @@
  *    (structured fields preserved) via saveBackendArticle.
  */
 
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -50,6 +50,7 @@ import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
 import { useIngestionResult } from '../hooks/useIngestionResult';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { formatDate } from '../services/dates';
+import { logLatency } from '../services/latencyLog';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import type {
@@ -465,7 +466,7 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const { user } = useAuth();
-  const { ingestionId, photoUri, barcodeRaw, capturedAt: capturedAtParam } = params;
+  const { ingestionId, photoUri, barcodeRaw, capturedAt: capturedAtParam, submittedAt } = params;
 
   const [saving, setSaving] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
@@ -479,6 +480,16 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
   const { phase, ingestion, run } = useIngestionResult(ingestionId);
 
   const fields = run?.fields ?? [];
+
+  // Instrumentation (dev only): the perceived wait from tap Valider to the run landing —
+  // the number that was invisible before (docs/LATENCY-REVIEW.md §6). Fires once when the
+  // phase reaches a terminal state.
+  useEffect(() => {
+    if (submittedAt == null) return;
+    if (phase === 'ready' || phase === 'failed' || phase === 'timeout' || phase === 'error') {
+      logLatency('review', { wait_ms: Date.now() - submittedAt, status: phase });
+    }
+  }, [phase, submittedAt]);
 
   // Allergen decision-support (chantier B): derive ONE EU-family suggestion from the
   // species/product fields. Pure + returns null when unsure (mixed/empty). It is shown

@@ -52,6 +52,8 @@ export type BackendReviewParams = {
   barcodeRaw?: string;
   /** Client capture time — shown in the header at T+0, before the server responds. */
   capturedAt?: string;
+  /** ms epoch when submit started — lets Review measure the perceived wait (dev only). */
+  submittedAt?: number;
 };
 
 type ReviewParams = LegacyReviewParams | BackendReviewParams;
