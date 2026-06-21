@@ -33,10 +33,16 @@ import {
   maskDate,
   isDateField,
   displayDate,
+  toIsoDate,
   parseWeight,
   formatWeight,
   parseTemp,
   formatTemp,
+  parsePrice,
+  formatPrice,
+  validateDate,
+  validateTempRange,
+  validateWeight,
   type WeightUnit,
 } from '../services/inputMasks';
 import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
@@ -284,6 +290,46 @@ function TempRangeInput({
   );
 }
 
+/**
+ * Price field: numeric input with a currency affix (defaults to € / EUR — the criée
+ * standard). Local amount state seeded once from the draft. Emits "amount currency"
+ * (e.g. "8.95 EUR"), so the stored value keeps the LLM's canonical price form.
+ */
+function PriceInput({
+  draft,
+  onChange,
+  highlighted,
+}: {
+  draft: string;
+  onChange: (text: string) => void;
+  highlighted: boolean;
+}) {
+  const seed = parsePrice(draft);
+  const [amount, setAmount] = useState(seed.amount);
+  const currency = seed.currency; // follows the extracted value; shown as a static affix
+
+  return (
+    <View style={styles.affixRow}>
+      <TextInput
+        value={amount}
+        onChangeText={(t) => {
+          const v = t.replace(/[^0-9.,]/g, '');
+          setAmount(v);
+          onChange(formatPrice(v, currency));
+        }}
+        keyboardType="decimal-pad"
+        placeholder="0.00"
+        placeholderTextColor={colors.onSurfaceVariant}
+        style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
+        accessibilityLabel="Prix"
+      />
+      <Text style={[typography.labelLarge, styles.affixUnitText]}>
+        {currency === 'EUR' ? '€' : currency}
+      </Text>
+    </View>
+  );
+}
+
 function EditableFieldRow({
   field,
   draft,
@@ -303,10 +349,17 @@ function EditableFieldRow({
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
   // formats the digits the operator reads off the label — it never computes a date.
   const isDate = isDateField(field.field_name);
-  // Price is amount-dominant (the criée works in EUR); a decimal pad is the right
-  // keyboard. A dedicated currency affix is tracked in the item-5 input plan.
-  const isPrice = field.field_name === 'price';
   const handleChange = (text: string) => onChange(isDate ? maskDate(text) : text);
+  // Real-time, NEUTRAL, non-blocking validity hint (Clean UI: no red, never blocks the
+  // save). Computed from the live draft so it updates as the operator types; null while
+  // the value is empty, valid, or still being typed.
+  let hint: string | null = null;
+  if (isDate) hint = validateDate(draft);
+  else if (field.field_name === 'weight') hint = validateWeight(parseWeight(draft).amount);
+  else if (field.field_name === 'storage_temperature') {
+    const t = parseTemp(draft);
+    hint = validateTempRange(t.min, t.max);
+  }
   return (
     <View style={styles.fieldRow}>
       <View style={styles.fieldHeader}>
@@ -319,11 +372,13 @@ function EditableFieldRow({
         <WeightInput draft={draft} onChange={onChange} highlighted={highlighted} />
       ) : field.field_name === 'storage_temperature' ? (
         <TempRangeInput draft={draft} onChange={onChange} highlighted={highlighted} />
+      ) : field.field_name === 'price' ? (
+        <PriceInput draft={draft} onChange={onChange} highlighted={highlighted} />
       ) : (
         <TextInput
           value={draft}
           onChangeText={handleChange}
-          keyboardType={isDate ? 'number-pad' : isPrice ? 'decimal-pad' : 'default'}
+          keyboardType={isDate ? 'number-pad' : 'default'}
           maxLength={isDate ? 10 : undefined}
           placeholder={isDate ? 'JJ/MM/AAAA' : highlighted ? 'Saisir la valeur' : 'Valeur extraite'}
           placeholderTextColor={colors.onSurfaceVariant}
@@ -338,6 +393,7 @@ function EditableFieldRow({
           accessibilityLabel={`Champ ${fieldLabelFr(field.field_name)}`}
         />
       )}
+      {hint ? <Text style={[typography.labelSmall, styles.inputHint]}>{hint}</Text> : null}
       {showSuggestion ? (
         <Pressable
           onPress={() => onChange(suggestion as string)}
@@ -400,13 +456,17 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
       const savedFields: ArticleField[] = run.fields.map((f): ArticleField => {
         const draft = edits[f.field_name];
         const hasEdit = draft !== undefined;
-        let nextValue = hasEdit ? (draft.trim() === '' ? null : draft.trim()) : f.value;
+        const rawNext = hasEdit ? (draft.trim() === '' ? null : draft.trim()) : f.value;
+        // Dates are stored CANONICAL ISO (the operator types DD/MM/YYYY; we keep
+        // YYYY-MM-DD) so storage, display (displayDate) and the backend chronological gate
+        // stay in sync. toIsoDate is the exact inverse of the displayDate that seeds the
+        // field, so the persisted value renders back to what the operator saw (audit §7.2
+        // step 4 / §4.3 / §4.4).
+        const nextValue =
+          rawNext != null && isDateField(f.field_name) ? toIsoDate(rawNext) : rawNext;
+        // Compare CANONICAL values: re-typing the same date is no longer a false "édité"
+        // (audit §5 step 3 — the old code compared a DD/MM/YYYY draft to an ISO value).
         const changed = hasEdit && nextValue !== f.value;
-        // Mobile presents/stores dates as DD/MM/YYYY; the raw run (raw_extraction_run
-        // below) keeps the canonical ISO for provenance + the backend chronological gate.
-        if (nextValue != null && isDateField(f.field_name)) {
-          nextValue = displayDate(nextValue);
-        }
         return {
           field_name: f.field_name,
           value: nextValue,
@@ -752,6 +812,11 @@ const styles = StyleSheet.create({
   inputHighlighted: {
     backgroundColor: colors.secondaryContainer,
     borderColor: colors.secondary,
+  },
+  // Neutral, non-blocking validity hint under an input (Clean UI: never red/alarmist).
+  inputHint: {
+    color: colors.onSurfaceVariant,
+    marginTop: spacing.xs,
   },
   // Allergen suggestion pill (chantier B) — a discreet, tappable primary-tinted chip
   // shown under the (empty) allergens input. Tapping it fills the field as a human edit.

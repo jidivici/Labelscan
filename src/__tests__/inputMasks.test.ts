@@ -6,6 +6,12 @@ import {
   formatWeight,
   parseTemp,
   formatTemp,
+  parsePrice,
+  formatPrice,
+  toIsoDate,
+  validateDate,
+  validateTempRange,
+  validateWeight,
   DATE_FIELDS,
 } from '../services/inputMasks';
 
@@ -130,5 +136,95 @@ describe('parseTemp / formatTemp', () => {
   it('round-trips a clean range', () => {
     const { min, max } = parseTemp('0-4 C');
     expect(formatTemp(min, max)).toBe('0 - 4 °C');
+  });
+});
+
+describe('parsePrice / formatPrice', () => {
+  it('splits amount + currency, defaulting to EUR', () => {
+    expect(parsePrice('8.95 EUR')).toEqual({ amount: '8.95', currency: 'EUR' });
+    expect(parsePrice('8,95 €')).toEqual({ amount: '8.95', currency: 'EUR' });
+    expect(parsePrice('12')).toEqual({ amount: '12', currency: 'EUR' });
+    expect(parsePrice('')).toEqual({ amount: '', currency: 'EUR' });
+  });
+
+  it('keeps an explicit ISO-4217 code', () => {
+    expect(parsePrice('9.50 USD')).toEqual({ amount: '9.50', currency: 'USD' });
+  });
+
+  it('rebuilds "amount currency" (empty amount → empty)', () => {
+    expect(formatPrice('8.95', 'EUR')).toBe('8.95 EUR');
+    expect(formatPrice('', 'EUR')).toBe('');
+    expect(formatPrice('9,50', 'USD')).toBe('9.50 USD');
+  });
+});
+
+describe('toIsoDate — DD/MM/YYYY → canonical ISO (inverse of displayDate)', () => {
+  it('converts a full DD/MM/YYYY to ISO', () => {
+    expect(toIsoDate('20/06/2026')).toBe('2026-06-20');
+    expect(toIsoDate('02/01/2027')).toBe('2027-01-02');
+  });
+
+  it('passes ISO / partial / verbatim through unchanged', () => {
+    expect(toIsoDate('2026-06-20')).toBe('2026-06-20');
+    expect(toIsoDate('2026-06')).toBe('2026-06');
+    expect(toIsoDate('20/06')).toBe('20/06');
+    expect(toIsoDate('')).toBe('');
+  });
+
+  it('round-trips with displayDate', () => {
+    expect(displayDate(toIsoDate('20/06/2026'))).toBe('20/06/2026');
+    expect(toIsoDate(displayDate('2026-06-20'))).toBe('2026-06-20');
+  });
+});
+
+describe('validateDate — neutral, non-blocking hints', () => {
+  it('accepts valid complete dates (DD/MM/YYYY or ISO)', () => {
+    expect(validateDate('20/06/2026')).toBeNull();
+    expect(validateDate('2026-06-20')).toBeNull();
+    expect(validateDate('29/02/2028')).toBeNull(); // leap year
+  });
+
+  it('does not flag an empty or still-typing value', () => {
+    expect(validateDate('')).toBeNull();
+    expect(validateDate('20/0')).toBeNull();
+    expect(validateDate('20/06/20')).toBeNull();
+  });
+
+  it('flags an implausible complete date', () => {
+    expect(validateDate('32/01/2026')).toBe('Jour invalide');
+    expect(validateDate('10/13/2026')).toBe('Mois invalide');
+    expect(validateDate('29/02/2027')).toBe('Jour invalide'); // 2027 is not a leap year
+    expect(validateDate('01/01/1999')).toBe('Année invalide');
+  });
+});
+
+describe('validateTempRange — min ≤ max, gross outliers', () => {
+  it('accepts a valid range or single bound', () => {
+    expect(validateTempRange('0', '4')).toBeNull();
+    expect(validateTempRange('-18', '')).toBeNull();
+    expect(validateTempRange('', '4')).toBeNull();
+    expect(validateTempRange('-', '')).toBeNull(); // mid-typing a negative
+  });
+
+  it('flags min greater than max', () => {
+    expect(validateTempRange('4', '0')).toBe('Min supérieur au max');
+  });
+
+  it('flags an implausible temperature', () => {
+    expect(validateTempRange('', '400')).toBe('Température inhabituelle');
+  });
+});
+
+describe('validateWeight — strictly positive', () => {
+  it('accepts a positive amount or a still-typing value', () => {
+    expect(validateWeight('320')).toBeNull();
+    expect(validateWeight('1.5')).toBeNull();
+    expect(validateWeight('')).toBeNull();
+    expect(validateWeight('.')).toBeNull();
+  });
+
+  it('flags zero or negative', () => {
+    expect(validateWeight('0')).toBe('Poids invalide');
+    expect(validateWeight('-5')).toBe('Poids invalide');
   });
 });
