@@ -1,0 +1,55 @@
+name: backend-ci
+
+# PG-0 + PG-1 gates. Runs on every push/PR touching the backend.
+on:
+  push:
+    paths: ["server/**", ".github/workflows/backend-ci.yml"]
+  pull_request:
+    paths: ["server/**", ".github/workflows/backend-ci.yml"]
+
+jobs:
+  foundations:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: labelscan_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/labelscan_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+
+      # G-ARCH — dependency-boundary enforcement (PG-0). Fails the build on any
+      # layering / context-independence / domain-purity violation.
+      - name: G-ARCH (import-linter)
+        run: lint-imports
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      # G-MIG — migrations must apply AND be reversible (expand-and-contract).
+      - name: Migrate up
+        run: alembic upgrade head
+      - name: Migrate down (reversibility)
+        run: alembic downgrade base
+      - name: Migrate up again
+        run: alembic upgrade head
+
+      # PG-1 proofs — immutability / same-transaction audit / rollback.
+      - name: Proofs
+        run: pytest -v

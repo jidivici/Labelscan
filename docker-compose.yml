@@ -1,0 +1,64 @@
+services:
+  db:
+    image: postgres:16
+    container_name: labelscan-db
+    environment:
+      POSTGRES_DB: labelscan_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - labelscan-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d labelscan_test"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: labelscan-server
+    env_file: ./server/.env
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/labelscan_test"
+      LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
+    volumes:
+      - labelscan-raw-store:/app/data/raw
+    depends_on:
+      db:
+        condition: service_healthy
+    entrypoint: ["bash", "/app/entrypoint.sh"]
+
+  worker:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: labelscan-worker
+    env_file: ./server/.env
+    environment:
+      DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/labelscan_test"
+      LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
+    volumes:
+      - labelscan-raw-store:/app/data/raw
+    depends_on:
+      db:
+        condition: service_healthy
+    # Remplacer "command:" par "entrypoint:" pour contourner l'entrypoint.sh par défaut
+    entrypoint: [ "python", "-m", "labelscan.app.worker_runtime" ]
+    # Liveness: the worker refreshes a heartbeat file each poll loop...
+    healthcheck:
+      test: [ "CMD", "python", "-m", "labelscan.app.worker_runtime", "--health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+
+volumes:
+  labelscan-pgdata:
+  labelscan-raw-store:

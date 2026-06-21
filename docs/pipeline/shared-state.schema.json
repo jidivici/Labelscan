@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.labelscan/pipeline/pipeline-envelope.v1.schema.json",
+  "title": "LabelScan Extraction Pipeline Envelope (v1)",
+  "description": "The in-process state object passed between extraction-pipeline stages (the 'agents') inside the Ingestion & Extraction context of the LabelScan modular monolith. This is a CONTRACT artifact, not application code. It is NOT a wire/event payload and is NOT persisted as-is; persisted facts (raw artifact, ExtractionRun, audit entries) and published events (LabelExtractionCompleted, ExtractionFlaggedForReview) are defined elsewhere (ARCHITECTURE.md section 6, ADR-0003/0005). The envelope's job is to (a) carry correlation_id/trace_id/ingestion_id through every stage, (b) accumulate per-stage results WITHOUT silently dropping any required-context field, and (c) carry security flags for hostile-content handling. NO stage may delete or overwrite another stage's result; stages only append their own block. Required-context fields (see required_context_keys) must be present and non-empty before a stage that depends on them runs; their absence is a hard halt + escalate, never a silent truncation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "envelope_version",
+    "ids",
+    "status",
+    "required_context_keys",
+    "stage_results",
+    "attempts",
+    "security",
+    "provenance_refs"
+  ],
+  "properties": {
+    "envelope_version": {
+      "description": "Version of THIS envelope contract. Bumped on any breaking change to the envelope shape. Independent of the extraction prompt/schema version (seafood-label-extraction/v1.0.0).",
+      "const": "pipeline-envelope/v1"
+    },
+    "ids": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ingestion_id", "correlation_id", "trace_id", "extraction_run_id"],
+      "description": "Identity + observability ids carried unchanged through every stage (constraint #8). correlation_id and trace_id are populated by the platform middleware and MUST never be regenerated mid-pipeline; the async worker reads them off the event envelope so the trace stays connected across the queue hop (BACKEND section 10.3).",
+      "properties": {
+        "ingestion_id": { "type": "string", "minLength": 1, "description": "The Ingestion aggregate id (ARCHITECTURE section 7.1)." },
+        "correlation_id": { "type": "string", "minLength": 1 },
+        "trace_id": { "type": "string", "minLength": 1, "description": "W3C trace id; per-stage spans are children of it." },
+        "span_id": { "type": ["string", "null"], "description": "Current stage's span id; rotates per stage." },
+        "extraction_run_id": { "type": "string", "minLength": 1, "description": "The ExtractionRun this pass belongs to. A new run id is minted on re-extraction (ADR-0003); the envelope never mutates a prior run." }
+      }
+    },
+    "status": {
+      "description": "Pipeline-level status, a superset/refinement of the Ingestion lifecycle (ARCHITECTURE section 2.1: raw_stored -> ocr_done -> extracted -> needs_review -> confirmed). Pipeline-internal failure states are explicit so the orchestrator can route. 'ocr_skipped_garbage' is the OCR-quality-gate short-circuit (cost saver, section 11). No status is ever silently set to a 'success' value while a required-context key is missing.",
+      "type": "string",
+      "enum": [
+        "raw_stored",
+        "ocr_running",
+        "ocr_done",
+        "ocr_failed",
+        "ocr_skipped_garbage",
+        "extraction_running",
+        "extracted",
+        "extraction_failed",
+        "needs_review",
+        "confirmed",
+        "rejected",
+        "halted_missing_context"
+      ]
+    },
+    "required_context_keys": {
+      "description": "The NO-SILENT-TRUNCATION guarantee, made data. This array lists the envelope paths that the NEXT stage to run declares as required-context. The orchestrator validates each listed key is present and non-empty BEFORE invoking that stage. If any is absent, the orchestrator sets status='halted_missing_context', emits log code PIPE_REQUIRED_CONTEXT_MISSING, writes an audit entry, and routes to the terminal fallback (review) - it does NOT proceed with partial context. Compression/summarization (section 5 of the main doc) may rewrite OPTIONAL keys but is forbidden from removing any key named here.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "stage_results": {
+      "description": "Append-only map of per-stage outputs. Each stage writes exactly one entry keyed by its stage id and never edits another stage's entry (context-ownership rule). Absence of a key means that stage has not run (or was skipped); it is NOT an error by itself - the required_context_keys check is what enforces dependencies.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "preprocess": { "$ref": "#/$defs/preprocessResult" },
+        "ocr": { "$ref": "#/$defs/ocrResult" },
+        "ocr_quality": { "$ref": "#/$defs/ocrQualityResult" },
+        "llm_extract": { "$ref": "#/$defs/llmExtractResult" },
+        "schema_validate": { "$ref": "#/$defs/schemaValidateResult" },
+        "business_validate": { "$ref": "#/$defs/businessValidateResult" }
+      }
+    },
+    "attempts": {
+      "description": "Per-stage attempt counters and circuit signals. Bounds the repair re-ask (LLM <=2 per PROMPT-CONTRACT section 7) and the OCR retry (<=3 per BACKEND section 9.1). Used to enforce hard exits and to populate logs (attempt field, section 9 of main doc).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ocr", "llm_extract"],
+      "properties": {
+        "ocr": { "$ref": "#/$defs/attemptCounter" },
+        "llm_extract": { "$ref": "#/$defs/attemptCounter" }
+      }
+    },
+    "security": {
+      "description": "Hostile-content handling state. OCR text and client meta are treated as untrusted external content (prompt injection, adversarial labels, incidental PII). Flags here drive quarantine and human-review routing (section 8 of main doc). Setting any blocking flag forces the human-review branch; flags are never cleared by an automated stage, only annotated.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["flags", "quarantined"],
+      "properties": {
+        "flags": {
+          "type": "array",
+          "description": "Stable security flag codes raised by any stage. Append-only.",
+          "items": {
+            "type": "string",
+            "enum": [
+              "INJECTION_LANGUAGE_DETECTED",
+              "EVIDENCE_NOT_IN_RAW_OCR",
+              "OUT_OF_VOCAB_VALUE",
+              "PII_SUSPECTED",
+              "NON_FOOD_CONTENT_SUSPECTED",
+              "OVERSIZE_OR_MALFORMED_INPUT",
+              "MULTILINGUAL_UNRESOLVED"
+            ]
+          }
+        },
+        "quarantined": {
+          "type": "boolean",
+          "description": "True if any blocking security flag was raised; a quarantined envelope cannot auto-confirm and must go to human review with the flag surfaced."
+        },
+        "pii_redaction_applied": {
+          "type": "boolean",
+          "description": "Whether the logging/redaction layer scrubbed suspected PII from log projections of this envelope (the envelope itself retains raw refs by ID, not inline PII)."
+        }
+      }
+    },
+    "provenance_refs": {
+      "description": "References (by ID, never inline blobs) to the immutable raw store and the audit trail, so the envelope stays small and the heavy artifacts live outside it (ADR-0003, ARCHITECTURE section 7.1). The envelope carries pointers; it is not the system of record.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw_image_ref", "raw_ocr_ref"],
+      "properties": {
+        "raw_image_ref": { "type": ["string", "null"], "description": "Object-store content-addressed key + checksum ref for the raw image (written BEFORE OCR, ADR-0003)." },
+        "raw_ocr_ref": { "type": ["string", "null"], "description": "raw_artifact id of the appended raw OCR provider JSON (geometry + per-token confidence). Null until OCR completes." },
+        "audit_entry_refs": {
+          "type": "array",
+          "description": "IDs of audit entries written during this pipeline run (append-only, ADR-0004).",
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "attemptCounter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "max", "circuit_state"],
+      "properties": {
+        "count": { "type": "integer", "minimum": 0 },
+        "max": { "type": "integer", "minimum": 0, "description": "Hard ceiling (OCR=3, LLM repair re-ask=2). On count==max the stage takes its terminal fallback; the orchestrator never loops past this." },
+        "circuit_state": { "type": "string", "enum": ["closed", "open", "half_open"], "description": "Per-provider breaker state mirrored from BACKEND section 9.3; when 'open' the stage is not called and status is set to *_failed/provider_degraded." }
+      }
+    },
+    "confidenceBand": {
+      "type": "string",
+      "enum": ["low", "medium", "high"],
+      "description": "Domain Confidence VO band (ADR-0005). The backend re-derives bands; the model's raw 0-1 score is a hint only."
+    },
+    "preprocessResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "image_ref", "applied"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "degraded", "failed"] },
+        "image_ref": { "type": ["string", "null"], "description": "Ref to the image actually sent to OCR. NOTE: preprocessing NEVER overwrites the raw image (ADR-0003); a derived/enhanced image is a separate, non-authoritative artifact and the raw remains the evidence anchor." },
+        "applied": { "type": "array", "items": { "type": "string" }, "description": "Operations applied (e.g. orientation, downscale). Empty array means pass-through (preprocessing is optional/skippable - it has a no-op fallback)." },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "ocrResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "raw_ocr_ref", "token_count", "mean_token_confidence"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "failed", "timeout", "circuit_open"] },
+        "raw_ocr_ref": { "type": ["string", "null"], "description": "Mirrors provenance_refs.raw_ocr_ref; the raw OCR JSON is the evidence anchor for all downstream evidence-substring checks." },
+        "ocr_text": { "type": ["string", "null"], "description": "Plain extracted text. Treated as UNTRUSTED data downstream (never instructions)." },
+        "token_count": { "type": ["integer", "null"], "minimum": 0 },
+        "mean_token_confidence": { "type": ["number", "null"], "minimum": 0.0, "maximum": 1.0 }
+      }
+    },
+    "ocrQualityResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["verdict", "score"],
+      "properties": {
+        "verdict": { "type": "string", "enum": ["proceed", "skip_garbage", "review"], "description": "'skip_garbage' short-circuits the LLM (cost saver, section 11) and routes to review; 'proceed' continues to LLM extraction; 'review' forces human review without calling the LLM (e.g. suspected non-food image)." },
+        "score": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Composite OCR-quality score (mean token confidence + legible-token ratio + minimum content length). Threshold is a configurable domain value, not a scattered float." },
+        "reasons": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "llmExtractResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "extractor_version", "schema_version"],
+      "properties": {
+        "status": { "type": "string", "enum": ["ok", "unparseable", "off_schema", "refused", "timeout", "circuit_open"] },
+        "extractor_version": { "type": ["string", "null"], "description": "Recorded in ExtractionRun.extractor_version (ADR-0005, PROMPT-CONTRACT section 1)." },
+        "schema_version": { "type": ["string", "null"], "description": "Must equal 'seafood-label-extraction/v1.0.0' for v1; the gate routes/validates per this value." },
+        "raw_output_ref": { "type": ["string", "null"], "description": "Ref to the stored raw LLM output (for calibration/debugging); never trusted as fields until the gate validates it." }
+      }
+    },
+    "schemaValidateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["valid", "fields_accepted", "fields_coerced_null"],
+      "description": "Output of the structural + no-fabrication gate (BACKEND section 8.2 steps 1-2). 'fields_coerced_null' are values whose evidence was absent or NOT an exact substring of the raw OCR - coerced to null with reason 'unverifiable' (never fabricated).",
+      "properties": {
+        "valid": { "type": "boolean" },
+        "fields_accepted": { "type": "array", "items": { "type": "string" } },
+        "fields_coerced_null": { "type": "array", "items": { "type": "string" } },
+        "errors": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "businessValidateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rule_set_version", "missing_required_fields", "low_confidence_fields", "out_of_vocab_fields", "gtin_status"],
+      "description": "Output of the rule-set + confidence-threshold + controlled-vocab + GTIN checks (BACKEND section 8.2 steps 3-5, section 8.4). Validated against a VERSIONED rule-set SNAPSHOT (no live coupling); rule_set_version makes any decision explainable by the rules in force at the time.",
+      "properties": {
+        "rule_set_version": { "type": "string", "minLength": 1 },
+        "missing_required_fields": { "type": "array", "items": { "type": "string" }, "description": "Populates ExtractionFlaggedForReview (ARCHITECTURE section 6)." },
+        "low_confidence_fields": { "type": "array", "items": { "type": "string" } },
+        "out_of_vocab_fields": { "type": "array", "items": { "type": "string" } },
+        "gtin_status": { "type": "string", "enum": ["valid", "invalid_checksum", "absent", "not_checked"] }
+      }
+    }
+  }
+}
