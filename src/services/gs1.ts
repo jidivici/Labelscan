@@ -18,6 +18,8 @@
  * are read defensively and surfaced in `warnings`, never guessed.
  */
 
+import { displayDate } from './inputMasks';
+
 const FNC1 = '\x1d'; // GS / Group Separator — the GS1 variable-field terminator
 
 // Fixed-length AIs (AI -> payload length in characters). HACCP-relevant subset.
@@ -201,4 +203,21 @@ export function formatGs1WeightKg(kg: number): string {
   let s = kg.toFixed(3);
   if (s.includes('.')) s = s.replace(/0+$/, '').replace(/\.$/, '');
   return `${s} kg`;
+}
+
+/**
+ * GS1-decoded values keyed by extraction field name, formatted for display (dates →
+ * DD/MM/YYYY, net weight → "x kg"). These are the fields GS1 resolves EXACTLY from the
+ * barcode; they power the Review field list at T+0 (filled rows before the LLM run lands —
+ * audit §2.1). Fields GS1 does not resolve are `undefined`.
+ */
+export function gs1FieldValues(gs1: Gs1Decoded): Record<string, string | undefined> {
+  const expiry = gs1.expiryDate ?? gs1.bestBefore;
+  return {
+    batch_number: gs1.lot ?? undefined,
+    expiry_date: expiry ? displayDate(expiry) : undefined,
+    packaging_date: gs1.packagingDate ? displayDate(gs1.packagingDate) : undefined,
+    weight: gs1.netWeightKg != null ? formatGs1WeightKg(gs1.netWeightKg) : undefined,
+    gtin: gs1.gtin ?? undefined,
+  };
 }

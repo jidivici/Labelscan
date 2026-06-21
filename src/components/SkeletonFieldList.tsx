@@ -1,23 +1,19 @@
 /**
- * SkeletonFieldList — placeholder rows shown while the server extraction (OCR + LLM)
+ * Skeleton placeholders for the Review field list while the server extraction (OCR + LLM)
  * is still running, after the GS1 fields have already been shown at T+0.
  *
- * Each row mirrors the geometry of ReviewScreen's EditableFieldRow (an uppercase
- * label line above a full-width input block) so that when the real fields arrive the
- * already-visible header/meta does not jump — only these placeholders are replaced.
- * A single shared opacity pulse (native-driven) reads as "loading" without motion noise.
+ * `SkeletonValue` is one pulsing value block whose geometry matches EditableFieldRow's
+ * input, so a per-field cascade (ReviewScreen) can render a STABLE 16-row list from T+0 —
+ * GS1 rows filled, the rest skeletoned IN PLACE — and swap each skeleton for the real
+ * field with zero layout shift. `SkeletonFieldList` is the legacy whole-block variant.
  */
 
 import React, { useEffect, useRef } from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { colors, spacing, radius } from '../theme';
 
-interface SkeletonFieldListProps {
-  /** How many placeholder rows to render (≈ the typical free-text field count). */
-  count?: number;
-}
-
-export function SkeletonFieldList({ count = 6 }: SkeletonFieldListProps) {
+/** One pulsing value block (same height as the bordered TextInput, so nothing shifts). */
+export function SkeletonValue() {
   const pulse = useRef(new Animated.Value(0.4)).current;
 
   useEffect(() => {
@@ -32,11 +28,26 @@ export function SkeletonFieldList({ count = 6 }: SkeletonFieldListProps) {
   }, [pulse]);
 
   return (
+    <Animated.View
+      style={[styles.valueBlock, { opacity: pulse }]}
+      accessibilityRole="progressbar"
+      accessibilityLabel="Champ en cours d’analyse"
+    />
+  );
+}
+
+interface SkeletonFieldListProps {
+  /** How many placeholder rows to render (≈ the typical free-text field count). */
+  count?: number;
+}
+
+export function SkeletonFieldList({ count = 6 }: SkeletonFieldListProps) {
+  return (
     <View accessibilityRole="progressbar" accessibilityLabel="Analyse de l’étiquette en cours">
       {Array.from({ length: count }).map((_, i) => (
         <View key={i} style={styles.row}>
-          <Animated.View style={[styles.labelBar, { opacity: pulse }]} />
-          <Animated.View style={[styles.valueBlock, { opacity: pulse }]} />
+          <View style={styles.labelBar} />
+          <SkeletonValue />
         </View>
       ))}
     </View>
