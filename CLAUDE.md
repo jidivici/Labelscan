@@ -108,7 +108,20 @@ aucun run précédent écrasé (test append-only) ; export backend reflète la v
 **Risques.** Offline (file locale), conflits multi-device (last-write-wins horodaté + audit),
 périmètre des champs éditables. **Effort : M-L.**
 
-#### Fix 7.2 — Persistance locale : blob AsyncStorage → SQLite indexé (scale + cohérence)
+#### Fix 7.2 — Persistance locale : blob AsyncStorage → SQLite indexé (scale + cohérence) — ✅ LIVRÉ (21 juin 2026)
+**Statut.** Approche **port + adaptateurs** (décision produit : interface testable maintenant,
+expo-sqlite branché plus tard — le module natif n'est pas vérifiable en jest/Node ici). Livré :
+`ArticleStore` (port, `articleStore.ts`) + `InMemoryArticleStore` (tests/référence) +
+`AsyncStorageArticleStore` **une clé par article** (`@labelscan:article:<id>`) → fin du blob unique :
+plafond ~6 Mo supprimé, writes O(1), getById O(1) ; `raw_extraction_run` sorti du chemin chaud
+(clé `@labelscan:articleRaw:<id>` lazy — write-only, aucune UI ne la lit) ; migration one-shot du
+blob legacy sans perte (blob conservé en secours). Facade `storage.ts` : API publique inchangée
+(écrans non touchés) + seam `setArticleStore()` pour brancher `SqliteArticleStore` (expo-sqlite,
+colonnes indexées + FTS5) plus tard sans rien changer d'autre. Vérifié : typecheck 0 erreur +
+`articleStore.test.ts` (contrat ×2 adaptateurs + migration), 108 tests jest verts. **Reste (séparé,
+non inclus) :** canonicalisation dates ISO (étape 4) — touche l'affichage multi-écrans, à traiter
+avec le Fix 5. Plan d'origine ci-dessous (référence).
+
 **Problème.** Un seul blob JSON contient TOUS les articles, chacun embarquant
 `raw_extraction_run` complet (`src/services/storage.ts:115`, `src/types/Article.ts:41`).
 Réécriture O(n) à chaque save ; **plafond ~6 Mo (CursorWindow Android) → échec silencieux** à

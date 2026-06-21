@@ -1,23 +1,36 @@
 /**
- * Storage Service — backend-extraction articles.
- *  - Article records → AsyncStorage (JSON array)
- *  - Photos → expo-file-system (permanent documents directory)
+ * Storage Service — backend-extraction articles (facade).
  *
- * Backend-only: getAllArticles ignores any legacy-shaped records (there is no
- * on-device-OCR data to preserve), and the next save overwrites them out.
+ * Public API unchanged (getAllArticles / getArticleById / saveBackendArticle /
+ * deleteArticle) so the screens don't move. Record persistence is delegated to an
+ * ArticleStore PORT (audit §7.2): the default is the per-key AsyncStorage adapter — no
+ * 6 MB blob ceiling, O(1) writes. To run on expo-sqlite in production, implement the port
+ * and call setArticleStore(new SqliteArticleStore()) at app init; nothing here changes.
+ *
+ * This facade still owns the PHOTO lifecycle (cache → permanent documents dir), which is
+ * orthogonal to where the record is stored.
  */
 
 import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
 import { v4 as uuidv4 } from 'uuid';
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { Article, ArticleField } from '../types/Article';
 import type { ExtractionRunResponse } from '../types/api';
+import type { ArticleStore } from './articleStore';
+import { AsyncStorageArticleStore } from './articleStoreAsyncStorage';
 
-const ARTICLES_KEY = '@labelscan:articles';
 const PHOTOS_DIR = `${FileSystem.documentDirectory}photos/`;
+
+// The active persistence engine. Default = per-key AsyncStorage (§7.2). SWAP POINT for a
+// future SqliteArticleStore (expo-sqlite, indexed + FTS5): inject it once at app init.
+let store: ArticleStore = new AsyncStorageArticleStore();
+
+/** Replace the storage engine (e.g. inject SqliteArticleStore in prod, a fake in tests). */
+export function setArticleStore(next: ArticleStore): void {
+  store = next;
+}
 
 // ─── Ensure photos dir exists ────────────────────────────────────────────────
 
@@ -28,40 +41,14 @@ async function ensurePhotosDirExists(): Promise<void> {
   }
 }
 
-// ─── Read all articles (backend records only) ──────────────────────────────────
+// ─── Reads (delegated to the active store) ──────────────────────────────────────
 
 export async function getAllArticles(): Promise<Article[]> {
-  const raw = await AsyncStorage.getItem(ARTICLES_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    // Ignore any legacy-shaped records — no on-device-OCR data to preserve.
-    return parsed.filter((a): a is Article => a?.source === 'backend_extraction');
-  } catch {
-    return [];
-  }
+  return store.getAll();
 }
-
-// ─── Read one article by id ─────────────────────────────────────────────────────
 
 export async function getArticleById(id: string): Promise<Article | null> {
-  const all = await getAllArticles();
-  return all.find((a) => a.id === id) ?? null;
-}
-
-// ─── Serialized writes ────────────────────────────────────────────────────────
-// AsyncStorage has no atomic read-modify-write; this queue serializes both save
-// and delete so concurrent mutations can't clobber the list (lost update).
-let articlesWriteQueue: Promise<unknown> = Promise.resolve();
-
-function enqueueArticlesWrite<T>(task: () => Promise<T>): Promise<T> {
-  const result = articlesWriteQueue.then(task, task);
-  articlesWriteQueue = result.then(
-    () => undefined,
-    () => undefined
-  );
-  return result;
+  return store.getById(id);
 }
 
 // ─── Save a backend-extraction article ──────────────────────────────────────────
@@ -127,35 +114,26 @@ export async function saveBackendArticle(input: SaveBackendArticleInput): Promis
     raw_extraction_run: input.raw_extraction_run ?? null,
   };
 
-  return enqueueArticlesWrite(async () => {
-    const existing = await getAllArticles();
-    const updated = [saved, ...existing]; // newest first
-    await AsyncStorage.setItem(ARTICLES_KEY, JSON.stringify(updated));
-    return saved;
-  });
+  // O(1): writes only this article's keys (raw run kept off the hot path by the adapter).
+  await store.put(saved);
+  return saved;
 }
 
 // ─── Delete an article ────────────────────────────────────────────────────────
 
 export async function deleteArticle(id: string): Promise<void> {
-  return enqueueArticlesWrite(async () => {
-    const existing = await getAllArticles();
-    const article = existing.find((a) => a.id === id);
+  const article = await store.getById(id);
 
-    if (article?.photo_uri) {
-      try {
-        const fileInfo = await FileSystem.getInfoAsync(article.photo_uri);
-        if (fileInfo.exists) {
-          await FileSystem.deleteAsync(article.photo_uri, { idempotent: true });
-        }
-      } catch (err) {
-        console.warn('Photo delete failed:', err);
+  if (article?.photo_uri) {
+    try {
+      const fileInfo = await FileSystem.getInfoAsync(article.photo_uri);
+      if (fileInfo.exists) {
+        await FileSystem.deleteAsync(article.photo_uri, { idempotent: true });
       }
+    } catch (err) {
+      console.warn('Photo delete failed:', err);
     }
+  }
 
-    const updated = existing.filter((a) => a.id !== id);
-    await AsyncStorage.setItem(ARTICLES_KEY, JSON.stringify(updated));
-  });
+  await store.remove(id);
 }
-
-
