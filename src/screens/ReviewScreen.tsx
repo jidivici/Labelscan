@@ -46,9 +46,9 @@ import {
   type WeightUnit,
 } from '../services/inputMasks';
 import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
-import { parseGs1, formatGs1WeightKg } from '../services/gs1';
+import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
 import { useIngestionResult } from '../hooks/useIngestionResult';
-import { SkeletonFieldList } from '../components/SkeletonFieldList';
+import { SkeletonValue } from '../components/SkeletonFieldList';
 import { formatDate } from '../services/dates';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
@@ -192,6 +192,51 @@ function needsReview(field: ExtractionField): boolean {
   return field.value == null || field.value === '';
 }
 
+// Canonical display order for the 16 fields. The SAME order drives the loading skeleton
+// list AND the ready list, so rows never reshuffle when the run lands (audit §2.2 — zero
+// layout shift). Readable HACCP order: identity → method/origin → lot/dates → conservation.
+const FIELD_ORDER = [
+  'product_name',
+  'commercial_designation',
+  'scientific_name',
+  'production_method',
+  'fishing_gear_or_farming_method',
+  'FAO_area',
+  'origin_country',
+  'batch_number',
+  'expiry_date',
+  'packaging_date',
+  'storage_temperature',
+  'weight',
+  'allergens',
+  'price',
+  'supplier_name',
+  'gtin',
+] as const;
+
+/**
+ * One placeholder row in the stable list while the LLM run is still loading: the real
+ * field LABEL is shown, and the VALUE is either the GS1-decoded value (known at T+0) or a
+ * pulsing skeleton. Same geometry as EditableFieldRow → swapping it in at ready does not
+ * move anything (audit §2.1/2.2).
+ */
+function PendingFieldRow({ fieldName, gs1Value }: { fieldName: string; gs1Value?: string }) {
+  return (
+    <View style={styles.fieldRow}>
+      <View style={styles.fieldHeader}>
+        <Text style={[typography.labelSmall, styles.fieldName]}>{fieldLabelFr(fieldName)}</Text>
+      </View>
+      {gs1Value != null ? (
+        <View style={styles.input}>
+          <Text style={[typography.bodyMedium, { color: colors.onSurface }]}>{gs1Value}</Text>
+        </View>
+      ) : (
+        <SkeletonValue />
+      )}
+    </View>
+  );
+}
+
 /**
  * Weight field: numeric input with an integrated, tappable unit affix (kg ⇄ g). Local
  * state is seeded once from the draft so typing decimals/units is not mangled by a
@@ -330,7 +375,7 @@ function PriceInput({
   );
 }
 
-function EditableFieldRow({
+const EditableFieldRow = React.memo(function EditableFieldRow({
   field,
   draft,
   onChange,
@@ -339,17 +384,21 @@ function EditableFieldRow({
 }: {
   field: ExtractionField;
   draft: string;
-  onChange: (text: string) => void;
+  // (name, text) so the parent keeps ONE stable callback for all rows — combined with
+  // React.memo, a keystroke then re-renders ONLY the edited row (audit §7.1).
+  onChange: (name: string, text: string) => void;
   highlighted: boolean;
   suggestion?: string | null;
 }) {
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
   const showSuggestion = !!suggestion && draft.trim() === '';
+  // Bind this row's field name once; the affix inputs and the suggestion chip emit through it.
+  const emit = (text: string) => onChange(field.field_name, text);
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
   // formats the digits the operator reads off the label — it never computes a date.
   const isDate = isDateField(field.field_name);
-  const handleChange = (text: string) => onChange(isDate ? maskDate(text) : text);
+  const handleChange = (text: string) => emit(isDate ? maskDate(text) : text);
   // Real-time, NEUTRAL, non-blocking validity hint (Clean UI: no red, never blocks the
   // save). Computed from the live draft so it updates as the operator types; null while
   // the value is empty, valid, or still being typed.
@@ -369,11 +418,11 @@ function EditableFieldRow({
         ) : null}
       </View>
       {field.field_name === 'weight' ? (
-        <WeightInput draft={draft} onChange={onChange} highlighted={highlighted} />
+        <WeightInput draft={draft} onChange={emit} highlighted={highlighted} />
       ) : field.field_name === 'storage_temperature' ? (
-        <TempRangeInput draft={draft} onChange={onChange} highlighted={highlighted} />
+        <TempRangeInput draft={draft} onChange={emit} highlighted={highlighted} />
       ) : field.field_name === 'price' ? (
-        <PriceInput draft={draft} onChange={onChange} highlighted={highlighted} />
+        <PriceInput draft={draft} onChange={emit} highlighted={highlighted} />
       ) : (
         <TextInput
           value={draft}
@@ -396,7 +445,7 @@ function EditableFieldRow({
       {hint ? <Text style={[typography.labelSmall, styles.inputHint]}>{hint}</Text> : null}
       {showSuggestion ? (
         <Pressable
-          onPress={() => onChange(suggestion as string)}
+          onPress={() => emit(suggestion as string)}
           style={styles.suggestionChip}
           android_ripple={{ color: colors.primaryContainer }}
           accessibilityRole="button"
@@ -410,7 +459,7 @@ function EditableFieldRow({
       ) : null}
     </View>
   );
-}
+});
 
 function BackendReview({ params }: { params: BackendReviewParams }) {
   const insets = useSafeAreaInsets();
@@ -437,6 +486,16 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
   // records a HUMAN edit (source='human' on save), never an extracted value — the
   // no-fabrication gate is untouched. See services/allergenSuggestions.ts.
   const allergenSuggestion = useMemo(() => suggestAllergen(fields), [fields]);
+
+  // ONE stable callback for every editable row (audit §7.1): with React.memo a keystroke
+  // re-renders only the row whose draft changed, not all 16.
+  const handleFieldChange = useCallback((name: string, text: string) => {
+    setEdits((prev) => ({ ...prev, [name]: text }));
+  }, []);
+
+  // GS1-decoded values keyed by field name — shown IN the field list at T+0 (before the
+  // LLM run lands) so those rows are filled immediately rather than skeletoned (§2.1).
+  const gs1Values = useMemo(() => gs1FieldValues(gs1), [gs1]);
 
   // GS1 wins on lot/DLC at T+0; the backend reconciles the same way, so the values stay
   // stable once the run lands.
@@ -610,14 +669,7 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
 
           <View style={styles.divider} />
 
-          {phase === 'loading' ? (
-            <>
-              <Text style={[typography.labelMedium, styles.sectionLabel]}>
-                Analyse de l’étiquette…
-              </Text>
-              <SkeletonFieldList count={6} />
-            </>
-          ) : phase === 'failed' || phase === 'timeout' || phase === 'error' ? (
+          {phase === 'failed' || phase === 'timeout' || phase === 'error' ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 {phase === 'timeout'
@@ -627,39 +679,46 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
                     : 'Impossible de joindre le serveur. Vérifiez votre connexion, puis reprenez la photo.'}
               </Text>
             </View>
-          ) : run == null ? (
+          ) : phase === 'ready' && run == null ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Impossible de charger les champs extraits. L'étiquette a été traitée sur le serveur
                 (statut : {ingestion ? ingestionStatusFr(ingestion.status) : '—'}).
               </Text>
             </View>
-          ) : fields.length === 0 ? (
+          ) : phase === 'ready' && fields.length === 0 ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Aucun champ extrait.
               </Text>
             </View>
           ) : (
+            // loading OR (ready with fields): a STABLE list in FIELD_ORDER. GS1 rows are
+            // filled at T+0, the rest skeleton IN PLACE, then swap to editable when the run
+            // lands — same rows, order and heights → zero layout shift (audit §2.1/2.2).
             <>
               <Text style={[typography.labelMedium, styles.sectionLabel]}>
-                Champs ({fields.length})
+                {phase === 'ready' ? `Champs (${fields.length})` : 'Analyse de l’étiquette…'}
               </Text>
-              {fields.map((f) => (
-                <EditableFieldRow
-                  key={f.field_name}
-                  field={f}
-                  draft={
-                    edits[f.field_name] ??
-                    (isDateField(f.field_name) ? displayDate(f.value ?? '') : f.value ?? '')
-                  }
-                  onChange={(text) =>
-                    setEdits((prev) => ({ ...prev, [f.field_name]: text }))
-                  }
-                  highlighted={needsReview(f)}
-                  suggestion={f.field_name === 'allergens' ? allergenSuggestion : undefined}
-                />
-              ))}
+              {FIELD_ORDER.map((name) => {
+                const field = fields.find((f) => f.field_name === name);
+                if (field) {
+                  return (
+                    <EditableFieldRow
+                      key={name}
+                      field={field}
+                      draft={
+                        edits[name] ??
+                        (isDateField(name) ? displayDate(field.value ?? '') : field.value ?? '')
+                      }
+                      onChange={handleFieldChange}
+                      highlighted={needsReview(field)}
+                      suggestion={name === 'allergens' ? allergenSuggestion : undefined}
+                    />
+                  );
+                }
+                return <PendingFieldRow key={name} fieldName={name} gs1Value={gs1Values[name]} />;
+              })}
             </>
           )}
         </ScrollView>

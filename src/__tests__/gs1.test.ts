@@ -1,4 +1,4 @@
-import { parseGs1, formatGs1WeightKg } from '../services/gs1';
+import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
 
 const FNC1 = '\x1d';
 
@@ -75,5 +75,29 @@ describe('GS1 parser (client mirror of server domain/gs1.py)', () => {
   it('formats kg compactly', () => {
     expect(formatGs1WeightKg(0.32)).toBe('0.32 kg');
     expect(formatGs1WeightKg(2)).toBe('2 kg');
+  });
+});
+
+describe('gs1FieldValues — T+0 field-list prefill', () => {
+  it('maps resolved AIs to display strings (dates DD/MM/YYYY, weight "x kg")', () => {
+    const v = gs1FieldValues(parseGs1('(01)03700161210047(10)LOT123(17)251231(13)250102(3103)001500'));
+    expect(v.batch_number).toBe('LOT123');
+    expect(v.gtin).toBe('03700161210047');
+    expect(v.expiry_date).toBe('31/12/2025');
+    expect(v.packaging_date).toBe('02/01/2025');
+    expect(v.weight).toBe('1.5 kg');
+  });
+
+  it('falls back to DDM (AI 15) when no DLC (AI 17) is present', () => {
+    expect(gs1FieldValues(parseGs1('(15)250601')).expiry_date).toBe('01/06/2025');
+  });
+
+  it('leaves unresolved fields undefined (never invents)', () => {
+    const v = gs1FieldValues(parseGs1('(10)LOT123'));
+    expect(v.batch_number).toBe('LOT123');
+    expect(v.gtin).toBeUndefined();
+    expect(v.expiry_date).toBeUndefined();
+    expect(v.weight).toBeUndefined();
+    expect(v.packaging_date).toBeUndefined();
   });
 });
