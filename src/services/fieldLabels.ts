@@ -5,6 +5,8 @@
  * unchanged; this just maps them to professional French for the review screen.
  */
 
+import { displayDate, isDateField } from './inputMasks';
+
 export const FIELD_LABELS_FR: Record<string, string> = {
   product_name: 'Nom du produit',
   commercial_designation: 'Dénomination commerciale',
@@ -80,5 +82,8 @@ export function productionMethodFr(value: string | null): string | null {
  */
 export function displayFieldValue(fieldName: string, value: string | null): string | null {
   if (fieldName === 'production_method') return productionMethodFr(value);
+  // Dates are stored canonical ISO (audit §7.2 step 4); render DD/MM/YYYY. displayDate
+  // passes through anything not ISO, so legacy DD/MM/YYYY records still display correctly.
+  if (value != null && isDateField(fieldName)) return displayDate(value);
   return value;
 }

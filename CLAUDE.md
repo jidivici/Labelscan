@@ -144,7 +144,18 @@ représentation canonique (ISO) en stockage.
 migration sans perte ; plus aucune lecture/écriture du blob global.
 **Risques.** Migration sur device réel, disponibilité FTS5 selon build Expo. **Effort : M-L.**
 
-#### Fix 5 — Saisie mobile : affixes, validation temps réel, cohérence
+#### Fix 5 — Saisie mobile : affixes, validation temps réel, cohérence — ✅ LIVRÉ (21 juin 2026)
+**Statut.** Étapes 1-4 livrées. `PriceInput` (affixe €/devise, défaut EUR) + `parsePrice`/`formatPrice`
+dans `inputMasks.ts`. Validateurs purs non bloquants `validateDate` (jour/mois/année + bissextile),
+`validateTempRange` (min ≤ max + outliers), `validateWeight` (> 0) → indice **neutre** sous le champ
+(jamais de rouge, jamais bloquant ; l'opérateur reste maître). Dates **canonisées ISO** au save via
+`toIsoDate` (inverse exact de `displayDate`) → fin de la double représentation (§4.4) ; `changed`
+comparé en ISO → plus de faux « édité » (§5.3) ; `displayFieldValue` formate les dates au détail.
+Cohérence (§4.3) : garantie par construction (`toIsoDate`↔`displayDate` round-trip testé), pas de
+log runtime. Vérifié : typecheck 0 erreur + 14 tests purs (`inputMasks.test.ts`), 122 jest verts.
+**Reste (objectif 3, séparé) :** étape 5 — autocomplétion par champ depuis l'historique. Plan
+d'origine ci-dessous (référence).
+
 **Problème.** Prix sans affixe devise (quick win `decimal-pad` fait) ; pas de validation temps
 réel (date `32/13`, temp hors borne) ; `changed`/`displayDate` calculé avant normalisation peut
 marquer une date inchangée comme « éditée » (`src/screens/ReviewScreen.tsx`).
