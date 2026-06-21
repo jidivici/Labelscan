@@ -42,21 +42,6 @@ class RunSummary(BaseModel):
     is_latest: bool
 
 
-class IngestionView(BaseModel):
-    ingestion_id: str
-    status: str
-    image_ref: str
-    checksum_sha256: str
-    barcode_raw: str | None
-    client_captured_at: str | None
-    server_received_at: str
-    correlation_id: str
-    trace_id: str
-    raw_artifacts: list[RawArtifactView]
-    extraction_runs: list[RunSummary]
-    audit: list[AuditEntry]
-
-
 class FieldView(BaseModel):
     field_name: str
     value: Any | None
@@ -73,6 +58,24 @@ class FieldView(BaseModel):
     confidence_band: str
     source: str
     created_at: str
+
+
+class IngestionView(BaseModel):
+    ingestion_id: str
+    status: str
+    image_ref: str
+    checksum_sha256: str
+    barcode_raw: str | None
+    client_captured_at: str | None
+    server_received_at: str
+    correlation_id: str
+    trace_id: str
+    raw_artifacts: list[RawArtifactView]
+    extraction_runs: list[RunSummary]
+    # The latest run's fields, embedded so a polling client renders the review screen
+    # WITHOUT a second GET /extraction-runs round-trip (audit §1.3). None until a run exists.
+    latest_fields: list[FieldView] | None = None
+    audit: list[AuditEntry]
 
 
 class ExtractionRunView(BaseModel):
@@ -139,6 +142,31 @@ def get_ingestion(
         )
         audit = audit_entries(c, ingestion_id)
 
+        # Latest run's fields, embedded so the polling client renders Review without a 2nd
+        # round-trip (§1.3). Empty until a run exists (during polling), so the per-poll
+        # payload stays light; only the terminal poll carries the fields.
+        latest_run_id = (
+            max(runs, key=lambda r: r["attempt_no"])["run_id"] if runs else None
+        )
+        latest_fields = None
+        if latest_run_id is not None:
+            field_rows = (
+                c.execute(
+                    text(
+                        "SELECT field_name, value, evidence, provenance, "
+                        "source_raw_artifact_id::text AS source_raw_artifact_id, "
+                        "validation_status, warnings, llm_confidence, ocr_confidence, "
+                        "combined_confidence, confidence_band, source, "
+                        "created_at::text AS created_at FROM ingestion.extracted_field "
+                        "WHERE extraction_run_id = :rid ORDER BY field_name"
+                    ),
+                    {"rid": latest_run_id},
+                )
+                .mappings()
+                .all()
+            )
+            latest_fields = [FieldView(**f) for f in field_rows]
+
     max_attempt = max((r["attempt_no"] for r in runs), default=None)
     return IngestionView(
         ingestion_id=row["id"],
@@ -154,6 +182,7 @@ def get_ingestion(
         extraction_runs=[
             RunSummary(**r, is_latest=(r["attempt_no"] == max_attempt)) for r in runs
         ],
+        latest_fields=latest_fields,
         audit=audit,
     )
 
