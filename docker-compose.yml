@@ -38,7 +38,11 @@ services:
     build:
       context: ./server
       dockerfile: Dockerfile
-    container_name: labelscan-worker
+    # No container_name: replicas need unique names. Running N workers is safe — the
+    # outbox claim uses FOR UPDATE SKIP LOCKED (audit §1.5) — and each replica keeps its
+    # OWN heartbeat file, so the per-container healthcheck stays correct.
+    deploy:
+      replicas: 2
     env_file: ./server/.env
     environment:
       DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/labelscan_test"
