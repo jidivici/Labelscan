@@ -28,6 +28,7 @@ import * as Haptics from 'expo-haptics';
 
 import { saveBackendArticle } from '../services/storage';
 import { suggestAllergen } from '../services/allergenSuggestions';
+import { submitFieldOverrides, isHumanEditableField } from '../services/fieldOverrideSubmit';
 import {
   maskDate,
   isDateField,
@@ -39,7 +40,6 @@ import {
   type WeightUnit,
 } from '../services/inputMasks';
 import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
-import { isUncertain } from '../services/fieldStatus';
 import { parseGs1, formatGs1WeightKg } from '../services/gs1';
 import { useIngestionResult } from '../hooks/useIngestionResult';
 import { SkeletonFieldList } from '../components/SkeletonFieldList';
@@ -52,6 +52,7 @@ import type {
   LegacyReviewParams,
 } from '../navigation/RootNavigator';
 import type { ExtractionField } from '../types/api';
+import type { ArticleField } from '../types/Article';
 
 type RouteType = RouteProp<CaptureStackParamList, 'Review'>;
 type NavProp = StackNavigationProp<CaptureStackParamList, 'Review'>;
@@ -177,12 +178,12 @@ function LegacyReview({ params }: { params: LegacyReviewParams }) {
 
 // ── Backend (server extraction) — single homogeneous editable list ────────────────
 
-// A field "needs attention" when it's empty (to fill) or its displayed value is
-// uncertain (< 70% confidence or an ambiguous status — see services/fieldStatus).
-// No percentages are surfaced; only the discreet tag below.
+// A field "needs attention" only when it is EMPTY (a value to fill in). We deliberately
+// do NOT surface AI confidence or an "à vérifier" flag here: manual validation is the
+// single source of truth (CLAUDE.md "Clean UI Radicale", audit §6.2). The highlight is
+// purely a fill-in affordance, never a quality judgement on an extracted value.
 function needsReview(field: ExtractionField): boolean {
-  if (field.value == null || field.value === '') return true;
-  return isUncertain(field);
+  return field.value == null || field.value === '';
 }
 
 /**
@@ -302,15 +303,16 @@ function EditableFieldRow({
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
   // formats the digits the operator reads off the label — it never computes a date.
   const isDate = isDateField(field.field_name);
+  // Price is amount-dominant (the criée works in EUR); a decimal pad is the right
+  // keyboard. A dedicated currency affix is tracked in the item-5 input plan.
+  const isPrice = field.field_name === 'price';
   const handleChange = (text: string) => onChange(isDate ? maskDate(text) : text);
   return (
     <View style={styles.fieldRow}>
       <View style={styles.fieldHeader}>
         <Text style={[typography.labelSmall, styles.fieldName]}>{fieldLabelFr(field.field_name)}</Text>
         {highlighted ? (
-          <Text style={[typography.labelSmall, styles.attentionTag]}>
-            {field.value == null || field.value === '' ? 'À compléter' : 'À vérifier'}
-          </Text>
+          <Text style={[typography.labelSmall, styles.attentionTag]}>À compléter</Text>
         ) : null}
       </View>
       {field.field_name === 'weight' ? (
@@ -321,7 +323,7 @@ function EditableFieldRow({
         <TextInput
           value={draft}
           onChangeText={handleChange}
-          keyboardType={isDate ? 'number-pad' : 'default'}
+          keyboardType={isDate ? 'number-pad' : isPrice ? 'decimal-pad' : 'default'}
           maxLength={isDate ? 10 : undefined}
           placeholder={isDate ? 'JJ/MM/AAAA' : highlighted ? 'Saisir la valeur' : 'Valeur extraite'}
           placeholderTextColor={colors.onSurfaceVariant}
@@ -395,6 +397,30 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
     if (!run || !ingestion) return;
     setSaving(true);
     try {
+      const savedFields: ArticleField[] = run.fields.map((f): ArticleField => {
+        const draft = edits[f.field_name];
+        const hasEdit = draft !== undefined;
+        let nextValue = hasEdit ? (draft.trim() === '' ? null : draft.trim()) : f.value;
+        const changed = hasEdit && nextValue !== f.value;
+        // Mobile presents/stores dates as DD/MM/YYYY; the raw run (raw_extraction_run
+        // below) keeps the canonical ISO for provenance + the backend chronological gate.
+        if (nextValue != null && isDateField(f.field_name)) {
+          nextValue = displayDate(nextValue);
+        }
+        return {
+          field_name: f.field_name,
+          value: nextValue,
+          combined_confidence: f.combined_confidence,
+          confidence_band: f.confidence_band,
+          validation_status: changed
+            ? nextValue == null
+              ? 'missing'
+              : 'present'
+            : f.validation_status,
+          edited: changed || undefined,
+        };
+      });
+
       await saveBackendArticle({
         ingestion_id: ingestionId,
         extraction_run_id: run.run_id,
@@ -403,31 +429,22 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
         barcode_raw: barcodeRaw ?? null,
         ingestion_status: ingestion.status,
         saved_by: user,
-        fields: run.fields.map((f) => {
-          const draft = edits[f.field_name];
-          const hasEdit = draft !== undefined;
-          let nextValue = hasEdit ? (draft.trim() === '' ? null : draft.trim()) : f.value;
-          const changed = hasEdit && nextValue !== f.value;
-          // Mobile presents/stores dates as DD/MM/YYYY; the raw run (raw_extraction_run
-          // below) keeps the canonical ISO for provenance + the backend chronological gate.
-          if (nextValue != null && isDateField(f.field_name)) {
-            nextValue = displayDate(nextValue);
-          }
-          return {
-            field_name: f.field_name,
-            value: nextValue,
-            combined_confidence: f.combined_confidence,
-            confidence_band: f.confidence_band,
-            validation_status: changed
-              ? nextValue == null
-                ? 'missing'
-                : 'present'
-              : f.validation_status,
-            edited: changed || undefined,
-          };
-        }),
+        fields: savedFields,
         raw_extraction_run: run,
       });
+
+      // Cohérence HACCP (audit §4.2): push each human correction to the AUTHORITATIVE
+      // backend store (append-only, source='human') so the server holds the validated
+      // value, not just this device. Best-effort + non-blocking: the local save is done,
+      // so a sync hiccup never stalls the continuous-capture loop. GS1-owned fields are
+      // skipped (the backend rejects them; they're barcode-exact).
+      const corrections = savedFields
+        .filter((f) => f.edited && isHumanEditableField(f.field_name))
+        .map((f) => ({ field_name: f.field_name, value: f.value }));
+      if (corrections.length > 0) {
+        void submitFieldOverrides({ ingestionId, fields: corrections });
+      }
+
       // Satisfying confirmation the arrivage was saved (light success haptic, non-blocking).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       // Continuous-capture loop: after a successful save, return to the still-mounted

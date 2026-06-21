@@ -235,6 +235,38 @@ export function getExtractionRun(
   return apiRequest<ExtractionRunResponse>(`/v1/extraction-runs/${encodeURIComponent(runId)}`, options);
 }
 
+/** Response of PATCH /v1/ingestions/{id}/fields/{name} (the persisted human field). */
+export interface OverrideFieldResponse {
+  ingestion_id: string;
+  run_id: string;
+  field_name: string;
+  value: string | null;
+  validation_status: string;
+  source: string; // 'human'
+  combined_confidence: number;
+  confidence_band: string;
+  replayed: boolean; // true => the value was already recorded (no new run)
+}
+
+/**
+ * PATCH /v1/ingestions/{id}/fields/{name} — record a human-validated correction on the
+ * AUTHORITATIVE backend store (append-only, source='human'). `value: null` clears the
+ * field. GS1-owned fields (lot/DLC/weight/GTIN/packaging) are rejected server-side
+ * (FIELD_NOT_EDITABLE / 409) — submit only human-editable fields. See audit §4.2.
+ */
+export function overrideField(
+  ingestionId: string,
+  fieldName: string,
+  value: string | null,
+  note?: string,
+  options: RequestOptions = {},
+): Promise<OverrideFieldResponse> {
+  return apiRequest<OverrideFieldResponse>(
+    `/v1/ingestions/${encodeURIComponent(ingestionId)}/fields/${encodeURIComponent(fieldName)}`,
+    { method: 'PATCH', body: { value, note }, ...options },
+  );
+}
+
 // Re-export the API types for convenient single-import consumption.
 export type {
   CreateIngestionResponse,

@@ -5,8 +5,6 @@
  * unchanged; this just maps them to professional French for the review screen.
  */
 
-import { formatFaoDisplay } from './faoDisplay';
-
 export const FIELD_LABELS_FR: Record<string, string> = {
   product_name: 'Nom du produit',
   commercial_designation: 'Dénomination commerciale',
@@ -74,9 +72,13 @@ export function productionMethodFr(value: string | null): string | null {
  * Field value as it should be DISPLAYED: francizes controlled vocabulary
  * (`production_method` → Élevage / Pêche sauvage), returns the value unchanged
  * otherwise. The stored value stays canonical (English) — this is presentation only.
+ *
+ * NOTE — FAO_area is shown VERBATIM (full precision, e.g. "27.8.b.1") so the displayed
+ * value is EXACTLY what is persisted/exported (audit §4.1). The friendly area name is a
+ * decorative SECONDARY annotation in the headline only — it must never replace, nor be
+ * saved in place of, the canonical designation.
  */
 export function displayFieldValue(fieldName: string, value: string | null): string | null {
   if (fieldName === 'production_method') return productionMethodFr(value);
-  if (fieldName === 'FAO_area') return formatFaoDisplay(value) ?? null;
   return value;
 }

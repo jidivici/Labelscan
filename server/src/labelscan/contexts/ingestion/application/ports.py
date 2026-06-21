@@ -52,3 +52,39 @@ class IngestionWriteRepository(Protocol):
         audit: AuditContext,
         action: str,
     ) -> PersistResult: ...
+
+
+@dataclass(frozen=True)
+class OverriddenField:
+    """The persisted human-validated field, returned for the override response."""
+
+    run_id: str  # the NEW append-only run carrying the human value
+    field_name: str
+    value: str | None
+    validation_status: str
+    source: str  # always 'human' here
+    combined_confidence: float
+    confidence_band: str
+    replayed: bool  # True => the latest run already carried this human value (no new run)
+
+
+class FieldOverrideRepository(Protocol):
+    """Records a human override of ONE extracted field as a NEW append-only
+    extraction_run (a full copy of the latest run with the one field replaced,
+    source='human'). The original run is never mutated (ADR-0003/0005). The audit
+    context is set so the run's AFTER INSERT audit trigger fires.
+
+    Returns None when the ingestion has no extraction run to override (→ 404).
+    Idempotent: if the latest run already carries this exact human value, no new
+    run is written and the existing field is returned (replayed=True)."""
+
+    def override_field(
+        self,
+        *,
+        ingestion_id: str,
+        field_name: str,
+        value: str | None,
+        note: str | None,
+        audit: AuditContext,
+        action: str,
+    ) -> OverriddenField | None: ...
