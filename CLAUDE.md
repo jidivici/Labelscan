@@ -60,19 +60,24 @@ saisie, nettoyage UI). Trois horizons : quick wins (faits), moyen terme, fond.
   canonique. `src/services/fieldLabels.ts`, `src/screens/ArticleDetailScreen.tsx`
 - [x] **§5 Clavier prix** : `decimal-pad` sur le champ `price`. `src/screens/ReviewScreen.tsx`
 
-### 🔜 Moyen terme (gardé en mémoire — backlog priorisé)
-- [ ] **§1.3 Double aller-retour** : endpoint léger `GET /v1/ingestions/{id}/status` (juste
-  `{status}`) pour le poll + champs du dernier run embarqués sur l'état terminal. `src/hooks/useIngestionResult.ts`
-- [ ] **§2.1/2.2 Cascade par champ + zéro layout shift** : seeder les lignes GS1
-  (lot/DLC/poids/GTIN) dans la liste éditable dès T+0, skeleton ciblé uniquement sur les
-  champs LLM, `SkeletonFieldList count` aligné sur le set connu. `src/screens/ReviewScreen.tsx`
-- [ ] **§7.1 Re-renders** : `React.memo(EditableFieldRow)` + callbacks stables ;
-  `React.memo(ArticleCard)` + `renderItem` stable + props FlatList (`initialNumToRender`,
-  `windowSize`, `removeClippedSubviews`).
-- [ ] **§1.5 Débit worker** : `deploy.replicas: 2-3` (`SKIP LOCKED` déjà multi-worker), puis
-  OCR/LLM concurrents entre ingestions. `docker-compose.yml`
-- [ ] **§6.3 Photo** : trancher `cover` vs `contain` (directive §2 vs implémentation actuelle
-  `contain`), uniformiser + coins arrondis sur Review et Détail.
+### 🔜 Moyen terme — ✅ LIVRÉ (21 juin 2026), sauf §6.3
+- [x] **§1.3 Double aller-retour** : champs du dernier run embarqués dans la réponse de statut
+  (`IngestionView.latest_fields`) → `useIngestionResult` construit le run sans 2e fetch (fetch
+  gardé en fallback). `read_router.py`, `useIngestionResult.ts`. (Endpoint `/status` allégé :
+  optionnel, non nécessaire — le payload reste léger tant qu'aucun run n'existe.)
+- [x] **§2.1/2.2 Cascade par champ + zéro layout shift** : liste stable à 16 lignes (`FIELD_ORDER`)
+  dès T+0, lignes GS1 préremplies (`gs1FieldValues`), skeleton en place (`SkeletonValue`) sur les
+  champs LLM, swap au ready sans saut. `ReviewScreen.tsx`, `SkeletonFieldList.tsx`.
+- [x] **§7.1 Re-renders** : `React.memo(EditableFieldRow)` + callback `(name,text)` stable ;
+  `React.memo(ArticleCard)` + `renderItem`/`onOpen` stables + FlatList (`getItemLayout`,
+  `initialNumToRender`, `windowSize`). `removeClippedSubviews` volontairement omis (cartes
+  gesture+reanimated, glitches non vérifiables sans device).
+- [x] **§1.5 Débit worker** : `deploy.replicas: 2` + retrait `container_name` (`SKIP LOCKED` déjà
+  multi-worker ; validé `docker compose config`). `docker-compose.yml`. (OCR/LLM concurrents
+  intra-ingestion = itération ultérieure.)
+- [ ] **§6.3 Photo** : REPORTÉ. Review + Détail déjà cohérents (`contain` — choix délibéré : ne
+  rogne jamais le contenu de l'étiquette). La « carte photo arrondie cover » de la directive §2 est
+  une refonte visuelle à faire **app lancée** (non vérifiable en édition aveugle ici).
 
 ### 🏗️ Fond — plans d'action détaillés
 
