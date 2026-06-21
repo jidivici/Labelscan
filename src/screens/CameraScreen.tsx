@@ -53,6 +53,7 @@ import { ProcessingOverlay } from '../components/ProcessingOverlay';
 import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
 import { extractTextFromImage } from '../services/ocr';
 import { submitCapture } from '../services/ingestionSubmit';
+import { logLatency } from '../services/latencyLog';
 import { BACKEND_FIRST } from '../config';
 import { colors, spacing, radius, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -282,6 +283,7 @@ export function CameraScreen() {
       // fallback to the full image if immediate crop failed.
       if (BACKEND_FIRST) {
         let submitUri = pending.croppedUri ?? pending.uri;
+        const submittedAt = Date.now(); // T0 for the perceived-wait measurement
         const outcome = await submitCapture({
           fileUri: submitUri,
           barcodeRaw: pending.barcodeRaw,
@@ -293,6 +295,7 @@ export function CameraScreen() {
           // barcode for the T+0 fields (lot, DLC) and polls the OCR/LLM result itself
           // (useIngestionResult), filling the rest in place. This replaces the old
           // full-screen spinner that froze the UI for the whole server round-trip.
+          logLatency('capture', { upload_ms: Date.now() - submittedAt, replayed: String(outcome.replayed) });
           if (!mountedRef.current) return;
           setPending(null);
           navigation.push('Review', {
@@ -301,6 +304,7 @@ export function CameraScreen() {
             photoUri: submitUri, // the cropped image actually sent for extraction
             barcodeRaw: pending.barcodeRaw,
             capturedAt: pending.capturedAt,
+            submittedAt,
           });
           return;
         } else {

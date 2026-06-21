@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 from typing import Protocol
 
 from sqlalchemy import text
@@ -242,6 +243,7 @@ class ExtractionConsumer:
         # Bounded provider retry: a transient OCR/LLM failure is retried up to a
         # limit; on exhaustion a FAILED run is recorded and the event is consumed
         # (published) — so there is NO infinite retry loop.
+        _ocr_t0 = time.monotonic()
         try:
             ocr, ocr_artifact_id = self._with_provider_retry(
                 lambda: self._ensure_ocr(ingestion_id, image_bytes, corr, trace)
@@ -249,6 +251,9 @@ class ExtractionConsumer:
         except _ProviderExhausted as e:
             self._persist_failed(worker_conn, ingestion_id, corr, trace, error=str(e))
             return
+        # Latency instrumentation: ~0 ms on a dedup/replay (no external call), the real
+        # provider time on a miss — isolates the dominant cost (docs/LATENCY-REVIEW.md §6).
+        ocr_ms = (time.monotonic() - _ocr_t0) * 1000.0
 
         # OCR-quality gate (cost saver, BEFORE the LLM): an illegible image is not
         # worth an LLM call. Skip it, route to review with the distinct
@@ -278,6 +283,7 @@ class ExtractionConsumer:
             )
             return
 
+        _llm_t0 = time.monotonic()
         try:
             llm = self._with_provider_retry(
                 lambda: self._ensure_llm(
@@ -294,6 +300,19 @@ class ExtractionConsumer:
         except _ProviderExhausted as e:
             self._persist_failed(worker_conn, ingestion_id, corr, trace, error=str(e))
             return
+        llm_ms = (time.monotonic() - _llm_t0) * 1000.0
+        # The two external-call durations, side by side — so the dominant cost (almost
+        # always the LLM) is measurable per ingestion (docs/LATENCY-REVIEW.md §6).
+        _log.info(
+            "extraction_timing",
+            extra={
+                "ingestion_id": ingestion_id,
+                "ocr_ms": round(ocr_ms, 1),
+                "llm_ms": round(llm_ms, 1),
+                "correlation_id": corr,
+                "trace_id": trace,
+            },
+        )
 
         # The anti-fabrication gate runs on the PRIMARY LLM fields UNCHANGED.
         verdict = self._gate(llm.fields, ocr)
