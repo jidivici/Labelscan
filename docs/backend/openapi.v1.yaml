@@ -1,0 +1,672 @@
+# LabelScan API — OpenAPI 3.1 SKELETON
+# Status: Partially implemented — see BACKEND-ARCHITECTURE.md §8 for implemented vs planned endpoints.
+# Companion to BACKEND-ARCHITECTURE.md and API-CONTRACTS.md. Paths + components only.
+# Request/response detail and examples live in API-CONTRACTS.md; keep all three in sync.
+openapi: 3.1.0
+info:
+  title: LabelScan Backend API
+  version: "1.0.0"
+  description: >
+    HACCP-oriented seafood traceability backend. Modular monolith, hexagonal core.
+    Raw stored before normalization; append-only audit; confidence+provenance per field;
+    unknown fields are null (never fabricated). See BACKEND-ARCHITECTURE.md.
+    Implementation notes: HS256 JWT auth, claude-haiku-4-5 default LLM,
+    hybrid GS1+LLM extraction, extracted_field.source ∈ {llm,gs1,human}.
+servers:
+  - url: https://api.labelscan.example/v1
+    description: placeholder
+
+security:
+  - bearerAuth: []
+
+tags:
+  - { name: ingestion,    description: "Capability 1-4: label ingestion, OCR/extraction, review" }
+  - { name: traceability, description: "Capability 5-7: batches, suppliers, lookup" }
+  - { name: haccp,        description: "Capability 8-9: temperature logs, alerts" }
+  - { name: audit,        description: "Capability 10: append-only audit (read-only)" }
+  - { name: ops,          description: "health, version" }
+
+paths:
+  # ---- Capability 1: Label ingestion -------------------------------------------------
+  /ingestions:
+    post:
+      tags: [ingestion]
+      operationId: submitCapture
+      security: [{ bearerAuth: ["ingestion:write"] }]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema: { $ref: '#/components/schemas/CaptureSubmit' }
+      responses:
+        '202': { description: Accepted, content: { application/json: { schema: { $ref: '#/components/schemas/IngestionAccepted' } } } }
+        '200': { description: Idempotent replay, content: { application/json: { schema: { $ref: '#/components/schemas/IngestionAccepted' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '413': { $ref: '#/components/responses/PayloadTooLarge' }
+        '415': { $ref: '#/components/responses/UnsupportedMediaType' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '429': { $ref: '#/components/responses/RateLimited' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
+    get:
+      tags: [ingestion]
+      operationId: listIngestions
+      security: [{ bearerAuth: ["ingestion:read"] }]
+      parameters:
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/IngestionStatus' } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/IngestionPage' } } } }
+
+  /ingestions/{id}:
+    get:
+      tags: [ingestion]
+      operationId: getIngestion
+      security: [{ bearerAuth: ["ingestion:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Ingestion' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /ingestions/{id}/image:
+    get:
+      tags: [ingestion]
+      operationId: getIngestionImage
+      security: [{ bearerAuth: ["ingestion:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '302': { description: Redirect to short-lived signed object-store URL }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- Capability 2 & 3: OCR / extraction persistence + status -----------------------
+  /ingestions/{id}/extract:
+    post:
+      tags: [ingestion]
+      operationId: runExtraction
+      security: [{ bearerAuth: ["extraction:run"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '202': { description: Extraction enqueued (new ExtractionRun) }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IngestionInvalidState' }
+
+  /ingestions/{id}/extraction:
+    get:
+      tags: [ingestion]
+      operationId: getExtraction
+      security: [{ bearerAuth: ["ingestion:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ExtractionView' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/ExtractionNotReady' }
+
+  /ingestions/{id}/extraction/runs:
+    get:
+      tags: [ingestion]
+      operationId: listExtractionRuns
+      security: [{ bearerAuth: ["ingestion:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ExtractionRunSummary' } } } } }
+
+  /ingestions/{id}/ocr:
+    get:
+      tags: [ingestion]
+      operationId: getOcrResult
+      security: [{ bearerAuth: ["ingestion:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/OcrSummary' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- Capability 4: validation / review workflow ------------------------------------
+  /ingestions/{id}/fields/{field_name}:
+    patch:
+      tags: [ingestion]
+      operationId: overrideField
+      security: [{ bearerAuth: ["extraction:review"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: field_name, in: path, required: true, schema: { $ref: '#/components/schemas/FieldName' } }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [value], properties: { value: {}, note: { type: string } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ExtractedField' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IngestionInvalidState' }
+
+  /ingestions/{id}/confirm:
+    post:
+      tags: [ingestion]
+      operationId: confirmExtraction
+      security: [{ bearerAuth: ["extraction:confirm"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content: { application/json: { schema: { type: object, properties: { note: { type: string } } } } }
+      responses:
+        '200': { description: Confirmed, content: { application/json: { schema: { $ref: '#/components/schemas/ConfirmResult' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IngestionInvalidState' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /ingestions/{id}/reject:
+    post:
+      tags: [ingestion]
+      operationId: rejectExtraction
+      security: [{ bearerAuth: ["extraction:confirm"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [reason], properties: { reason: { type: string } } } } }
+      responses:
+        '200': { description: Rejected }
+        '409': { $ref: '#/components/responses/IngestionInvalidState' }
+
+  # ---- Capability 5: batch/lot creation ----------------------------------------------
+  /batches:
+    post:
+      tags: [traceability]
+      operationId: createBatch
+      security: [{ bearerAuth: ["batch:write"] }]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/BatchCreate' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Batch' } } } }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    get:
+      tags: [traceability]
+      operationId: listBatches
+      security: [{ bearerAuth: ["traceability:read"] }]
+      parameters:
+        - { name: species,  in: query, schema: { type: string } }
+        - { name: lot_code, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/BatchPage' } } } }
+
+  /batches/{id}:
+    get:
+      tags: [traceability]
+      operationId: getBatch
+      security: [{ bearerAuth: ["traceability:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Batch' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- Capability 6: supplier management ---------------------------------------------
+  /suppliers:
+    post:
+      tags: [traceability]
+      operationId: createSupplier
+      security: [{ bearerAuth: ["supplier:write"] }]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SupplierCreate' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Supplier' } } } }
+    get:
+      tags: [traceability]
+      operationId: listSuppliers
+      security: [{ bearerAuth: ["traceability:read"] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SupplierPage' } } } }
+
+  /suppliers/{id}:
+    get:
+      tags: [traceability]
+      operationId: getSupplier
+      security: [{ bearerAuth: ["traceability:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Supplier' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+    patch:
+      tags: [traceability]
+      operationId: updateSupplier
+      security: [{ bearerAuth: ["supplier:write"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - { name: If-Match, in: header, required: true, schema: { type: string } }
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/SupplierCreate' } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Supplier' } } } }
+        '412': { $ref: '#/components/responses/PreconditionFailed' }
+    delete:
+      tags: [traceability]
+      operationId: deactivateSupplier
+      security: [{ bearerAuth: ["supplier:admin"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses: { '204': { description: Deactivated (soft) } }
+
+  # ---- Capability 7: traceability lookup ---------------------------------------------
+  /trace:
+    get:
+      tags: [traceability]
+      operationId: traceLookup
+      security: [{ bearerAuth: ["traceability:read"] }]
+      parameters:
+        - { name: lot_code,    in: query, schema: { type: string } }
+        - { name: gtin,        in: query, schema: { type: string } }
+        - { name: supplier_id, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TracePage' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+
+  /trace/by-lot/{lot_code}:
+    get:
+      tags: [traceability]
+      operationId: traceByLot
+      security: [{ bearerAuth: ["traceability:read"] }]
+      parameters: [ { name: lot_code, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TracePage' } } } }
+
+  /trace/by-batch/{batch_id}:
+    get:
+      tags: [traceability]
+      operationId: traceByBatch
+      security: [{ bearerAuth: ["traceability:read"] }]
+      parameters: [ { name: batch_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TraceItem' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- Capability 8: temperature logging ---------------------------------------------
+  /temperature-logs:
+    post:
+      tags: [haccp]
+      operationId: logTemperature
+      security: [{ bearerAuth: ["temperature:write"] }]
+      parameters: [ { $ref: '#/components/parameters/IdempotencyKey' } ]
+      requestBody: { required: true, content: { application/json: { schema: { $ref: '#/components/schemas/TemperatureLogCreate' } } } }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/TemperatureLog' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+    get:
+      tags: [haccp]
+      operationId: listTemperatureLogs
+      security: [{ bearerAuth: ["haccp:read"] }]
+      parameters:
+        - { name: location, in: query, schema: { type: string } }
+        - { name: batch_id, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TemperatureLogPage' } } } }
+
+  # ---- Capability 9: alerts ----------------------------------------------------------
+  /alerts:
+    get:
+      tags: [haccp]
+      operationId: listAlerts
+      security: [{ bearerAuth: ["haccp:read"] }]
+      parameters:
+        - { name: state,    in: query, schema: { type: string, enum: [open, acknowledged, resolved] } }
+        - { name: severity, in: query, schema: { type: string, enum: [low, medium, high, critical] } }
+        - { name: type,     in: query, schema: { type: string, enum: [expiry, temperature, required_field] } }
+        - { name: batch_id, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AlertPage' } } } }
+
+  /alerts/{id}:
+    get:
+      tags: [haccp]
+      operationId: getAlert
+      security: [{ bearerAuth: ["haccp:read"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /alerts/{id}/acknowledge:
+    post:
+      tags: [haccp]
+      operationId: acknowledgeAlert
+      security: [{ bearerAuth: ["alert:ack"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { required: false, content: { application/json: { schema: { type: object, properties: { note: { type: string } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '409': { $ref: '#/components/responses/AlertInvalidTransition' }
+
+  /alerts/{id}/resolve:
+    post:
+      tags: [haccp]
+      operationId: resolveAlert
+      security: [{ bearerAuth: ["alert:resolve"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: string } } } } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Alert' } } } }
+        '409': { $ref: '#/components/responses/AlertInvalidTransition' }
+
+  # ---- Capability 10: audit (read-only) ----------------------------------------------
+  /audit:
+    get:
+      tags: [audit]
+      operationId: queryAudit
+      security: [{ bearerAuth: ["audit:read"] }]
+      parameters:
+        - { name: actor_id,       in: query, schema: { type: string } }
+        - { name: action,         in: query, schema: { type: string } }
+        - { name: subject_ref,    in: query, schema: { type: string } }
+        - { name: correlation_id, in: query, schema: { type: string } }
+        - { name: from,           in: query, schema: { type: string, format: date-time } }
+        - { name: to,             in: query, schema: { type: string, format: date-time } }
+        - $ref: '#/components/parameters/Limit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditPage' } } } }
+
+  /audit/{entry_id}:
+    get:
+      tags: [audit]
+      operationId: getAuditEntry
+      security: [{ bearerAuth: ["audit:read"] }]
+      parameters: [ { name: entry_id, in: path, required: true, schema: { type: string } } ]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditEntry' } } } }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  # ---- ops ---------------------------------------------------------------------------
+  /health/live:  { get: { tags: [ops], operationId: live,    security: [], responses: { '200': { description: alive } } } }
+  /health/ready: { get: { tags: [ops], operationId: ready,   security: [], responses: { '200': { description: ready }, '503': { $ref: '#/components/responses/DependencyUnavailable' } } } }
+  /version:      { get: { tags: [ops], operationId: version, security: [], responses: { '200': { description: OK } } } }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: OAuth2 JWT (RS256), verified against IdP JWKS. Scopes per operation; least privilege.
+
+  parameters:
+    Id:             { name: id, in: path, required: true, schema: { type: string } }
+    Limit:          { name: limit, in: query, schema: { type: integer, default: 50, maximum: 200 } }
+    Cursor:         { name: cursor, in: query, schema: { type: string } }
+    IdempotencyKey: { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+    CorrelationId:  { name: X-Correlation-Id, in: header, required: false, schema: { type: string } }
+
+  responses:
+    Unauthenticated:        { description: Unauthenticated,        content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    Forbidden:              { description: Forbidden,              content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    NotFound:               { description: Not found,              content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    IdempotencyConflict:    { description: Idempotency conflict,   content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    PayloadTooLarge:        { description: Payload too large,      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    UnsupportedMediaType:   { description: Unsupported media type, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    ValidationFailed:       { description: Validation failed,      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    RateLimited:            { description: Rate limited,           headers: { Retry-After: { schema: { type: integer } } }, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    DependencyUnavailable:  { description: Dependency unavailable, headers: { Retry-After: { schema: { type: integer } } }, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    PreconditionFailed:     { description: ETag precondition failed, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    IngestionInvalidState:  { description: Invalid ingestion state, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    ExtractionNotReady:     { description: Extraction not ready,   content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    AlertInvalidTransition: { description: Invalid alert transition, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  schemas:
+    # ---- shared ----
+    Problem:
+      type: object
+      required: [type, title, status, error_code, correlation_id, timestamp, retriable]
+      properties:
+        type:           { type: string, format: uri }
+        title:          { type: string }
+        status:         { type: integer }
+        detail:         { type: string }
+        error_code:     { type: string }
+        correlation_id: { type: string }
+        trace_id:       { type: string }
+        timestamp:      { type: string, format: date-time }
+        retriable:      { type: boolean }
+        errors:
+          type: array
+          items:
+            type: object
+            properties: { field: { type: string }, code: { type: string }, message: { type: string } }
+    # D4: score == extracted_field.combined_confidence; band == extracted_field.confidence_band.
+    Confidence:
+      type: object
+      required: [score, band]
+      properties:
+        score: { type: number, minimum: 0, maximum: 1, description: "Read-model projection of extracted_field.combined_confidence" }
+        band:  { type: string, enum: [low, medium, high], description: "Read-model projection of extracted_field.confidence_band" }
+    # D3: a STORED value can only be labelled by the LLM or a human reviewer; ocr/barcode never label a stored field value (matches extracted_field.source CHECK).
+    Provenance:
+      type: object
+      required: [source]
+      properties:
+        source:            { type: string, enum: [llm, human] }
+        extractor_version: { type: string, nullable: true }
+        source_ref:        { type: string, nullable: true, description: "Pointer into the immutable raw OCR (token span); null if unverifiable. Equivalent to extracted_field.evidence." }
+    # D1: the 15 canonical extraction.v1 field names (raw_warnings is a label-level stub on extraction_run, not a per-field name).
+    FieldName:
+      type: string
+      enum: [product_name, commercial_designation, scientific_name, batch_number, supplier_name, origin_country, FAO_area, production_method, fishing_gear_or_farming_method, expiry_date, packaging_date, storage_temperature, allergens, weight, price]
+    # D2: validation_status and per-field warnings are persisted (extracted_field) and must appear in the read model so it is a faithful projection.
+    ExtractedField:
+      type: object
+      required: [name, value, confidence, provenance, validation_status]
+      properties:
+        name:              { $ref: '#/components/schemas/FieldName' }
+        value:             { nullable: true, description: "null when absent/unreadable; NEVER fabricated" }
+        confidence:        { $ref: '#/components/schemas/Confidence' }
+        provenance:        { $ref: '#/components/schemas/Provenance' }
+        validation_status: { type: string, enum: [present, missing, ambiguous, normalized, unnormalizable, invalid] }
+        warnings:          { type: array, items: { type: string } }
+        reason:            { type: string, nullable: true, enum: [not_found, unreadable, unverifiable] }
+
+    # ---- ingestion ----
+    # D7: authoritative 12-state machine (schema.sql ingestion CHECK == shared-state.schema.json). This was an 8-state public projection.
+    IngestionStatus: { type: string, enum: [raw_stored, ocr_running, ocr_done, ocr_failed, ocr_skipped_garbage, extraction_running, extracted, extraction_failed, needs_review, confirmed, rejected, halted_missing_context] }
+    CaptureSubmit:
+      type: object
+      required: [image]
+      properties:
+        image: { type: string, format: binary }
+        meta:
+          type: object
+          properties:
+            barcode_raw:        { type: string, nullable: true }
+            client_captured_at: { type: string, format: date-time, nullable: true }
+            client_meta:        { type: object, additionalProperties: true }
+    IngestionAccepted:
+      type: object
+      required: [ingestion_id, status, image_ref, checksum, server_received_at, correlation_id]
+      properties:
+        ingestion_id:       { type: string }
+        status:             { $ref: '#/components/schemas/IngestionStatus' }
+        image_ref:          { type: string }
+        checksum:           { type: string }
+        server_received_at: { type: string, format: date-time }
+        correlation_id:     { type: string }
+    Ingestion:
+      type: object
+      properties:
+        ingestion_id:       { type: string }
+        status:             { $ref: '#/components/schemas/IngestionStatus' }
+        image_ref:          { type: string }
+        checksum:           { type: string }
+        barcode_raw:        { type: string, nullable: true }
+        server_received_at: { type: string, format: date-time }
+        client_captured_at: { type: string, format: date-time, nullable: true }
+        batch_id:           { type: string, nullable: true }
+    IngestionPage:
+      type: object
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/Ingestion' } }
+        next_cursor: { type: string, nullable: true }
+    ExtractionView:
+      type: object
+      properties:
+        ingestion_id:            { type: string }
+        status:                  { $ref: '#/components/schemas/IngestionStatus' }
+        extractor_version:       { type: string }
+        fields:                  { type: array, items: { $ref: '#/components/schemas/ExtractedField' } }
+        missing_required_fields: { type: array, items: { $ref: '#/components/schemas/FieldName' } }
+        low_confidence_fields:   { type: array, items: { $ref: '#/components/schemas/FieldName' } }
+    ExtractionRunSummary:
+      type: object
+      properties:
+        run_id:            { type: string }
+        extractor_version: { type: string }
+        ocr_raw_ref:       { type: string }
+        outcome:           { type: string, enum: [extraction_running, extracted, needs_review, extraction_failed, unparseable, off_schema, refused] }
+        created_at:        { type: string, format: date-time }
+    OcrSummary:
+      type: object
+      properties:
+        ocr_raw_ref:           { type: string }
+        token_count:           { type: integer }
+        mean_token_confidence: { type: number }
+    ConfirmResult:
+      type: object
+      properties:
+        ingestion_id: { type: string }
+        status:       { type: string, enum: [confirmed] }
+        batch_id:     { type: string, nullable: true }
+
+    # ---- traceability ----
+    # D5/D6: production_method enum matches batch CHECK (wild_caught|farmed); gear_type dropped (no backing column on batch — gear is only surfaced via the extraction view); scientific_name maps to batch.species_scientific; species (common name) resolves to a product, it is not a batch column.
+    BatchCreate:
+      type: object
+      required: [lot_code, species]
+      properties:
+        lot_code:            { type: string }
+        gtin:                { type: string, nullable: true }
+        species:             { type: string, description: "Common species name; resolves/links a traceability.product — not stored directly on batch" }
+        scientific_name:     { type: string, nullable: true, description: "Maps to batch.species_scientific (denormalized snapshot at confirm)" }
+        fao_area:            { type: string, nullable: true, description: "Maps to batch.fao_area_code" }
+        production_method:   { type: string, nullable: true, enum: [wild_caught, farmed] }
+        use_by:              { type: string, format: date, nullable: true }
+        supplier_id:         { type: string, nullable: true }
+        source_ingestion_id: { type: string, nullable: true }
+    Batch:
+      allOf:
+        - $ref: '#/components/schemas/BatchCreate'
+        - type: object
+          properties:
+            batch_id:   { type: string }
+            created_at: { type: string, format: date-time }
+    BatchPage:
+      type: object
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Batch' } }, next_cursor: { type: string, nullable: true } }
+    SupplierCreate:
+      type: object
+      required: [name]
+      properties:
+        name:            { type: string }
+        approval_number: { type: string, nullable: true }
+    Supplier:
+      allOf:
+        - $ref: '#/components/schemas/SupplierCreate'
+        - type: object
+          properties:
+            id:     { type: string }
+            active: { type: boolean }
+            etag:   { type: string }
+    SupplierPage:
+      type: object
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Supplier' } }, next_cursor: { type: string, nullable: true } }
+    TraceItem:
+      type: object
+      properties:
+        batch_id:            { type: string }
+        lot_code:            { type: string }
+        gtin:                { type: string, nullable: true }
+        species:             { type: string }
+        fao_area:            { type: string, nullable: true }
+        use_by:              { type: string, format: date, nullable: true }
+        supplier:            { $ref: '#/components/schemas/Supplier' }
+        source_ingestion_id: { type: string }
+        alerts:              { type: array, items: { $ref: '#/components/schemas/AlertSummary' } }
+    TracePage:
+      type: object
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/TraceItem' } }, next_cursor: { type: string, nullable: true } }
+
+    # ---- haccp ----
+    TemperatureLogCreate:
+      type: object
+      required: [location, temp_c, measured_at]
+      properties:
+        location:    { type: string }
+        temp_c:      { type: number, minimum: -50, maximum: 60 }
+        measured_at: { type: string, format: date-time }
+        batch_id:    { type: string, nullable: true }
+        source:      { type: string, enum: [manual, sensor], default: manual }
+    TemperatureLog:
+      allOf:
+        - $ref: '#/components/schemas/TemperatureLogCreate'
+        - type: object
+          properties:
+            id:           { type: string }
+            recorded_at:  { type: string, format: date-time, description: "Server time (Clock)" }
+    TemperatureLogPage:
+      type: object
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/TemperatureLog' } }, next_cursor: { type: string, nullable: true } }
+    AlertSummary:
+      type: object
+      properties:
+        alert_id: { type: string }
+        type:     { type: string, enum: [expiry, temperature, required_field] }
+        severity: { type: string, enum: [low, medium, high, critical] }
+        state:    { type: string, enum: [open, acknowledged, resolved] }
+    Alert:
+      allOf:
+        - $ref: '#/components/schemas/AlertSummary'
+        - type: object
+          properties:
+            batch_id:              { type: string, nullable: true }
+            control_plan_version:  { type: string }
+            raised_at:             { type: string, format: date-time }
+            acknowledged_by:       { type: string, nullable: true }
+            resolved_by:           { type: string, nullable: true }
+            note:                  { type: string, nullable: true }
+    AlertPage:
+      type: object
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/Alert' } }, next_cursor: { type: string, nullable: true } }
+
+    # ---- audit ----
+    AuditEntry:
+      type: object
+      properties:
+        entry_id:       { type: string }
+        action:         { type: string }
+        actor:          { type: object, properties: { id: { type: string }, role: { type: string } } }
+        subject_ref:    { type: string }
+        before_ref:     { type: string, nullable: true }
+        after_ref:      { type: string, nullable: true }
+        occurred_at:    { type: string, format: date-time }
+        correlation_id: { type: string }
+        trace_id:       { type: string }
+    AuditPage:
+      type: object
+      properties: { items: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }, next_cursor: { type: string, nullable: true } }

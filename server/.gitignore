@@ -1,0 +1,12 @@
+# Python build / cache artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.import_linter_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local env
+.env

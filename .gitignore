@@ -30,8 +30,11 @@ yarn-error.*
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files (never commit real secrets — only *.example is tracked)
+.env
+.env.*
+!.env.example
+!.env*.example
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +42,17 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# IDE / editors
+.idea/
+.vscode/
+
+# Claude Code: ignore local agent state + nested git worktrees, but keep the shared
+# project settings (settings.json, already tracked) under version control.
+.claude/*
+!.claude/settings.json
+
+# Python tooling caches (root level; server/ has its own ignore too)
+.pytest_cache/
+.ruff_cache/
+__pycache__/

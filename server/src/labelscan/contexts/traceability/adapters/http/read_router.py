@@ -1,0 +1,99 @@
+"""Read-only endpoint for batches (query adapter).
+
+No writes, no domain logic. Read-only cross-schema joins assemble the read model
+(batch + supplier/product + linked alerts + audit). Returns exactly what exists,
+including `status` ('registered' | 'flagged').
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Depends, Request
+from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.engine import Engine
+
+from labelscan.platform.http.deps import get_engine
+from labelscan.platform.http.errors import ApiError
+from labelscan.platform.http.read_models import AuditEntry, audit_entries
+from labelscan.platform.http.security import require_scope
+
+router = APIRouter()
+
+
+class BatchAlert(BaseModel):
+    id: str
+    alert_type: str
+    severity: str
+    state: str
+    control_plan_version: str | None
+    detail: Any
+    created_at: str
+    updated_at: str
+
+
+class BatchView(BaseModel):
+    batch_id: str
+    lot_code: str
+    gtin: str | None
+    status: str
+    species_scientific: str | None
+    fao_area_code: str | None
+    production_method: str | None
+    use_by: str | None
+    packaging_date: str | None
+    source_ingestion_id: str
+    source_extraction_run_id: str
+    supplier_name: str | None
+    product_common_name: str | None
+    product_scientific_name: str | None
+    created_at: str
+    alerts: list[BatchAlert]
+    audit: list[AuditEntry]
+
+
+@router.get("/v1/batches/{batch_id}", response_model=BatchView)
+def get_batch(
+    batch_id: str,
+    request: Request,
+    _principal=Depends(require_scope("traceability:read")),
+    engine: Engine = Depends(get_engine),
+) -> BatchView:
+    with engine.connect() as c:
+        row = (
+            c.execute(
+                text(
+                    "SELECT b.id::text AS batch_id, b.lot_code, b.gtin, b.status, b.species_scientific, "
+                    "b.fao_area_code, b.production_method, b.use_by::text AS use_by, "
+                    "b.packaging_date::text AS packaging_date, b.source_ingestion_id::text AS source_ingestion_id, "
+                    "b.source_extraction_run_id::text AS source_extraction_run_id, b.created_at::text AS created_at, "
+                    "s.name AS supplier_name, p.common_name AS product_common_name, "
+                    "p.scientific_name AS product_scientific_name "
+                    "FROM traceability.batch b "
+                    "LEFT JOIN traceability.supplier s ON s.id = b.supplier_id "
+                    "LEFT JOIN traceability.product p ON p.id = b.product_id "
+                    "WHERE b.id = :id"
+                ),
+                {"id": batch_id},
+            )
+            .mappings()
+            .first()
+        )
+        if row is None:
+            raise ApiError("NOT_FOUND", f"batch {batch_id} not found")
+        alerts = (
+            c.execute(
+                text(
+                    "SELECT id::text AS id, alert_type, severity, state, control_plan_version, detail, "
+                    "created_at::text AS created_at, updated_at::text AS updated_at "
+                    "FROM haccp.alert WHERE batch_id = :id ORDER BY created_at"
+                ),
+                {"id": batch_id},
+            )
+            .mappings()
+            .all()
+        )
+        audit = audit_entries(c, batch_id)
+
+    return BatchView(**row, alerts=[BatchAlert(**a) for a in alerts], audit=audit)
