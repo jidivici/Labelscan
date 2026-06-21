@@ -34,11 +34,18 @@ interface ArticleCardProps {
   onOpen?: (article: Article) => void;
 }
 
-const CARD_HEIGHT = 88;
+export const CARD_HEIGHT = 88;
 const DELETE_WIDTH = 80;
 const SWIPE_THRESHOLD = -60;
 
-export function ArticleCard({ article, onDelete, onOpen }: ArticleCardProps) {
+// Memoized: in a long FlatList, a parent state change (search, delete) must NOT re-render
+// every card. Re-renders only when article/onDelete/onOpen change — the parent keeps those
+// stable via useCallback (audit §7.1).
+export const ArticleCard = React.memo(function ArticleCard({
+  article,
+  onDelete,
+  onOpen,
+}: ArticleCardProps) {
   const translateX = useSharedValue(0);
   const scale = useSharedValue(1);
 
@@ -170,7 +177,7 @@ export function ArticleCard({ article, onDelete, onOpen }: ArticleCardProps) {
       </GestureDetector>
     </View>
   );
-}
+});
 
 const styles = StyleSheet.create({
   wrapper: {

@@ -17,7 +17,7 @@ import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { ArticleCard } from '../components/ArticleCard';
+import { ArticleCard, CARD_HEIGHT } from '../components/ArticleCard';
 import { EmptyState } from '../components/EmptyState';
 import { CaptureFab } from '../components/CaptureFab';
 import { Article } from '../types/Article';
@@ -28,6 +28,15 @@ import { useArticleSearch } from '../hooks/useArticleSearch';
 import { sortArticlesByName } from '../services/articleGrouping';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
+
+// Each card has a FIXED height (CARD_HEIGHT) + its marginBottom, so FlatList can place
+// rows without measuring them — O(1) scroll at thousands of lots (audit §7.1).
+const ITEM_HEIGHT = CARD_HEIGHT + spacing.sm;
+const getItemLayout = (_data: ArrayLike<Article> | null | undefined, index: number) => ({
+  length: ITEM_HEIGHT,
+  offset: ITEM_HEIGHT * index,
+  index,
+});
 
 export function ArticleListScreen() {
   const insets = useSafeAreaInsets();
@@ -60,6 +69,19 @@ export function ArticleListScreen() {
       Alert.alert('Erreur', 'Impossible de supprimer l’article.');
     }
   }, []);
+
+  // Stable callbacks + renderItem so React.memo(ArticleCard) actually skips unchanged rows.
+  const handleOpen = useCallback(
+    (a: Article) => navigation.navigate('ArticleDetail', { articleId: a.id }),
+    [navigation],
+  );
+
+  const renderItem = useCallback(
+    ({ item }: { item: Article }) => (
+      <ArticleCard article={item} onDelete={handleDelete} onOpen={handleOpen} />
+    ),
+    [handleDelete, handleOpen],
+  );
 
   const handleExportJSON = useCallback(async () => {
     if (articles.length === 0) {
@@ -186,13 +208,11 @@ export function ArticleListScreen() {
       <FlatList
         data={ordered}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <ArticleCard
-            article={item}
-            onDelete={handleDelete}
-            onOpen={(a) => navigation.navigate('ArticleDetail', { articleId: a.id })}
-          />
-        )}
+        renderItem={renderItem}
+        getItemLayout={getItemLayout}
+        initialNumToRender={10}
+        maxToRenderPerBatch={10}
+        windowSize={7}
         contentContainerStyle={[
           styles.listContent,
           // Extra bottom space so the FAB never covers the last card.
