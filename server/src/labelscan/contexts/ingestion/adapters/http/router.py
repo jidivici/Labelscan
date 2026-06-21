@@ -28,8 +28,16 @@ from fastapi import (
     UploadFile,
     status,
 )
+from pydantic import BaseModel
 
 from labelscan.contexts.ingestion.adapters.http.schemas import IngestionAcceptedResponse
+from labelscan.contexts.ingestion.application.override_field import (
+    FieldNotEditable,
+    IngestionNotFound,
+    OverrideField,
+    OverrideFieldCommand,
+    UnknownField,
+)
 from labelscan.contexts.ingestion.application.submit_ingestion import (
     SubmitIngestion,
     SubmitIngestionCommand,
@@ -137,4 +145,97 @@ def submit_ingestion(
         status=result.status,
         replayed=result.replayed,
         correlation_id=request.state.correlation_id,
+    )
+
+
+# ── Capability 4: human override of one extracted field (HITL, audit §4.2) ──────────
+
+_DEFAULT_OVERRIDE_USE_CASE: OverrideField | None = None
+_OVERRIDE_LOCK = threading.Lock()
+
+
+def get_override_field() -> OverrideField:
+    # Composition seam (overridden in tests). Lazy, same double-checked pattern as
+    # get_submit_ingestion so the engine is built once and the app layer is not imported.
+    global _DEFAULT_OVERRIDE_USE_CASE
+    if _DEFAULT_OVERRIDE_USE_CASE is None:
+        with _OVERRIDE_LOCK:
+            if _DEFAULT_OVERRIDE_USE_CASE is None:
+                from labelscan.contexts.ingestion.adapters.sql_field_override_repository import (
+                    SqlFieldOverrideRepository,
+                )
+                from labelscan.platform.db.engine import make_engine
+
+                _DEFAULT_OVERRIDE_USE_CASE = OverrideField(
+                    SqlFieldOverrideRepository(make_engine())
+                )
+    return _DEFAULT_OVERRIDE_USE_CASE
+
+
+class OverrideFieldRequest(BaseModel):
+    value: str | None = None  # null/blank => the reviewer cleared the field
+    note: str | None = None
+
+
+class OverriddenFieldResponse(BaseModel):
+    ingestion_id: str
+    run_id: str
+    field_name: str
+    value: str | None
+    validation_status: str
+    source: str
+    combined_confidence: float
+    confidence_band: str
+    replayed: bool
+
+
+@router.patch(
+    "/v1/ingestions/{ingestion_id}/fields/{field_name}",
+    response_model=OverriddenFieldResponse,
+)
+def override_field(
+    ingestion_id: str,
+    field_name: str,
+    request: Request,
+    body: OverrideFieldRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    principal: Principal = Depends(require_scope("extraction:review")),
+    use_case: OverrideField = Depends(get_override_field),
+) -> OverriddenFieldResponse:
+    command = OverrideFieldCommand(
+        ingestion_id=ingestion_id,
+        field_name=field_name,
+        value=body.value,
+        note=body.note,
+        actor_id=principal.actor_id,  # audit context + human provenance: who validated
+        correlation_id=request.state.correlation_id,
+        trace_id=request.state.trace_id,
+    )
+    try:
+        result = use_case(command)
+    except UnknownField:
+        raise ApiError("VALIDATION_ERROR", f"unknown field '{field_name}'")
+    except FieldNotEditable:
+        raise ApiError(
+            "FIELD_NOT_EDITABLE",
+            f"field '{field_name}' is barcode-derived (GS1) and cannot be overridden",
+        )
+    except IngestionNotFound:
+        raise ApiError(
+            "NOT_FOUND",
+            f"no extraction run to override for ingestion {ingestion_id}",
+        )
+    except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError, OSError):
+        raise ApiError("DEPENDENCY_UNAVAILABLE", "storage unavailable; retry")
+
+    return OverriddenFieldResponse(
+        ingestion_id=ingestion_id,
+        run_id=result.run_id,
+        field_name=result.field_name,
+        value=result.value,
+        validation_status=result.validation_status,
+        source=result.source,
+        combined_confidence=result.combined_confidence,
+        confidence_band=result.confidence_band,
+        replayed=result.replayed,
     )

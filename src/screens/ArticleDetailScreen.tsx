@@ -44,10 +44,13 @@ const EM_DASH = "—";
 function HeadlineItem({
   label,
   value,
+  subtitle,
   emphasis,
 }: {
   label: string;
   value: string | null | undefined;
+  /** Decorative secondary line (e.g. the FAO area name). Never the canonical value. */
+  subtitle?: string | null;
   emphasis?: boolean;
 }) {
   const hasValue = !!value && value.length > 0;
@@ -64,6 +67,9 @@ function HeadlineItem({
       >
         {hasValue ? value : EM_DASH}
       </Text>
+      {hasValue && subtitle ? (
+        <Text style={[typography.bodySmall, styles.headlineSubtitle]}>{subtitle}</Text>
+      ) : null}
     </View>
   );
 }
@@ -135,8 +141,13 @@ export function ArticleDetailScreen() {
   }
 
   const lot = article.fields.find((f) => f.field_name === 'batch_number');
-  // Precise catch zone (FAO major-area number) — surfaced prominently when extracted.
+  // Precise catch zone — surfaced prominently when extracted. Shown VERBATIM (full
+  // precision, e.g. "27.8.b.1") so the headline equals the stored/exported value; the
+  // official area name is a decorative subtitle, and only when it adds something beyond
+  // the stored designation (audit §4.1).
   const fao = article.fields.find((f) => f.field_name === 'FAO_area');
+  const faoFriendly = fao?.value ? formatFaoDisplay(fao.value) : null;
+  const faoSubtitle = faoFriendly && faoFriendly !== fao?.value ? faoFriendly : null;
 
   return (
     <View style={[styles.root, { paddingBottom: insets.bottom }]}>
@@ -171,7 +182,9 @@ export function ArticleDetailScreen() {
         <View style={styles.headlineCard}>
           <View style={styles.headlineGroup}>
             <HeadlineItem label="Numéro de lot" value={lot?.value} emphasis />
-            {fao?.value ? <HeadlineItem label="Zone de pêche (FAO)" value={formatFaoDisplay(fao.value)} /> : null}
+            {fao?.value ? (
+              <HeadlineItem label="Zone de pêche (FAO)" value={fao.value} subtitle={faoSubtitle} />
+            ) : null}
           </View>
           <View style={styles.headlineDivider} />
           <View style={styles.headlineGroup}>
@@ -272,6 +285,12 @@ const styles = StyleSheet.create({
   },
   headlineValue: {
     color: colors.onSurface,
+  },
+  // Decorative second line under a headline value (e.g. the FAO area name). Quiet, so
+  // the canonical value above it stays the focus.
+  headlineSubtitle: {
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
   },
   // Shared treatment for every uppercase label (headline, section header, field name)
   // so the whole screen reads on one typographic system, aligned to a single left edge.

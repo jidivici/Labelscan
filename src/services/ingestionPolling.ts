@@ -20,9 +20,9 @@ export type PollResult =
 export interface PollOptions {
   signal?: AbortSignal;
   maxDurationMs?: number; // overall budget (default 30s)
-  maxAttempts?: number; // hard attempt cap (default 20)
-  baseDelayMs?: number; // first inter-attempt delay (default 1.5s)
-  maxDelayMs?: number; // delay cap (default 5s)
+  maxAttempts?: number; // hard attempt cap (default 24)
+  baseDelayMs?: number; // flat inter-attempt delay in the fast window (default 1s)
+  maxDelayMs?: number; // delay cap once we back off (default 5s)
   requestTimeoutMs?: number; // per-GET timeout (default 10s)
 }
 
@@ -45,10 +45,19 @@ export function classifyIngestionStatus(status: string): StatusClass {
   return 'unknown';
 }
 
+// A label extraction (OCR + Haiku) almost always lands in < 12 s. Poll on a FAST,
+// FLAT cadence in that window so the result is shown within ~1 s of being ready —
+// exponential backoff here only adds dead time staring at skeletons (audit §1.2).
+// Past that window (a genuinely slow extraction) we back off to spare the network.
+const FLAT_WINDOW_ATTEMPTS = 12;
+
 function backoffDelayMs(attempt: number, base: number, max: number): number {
-  const exp = Math.min(base * 2 ** (attempt - 1), max);
-  const jitter = Math.random() * base * 0.5;
-  return Math.min(Math.round(exp + jitter), max);
+  if (attempt <= FLAT_WINDOW_ATTEMPTS) {
+    // small jitter so concurrent clients don't align their polls
+    return base + Math.round(Math.random() * base * 0.2);
+  }
+  const exp = Math.min(base * 2 ** (attempt - FLAT_WINDOW_ATTEMPTS), max);
+  return Math.min(Math.round(exp), max);
 }
 
 function cancellableDelay(ms: number, signal?: AbortSignal): Promise<void> {
@@ -73,8 +82,8 @@ export async function pollIngestionUntilReady(
   const {
     signal,
     maxDurationMs = 30_000,
-    maxAttempts = 20,
-    baseDelayMs = 1_500,
+    maxAttempts = 24,
+    baseDelayMs = 1_000,
     maxDelayMs = 5_000,
     requestTimeoutMs = 10_000,
   } = options;

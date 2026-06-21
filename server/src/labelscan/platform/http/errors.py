@@ -32,6 +32,11 @@ ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
         "Alert lifecycle transition not allowed from the current state",
         False,
     ),
+    "FIELD_NOT_EDITABLE": (
+        409,
+        "Field is barcode-derived (GS1) and cannot be overridden by a human",
+        False,
+    ),
     "PAYLOAD_TOO_LARGE": (413, "Payload exceeds the configured limit", False),
     "UNSUPPORTED_MEDIA_TYPE": (415, "Unsupported image media type", False),
     "RATE_LIMITED": (429, "Too many requests", True),

@@ -225,12 +225,15 @@ export function CameraScreen() {
         const crop = computeFrameCrop(photo.width, photo.height);
         if (crop) {
           try {
-            // Crop only — no resize. compress:1.0 keeps the second JPEG encode
-            // lossless-ish so the cropped image preserves small-print legibility.
+            // Crop to the frame, then cap the long edge at ~2000px and encode at 0.8.
+            // Cloud Vision + Haiku read small print fine at this size, and the upload —
+            // the only thing the operator waits on — is several times smaller/faster than
+            // a full-res lossless JPEG (audit §1.4). Resize runs AFTER the crop, so the
+            // width bound is relative to the cropped image.
             const cropped = await ImageManipulator.manipulateAsync(
               photo.uri,
-              [{ crop }],
-              { compress: 1.0, format: ImageManipulator.SaveFormat.JPEG }
+              [{ crop }, { resize: { width: Math.min(crop.width, 2000) } }],
+              { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
             );
             croppedUri = cropped.uri;
           } catch (e) {

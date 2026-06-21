@@ -18,6 +18,7 @@ ADMIN_SCOPES: frozenset[str] = frozenset(
     {
         "ingestion:write",
         "ingestion:read",
+        "extraction:review",  # human override of an extracted field (PATCH .../fields/{name})
         "haccp:read",
         "alert:ack",
         "alert:resolve",

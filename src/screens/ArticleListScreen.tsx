@@ -215,11 +215,7 @@ export function ArticleListScreen() {
       />
 
       {/* Launches the capture module (bottom-right). */}
-      <CaptureFab
-        onPress={openCapture}
-        badgeCount={articles.length}
-        bottomInset={insets.bottom}
-      />
+      <CaptureFab onPress={openCapture} bottomInset={insets.bottom} />
     </View>
   );
 }

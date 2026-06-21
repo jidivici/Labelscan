@@ -35,7 +35,10 @@ const MAX_ERROR_MESSAGE_LEN = 1_000;
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 export type OutboxStatus = 'pending' | 'in_flight' | 'succeeded' | 'dead_letter';
-export type OutboxOperationType = 'create_ingestion' | 'poll_ingestion_status';
+export type OutboxOperationType =
+  | 'create_ingestion'
+  | 'poll_ingestion_status'
+  | 'override_field';
 
 /** Payload for POST /v1/ingestions (mirrors the Batch-4 createIngestion args). */
 export interface CreateIngestionPayload {
@@ -47,6 +50,14 @@ export interface CreateIngestionPayload {
 /** Payload for GET /v1/ingestions/{id} (optional follow-up operation). */
 export interface PollIngestionStatusPayload {
   ingestion_id: string;
+}
+
+/** Payload for PATCH /v1/ingestions/{id}/fields/{name} — a human field correction. */
+export interface OverrideFieldPayload {
+  ingestion_id: string;
+  field_name: string;
+  value: string | null; // null => the reviewer cleared the field
+  note?: string;
 }
 
 /** Result recorded on a succeeded create_ingestion op (read by the polling batch). */
@@ -80,7 +91,15 @@ export interface PollIngestionStatusOperation extends OutboxOperationBase {
   payload: PollIngestionStatusPayload;
 }
 
-export type OutboxOperation = CreateIngestionOperation | PollIngestionStatusOperation;
+export interface OverrideFieldOperation extends OutboxOperationBase {
+  type: 'override_field';
+  payload: OverrideFieldPayload;
+}
+
+export type OutboxOperation =
+  | CreateIngestionOperation
+  | PollIngestionStatusOperation
+  | OverrideFieldOperation;
 
 /** Error info supplied to markFailed (e.g. derived from the Batch-4 ApiError). */
 export interface OperationError {
@@ -226,6 +245,13 @@ export function enqueuePollIngestionStatus(
   opts: EnqueueOptions = {},
 ): Promise<PollIngestionStatusOperation> {
   return enqueue({ type: 'poll_ingestion_status', payload }, opts) as Promise<PollIngestionStatusOperation>;
+}
+
+export function enqueueOverrideField(
+  payload: OverrideFieldPayload,
+  opts: EnqueueOptions = {},
+): Promise<OverrideFieldOperation> {
+  return enqueue({ type: 'override_field', payload }, opts) as Promise<OverrideFieldOperation>;
 }
 
 // ── Status transitions ─────────────────────────────────────────────────────────
