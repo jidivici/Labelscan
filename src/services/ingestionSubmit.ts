@@ -1,15 +1,18 @@
 /**
- * Foreground submission of a backend_first capture (Batch 6).
+ * Submission of a backend_first capture (Batch 6, reshaped for workflow v1).
  *
  * Bridges the outbox (durable per-capture operation + stable Idempotency-Key /
- * X-Correlation-Id) and the API client. It enqueues a `create_ingestion` op, then
- * executes it ONCE in the foreground and records the outcome on the op:
- *  - success      → op marked succeeded, the ingestion_id stored on the op
- *  - retryable    → op left pending with a backed-off next_attempt_at (a later
- *                   batch drains it; there is no background worker yet)
- *  - non-retryable/exhausted → op moved to dead_letter
+ * X-Correlation-Id) and the API client, split in two so the scan QUEUE can record
+ * the op id BEFORE the (slow) HTTP attempt — a kill mid-upload leaves a scan that
+ * reconciliation can still resolve from its op:
+ *  - enqueueCapture   → persist the durable `create_ingestion` op, return it
+ *  - executeCreateIngestionOp → claim + POST once, record the outcome on the op:
+ *      success      → op marked succeeded, the ingestion_id stored on the op
+ *      retryable    → op left pending with a backed-off next_attempt_at (the
+ *                     outbox drain replays it later)
+ *      non-retryable/exhausted → op moved to dead_letter
  *
- * No polling, no background worker, no secrets.
+ * No polling, no secrets.
  */
 
 import { ApiError, createIngestion } from './api';
@@ -18,6 +21,7 @@ import {
   markFailed,
   markInFlight,
   markSucceeded,
+  type CreateIngestionOperation,
   type CreateIngestionPayload,
   type OperationError,
 } from './outbox';
@@ -40,15 +44,19 @@ function toOperationError(err: unknown): OperationError {
   return { code: 'UNKNOWN', status: 0, message: 'unexpected client error', retriable: true };
 }
 
-export async function submitCapture(input: CaptureInput): Promise<SubmitOutcome> {
+/** Persist the durable submission op (stable keys) WITHOUT executing it yet. */
+export function enqueueCapture(input: CaptureInput): Promise<CreateIngestionOperation> {
   const payload: CreateIngestionPayload = {
     file: { uri: input.fileUri, name: 'label.jpg', type: 'image/jpeg' },
     barcode_raw: input.barcodeRaw,
     client_captured_at: input.capturedAt,
   };
-  const op = await enqueueCreateIngestion(payload);
+  return enqueueCreateIngestion(payload);
+}
 
-  const claimed = await markInFlight(op.id);
+/** Claim the op and execute it ONCE in the foreground, recording the outcome. */
+export async function executeCreateIngestionOp(opId: string): Promise<SubmitOutcome> {
+  const claimed = await markInFlight(opId);
   if (!claimed || claimed.type !== 'create_ingestion') {
     // Could not claim it (already terminal/claimed) — leave for a later drain.
     return { kind: 'pending', code: 'NOT_CLAIMABLE' };
@@ -75,4 +83,10 @@ export async function submitCapture(input: CaptureInput): Promise<SubmitOutcome>
     }
     return { kind: 'pending', code: opError.code };
   }
+}
+
+/** Enqueue + execute in one call (legacy shape, kept for direct submissions). */
+export async function submitCapture(input: CaptureInput): Promise<SubmitOutcome> {
+  const op = await enqueueCapture(input);
+  return executeCreateIngestionOp(op.id);
 }

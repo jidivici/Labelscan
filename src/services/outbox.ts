@@ -59,6 +59,8 @@ export interface OverrideFieldPayload {
   field_name: string;
   value: string | null; // null => the reviewer cleared the field
   note?: string;
+  /** Explicit acknowledgement required by the server to override a GS1-owned field. */
+  force_gs1?: boolean;
 }
 
 /** Payload for POST /v1/ingestions/{id}/confirm — finalize the review (P3). */
@@ -205,6 +207,12 @@ function mutate<T>(fn: (ops: OutboxOperation[]) => { ops: OutboxOperation[]; res
 
 export async function listAll(): Promise<OutboxOperation[]> {
   return loadAll();
+}
+
+/** One operation by id (read-only) — lets the scan queue reconcile its transport op. */
+export async function getOperation(id: string): Promise<OutboxOperation | null> {
+  const all = await loadAll();
+  return all.find((op) => op.id === id) ?? null;
 }
 
 /** Pending operations whose backoff has elapsed, oldest first (FIFO). */

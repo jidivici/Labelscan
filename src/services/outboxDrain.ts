@@ -11,14 +11,14 @@
  *   - the server dedups by Idempotency-Key (migration 0013), so a replay of an op
  *     that DID reach the backend replays the original outcome — never a double write;
  *   - one drain at a time (module-level latch) — concurrent triggers coalesce;
- *   - only review writes are drained (override_field / confirm_ingestion);
- *     create_ingestion ops carry device file URIs that may be stale and stay on
- *     the queue for their own dedicated flow.
+ *   - create_ingestion ops are drained too (workflow v1): their file URIs point at
+ *     the DURABLE pending/ photo store, so a replay is sound; after each drain the
+ *     scan queue reconciles so a landed submit advances its card.
  */
 
 import { AppState, type AppStateStatus } from 'react-native';
 
-import { ApiError, confirmIngestion, overrideField } from './api';
+import { ApiError, confirmIngestion, createIngestion, overrideField } from './api';
 import {
   listPendingDue,
   markFailed,
@@ -27,7 +27,9 @@ import {
   purgeTerminalOps,
   type OperationError,
   type OutboxOperation,
+  type OutboxResult,
 } from './outbox';
+import { reconcileScanQueue } from './scanQueue';
 
 export interface DrainResult {
   succeeded: number;
@@ -42,23 +44,42 @@ function toOperationError(err: unknown): OperationError {
   return { code: 'UNKNOWN', status: 0, message: 'unexpected client error', retriable: true };
 }
 
-async function executeOperation(op: OutboxOperation): Promise<boolean> {
-  // true = the drainer handles this op type (and the call succeeded when it returns).
+type ExecuteOutcome =
+  | { handled: false }
+  | { handled: true; result?: OutboxResult }; // result recorded on the op (create_ingestion)
+
+async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
   if (op.type === 'override_field') {
     await overrideField(op.payload.ingestion_id, op.payload.field_name, op.payload.value, op.payload.note, {
       idempotencyKey: op.idempotencyKey,
       correlationId: op.correlationId,
+      forceGs1: op.payload.force_gs1,
     });
-    return true;
+    return { handled: true };
   }
   if (op.type === 'confirm_ingestion') {
     await confirmIngestion(op.payload.ingestion_id, {
       idempotencyKey: op.idempotencyKey,
       correlationId: op.correlationId,
     });
-    return true;
+    return { handled: true };
   }
-  return false;
+  if (op.type === 'create_ingestion') {
+    const res = await createIngestion(
+      op.payload.file,
+      {
+        barcode_raw: op.payload.barcode_raw,
+        client_captured_at: op.payload.client_captured_at,
+      },
+      { idempotencyKey: op.idempotencyKey, correlationId: op.correlationId },
+    );
+    // The ingestion_id must land on the op — reconcileScanQueue reads it there.
+    return {
+      handled: true,
+      result: { ingestion_id: res.ingestion_id, status: res.status, replayed: res.replayed },
+    };
+  }
+  return { handled: false };
 }
 
 // One drain at a time. A trigger that arrives WHILE a drain is running does not get
@@ -82,15 +103,19 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
       // the drain's start time — a frozen `now` would never see it due.
       const due = await listPendingDue(Math.max(now, Date.now()));
       for (const op of due) {
-        if (op.type !== 'override_field' && op.type !== 'confirm_ingestion') {
+        if (
+          op.type !== 'override_field' &&
+          op.type !== 'confirm_ingestion' &&
+          op.type !== 'create_ingestion'
+        ) {
           result.skipped += 1;
           continue;
         }
         const claimed = await markInFlight(op.id);
         if (!claimed) continue; // raced by another executor — skip
         try {
-          await executeOperation(claimed);
-          await markSucceeded(claimed.id);
+          const exec = await executeOperation(claimed);
+          await markSucceeded(claimed.id, exec.handled && exec.result ? { result: exec.result } : {});
           result.succeeded += 1;
         } catch (err) {
           await markFailed(claimed.id, toOperationError(err));
@@ -107,6 +132,9 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
     draining = false;
     rerunRequested = false;
   }
+  // A landed create_ingestion must advance its scan card (step 1 → 2). Fire-and-forget
+  // AFTER the latch released — reconciliation may schedule polls, never another drain.
+  if (result.succeeded > 0) void reconcileScanQueue();
   return result;
 }
 
