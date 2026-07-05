@@ -124,6 +124,34 @@ export function formatPrice(amount: string, currency: string): string {
   return a === '' ? '' : `${a} ${currency}`;
 }
 
+// ── Health mark ("estampille sanitaire"): always UPPERCASE ───────────────────────
+// The official EU sanitary mark is stamped in uppercase, e.g. "FR 34.108.504 CE",
+// "ES 12.932470 UE", "GB BB004" — country code + establishment number + CE/UE suffix.
+// Digits and separators (space/dot) vary by country, so the mask only forces case; it
+// never strips a character the operator typed (no-fabrication — read off the label).
+
+export const HEALTH_MARK_FIELD = 'health_mark';
+
+export function isHealthMarkField(fieldName: string): boolean {
+  return fieldName === HEALTH_MARK_FIELD;
+}
+
+/** Force every keystroke to uppercase — the only transform (never drops characters). */
+export function maskHealthMark(input: string): string {
+  return input.toUpperCase();
+}
+
+/**
+ * Validity hint for a health mark: a real estampille always carries a digit (the
+ * establishment number) — flag a COMPLETE value that has none. Neutral/non-blocking
+ * (Clean UI), and silent while empty or still being typed (fewer than 3 chars).
+ */
+export function validateHealthMark(value: string): string | null {
+  const v = value.trim();
+  if (v.length < 3) return null;
+  return /\d/.test(v) ? null : 'Une estampille contient normalement un numéro';
+}
+
 // ── Date canonicalization (storage = ISO; display = DD/MM/YYYY) ──────────────────
 
 /**

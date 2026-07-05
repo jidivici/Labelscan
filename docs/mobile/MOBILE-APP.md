@@ -253,6 +253,17 @@ Clavier numérique (`number-pad`) + masque **DD/MM/YYYY** (insertion auto du `/`
 une valeur calculée : **pas** d'« expiry = packaging + N jours ». Dates stockées **canonique ISO**
 (`toIsoDate`), affichées DD/MM/YYYY ; validation neutre et non bloquante (jamais de rouge).
 
+### Estampille sanitaire (`health_mark`) — toujours en majuscules
+
+Le cachet officiel UE est imprimé en majuscules (ex. `FR 34.108.504 CE`, `GB BB004`) —
+[`services/inputMasks.ts`](../../src/services/inputMasks.ts) : `maskHealthMark` force chaque
+frappe en majuscule **sans jamais retirer un caractère** (espaces/points/tirets du format
+d'origine conservés — no-fabrication). `validateHealthMark` ajoute un indice neutre, non
+bloquant, si une valeur qui semble complète (≥3 caractères) ne contient **aucun chiffre** (le
+numéro d'établissement est toujours présent sur un vrai cachet). Portée volontairement limitée
+à la **saisie de l'opérateur** : une valeur extraite par l'IA non modifiée n'est jamais
+retouchée côté client (garde l'invariant « valeur affichée == valeur persistée »).
+
 ### Libellés FR + saisie par unité
 
 - **Libellés métier** : [`services/fieldLabels.ts`](../../src/services/fieldLabels.ts)
@@ -302,7 +313,7 @@ retirée avec ce chemin — audit §7.3.)
 
 ## 9. Tests
 
-`npx jest --config jest.config.js` (ts-jest, environnement node) — 21 suites, **193 tests** ;
+`npx jest --config jest.config.js` (ts-jest, environnement node) — 21 suites, **199 tests** ;
 notables : `scanQueue` (transitions, cap de sondages, hydratation/réconciliation, dédoublonnage,
 nettoyage photo, **`saveScanEdits` persiste + ré-hydrate le brouillon**), `ingestionResult`,
 `scanSteps` (mapping 5 statuts × `ocrDone`), `fieldCompleteness` (**`filledCountFromValues` = verrou

@@ -1,4 +1,4 @@
-# LabelScan — Plan d'implémentation (état au 3 juillet 2026)
+r# LabelScan — Plan d'implémentation (état au 3 juillet 2026)
 
 **Objectif :** passer de l'état actuel (cœur métier complet, testé, mono-site, mono-compte)
 à un produit déployable chez un grand compte, en répondant aux exigences de l'application :

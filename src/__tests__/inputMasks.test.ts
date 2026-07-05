@@ -13,6 +13,9 @@ import {
   validateTempRange,
   validateWeight,
   DATE_FIELDS,
+  isHealthMarkField,
+  maskHealthMark,
+  validateHealthMark,
 } from '../services/inputMasks';
 
 describe('maskDate — DD/MM/YYYY input mask', () => {
@@ -226,5 +229,41 @@ describe('validateWeight — strictly positive', () => {
   it('flags zero or negative', () => {
     expect(validateWeight('0')).toBe('Poids invalide');
     expect(validateWeight('-5')).toBe('Poids invalide');
+  });
+});
+
+describe('isHealthMarkField', () => {
+  it('is true only for health_mark', () => {
+    expect(isHealthMarkField('health_mark')).toBe(true);
+    expect(isHealthMarkField('scientific_name')).toBe(false);
+  });
+});
+
+describe('maskHealthMark — force uppercase, keystrokes preserved verbatim', () => {
+  it('uppercases letters, keeps digits/spaces/dots untouched (real stamp format)', () => {
+    expect(maskHealthMark('fr 34.108.504 ce')).toBe('FR 34.108.504 CE');
+    expect(maskHealthMark('Fr 12.345.678 Ce')).toBe('FR 12.345.678 CE');
+    expect(maskHealthMark('gb bb004')).toBe('GB BB004');
+  });
+
+  it('never drops a character (no-fabrication — the mask only cases, never strips)', () => {
+    expect(maskHealthMark('es 07-019-003')).toBe('ES 07-019-003');
+    expect(maskHealthMark('')).toBe('');
+  });
+});
+
+describe('validateHealthMark — a real stamp always carries a digit', () => {
+  it('is silent while empty or still typing (fewer than 3 chars)', () => {
+    expect(validateHealthMark('')).toBeNull();
+    expect(validateHealthMark('FR')).toBeNull();
+  });
+
+  it('is silent for a plausible stamp (contains a digit)', () => {
+    expect(validateHealthMark('FR 34.108.504 CE')).toBeNull();
+    expect(validateHealthMark('GB BB004')).toBeNull();
+  });
+
+  it('flags a complete-looking value with no digit at all', () => {
+    expect(validateHealthMark('FR CE')).toBe('Une estampille contient normalement un numéro');
   });
 });

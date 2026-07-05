@@ -566,3 +566,13 @@ des cartes erreur sont retirés — un seul geste de suppression dans toute l'ap
 **Vérifié** : typecheck 0 erreur, **193 jest verts** (21 suites, +6 `fieldHistory`). Backend inchangé.
 **Reste (device)** : swipe gauche carte en cours (tous états) ; chips au focus espèce/producteur/FAO,
 tap → champ rempli ; plus aucun effet des touches volume dans la caméra.
+
+④ **Estampille sanitaire toujours en majuscules** (même jour) : `maskHealthMark`/`validateHealthMark`
+(`inputMasks.ts`) — chaque frappe sur `health_mark` est forcée en majuscule (jamais de caractère
+retiré : espaces/points/tirets du format réel `FR 34.108.504 CE` conservés) ; indice neutre si une
+valeur qui semble complète ne contient aucun chiffre. **Portée volontairement limitée à la saisie
+opérateur** — une valeur extraite non modifiée n'est jamais retouchée côté client (invariant
+affiché==persisté). Les suggestions d'historique restent inchangées : déjà simples et liées au
+draft (préfixe>substring sur ce qui est tapé) — pas de nouveau mécanisme nécessaire.
+
+**Vérifié** : typecheck 0 erreur, **199 jest verts** (21 suites, +6 `inputMasks`).
