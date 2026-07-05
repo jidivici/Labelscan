@@ -1,10 +1,12 @@
 /**
- * ReviewScreen — dual mode.
- *  - Legacy (backend_first=false): on-device OCR result, display only. Save is
- *    disabled — there is no on-device Article model; saving requires backend mode.
- *  - Backend (backend_first=true):  display the server extraction result (status +
- *    per-field value/confidence/validation_status) and Save a backend Article
- *    (structured fields preserved) via saveBackendArticle.
+ * ReviewScreen — the single review/edit path (workflow v1).
+ *
+ * Opened from the home screen's "En cours" section for one queued scan (by
+ * `pendingScanId`); reads its photo/barcode/extraction result LIVE from the scan
+ * queue (useScan) rather than from navigation params, so it always reflects the
+ * queue's current truth. Displays the server extraction result (status + per-field
+ * value/confidence/validation_status) and saves a backend Article via
+ * saveBackendArticle, then removes the scan from the queue.
  */
 
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
@@ -48,7 +50,8 @@ import {
 } from '../services/inputMasks';
 import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
 import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
-import { useIngestionResult } from '../hooks/useIngestionResult';
+import { useScan } from '../hooks/useScanQueue';
+import { completeScan } from '../services/scanQueue';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { CascadeReveal, cascadeDelay } from '../components/CascadeReveal';
 import { ExtractionProgress } from '../components/ExtractionProgress';
@@ -56,137 +59,14 @@ import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
-import type {
-  BackendReviewParams,
-  CaptureStackParamList,
-  LegacyReviewParams,
-} from '../navigation/RootNavigator';
+import type { RootStackParamList } from '../navigation/RootNavigator';
 import type { ExtractionField } from '../types/api';
 import type { ArticleField } from '../types/Article';
 
-type RouteType = RouteProp<CaptureStackParamList, 'Review'>;
-type NavProp = StackNavigationProp<CaptureStackParamList, 'Review'>;
+type RouteType = RouteProp<RootStackParamList, 'Review'>;
+type NavProp = StackNavigationProp<RootStackParamList, 'Review'>;
 
-// ── Dispatcher: pick the mode from the (discriminated) route params ──────────────
-
-export function ReviewScreen() {
-  const route = useRoute<RouteType>();
-  if (route.params.mode === 'backend') {
-    return <BackendReview params={route.params} />;
-  }
-  return <LegacyReview params={route.params} />;
-}
-
-// ── Legacy (on-device OCR) — behavior unchanged ──────────────────────────────────
-
-function LegacyReview({ params }: { params: LegacyReviewParams }) {
-  const insets = useSafeAreaInsets();
-  const navigation = useNavigation<NavProp>();
-  const { photoUri, ocrText, barcodeValue, capturedAt } = params;
-
-  const handleRetake = useCallback(() => {
-    navigation.goBack();
-  }, [navigation]);
-
-  // The local Article model is backend-extraction only — on-device OCR results
-  // are not persisted. Save is disabled here; saving requires backend mode.
-  const handleSaveDisabled = useCallback(() => {
-    Alert.alert(
-      'Enregistrement indisponible',
-      'Les résultats OCR sur l’appareil ne sont pas enregistrés. Activez le mode backend pour enregistrer les articles extraits.'
-    );
-  }, []);
-
-  const hasText = Boolean(ocrText?.trim());
-
-  return (
-    <View style={[styles.root, { paddingBottom: insets.bottom }]}>
-      {/* Photo */}
-      <View style={styles.photoContainer}>
-        <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />
-        {/* App bar overlay */}
-        <View style={[styles.photoAppBar, { paddingTop: insets.top + 8 }]}>
-          <Pressable
-            onPress={handleRetake}
-            hitSlop={12}
-            android_ripple={{ color: 'rgba(255,255,255,0.2)', borderless: true }}
-          >
-            <MaterialCommunityIcons name="arrow-left" size={24} color={colors.onPrimary} />
-          </Pressable>
-          <Text style={[typography.titleLarge, { color: colors.onPrimary }]}>Vérification</Text>
-          <View style={{ width: 24 }} />
-        </View>
-      </View>
-
-      {/* Content card that overlaps photo */}
-      <ScrollView
-        style={styles.contentCard}
-        contentContainerStyle={styles.contentInner}
-        showsVerticalScrollIndicator={false}
-      >
-        {/* Date row */}
-        <View style={styles.metaRow}>
-          <MaterialCommunityIcons name="calendar-outline" size={14} color={colors.onSurfaceVariant} />
-          <Text style={[typography.labelSmall, styles.metaText]}>
-            {formatDate(capturedAt)}
-          </Text>
-        </View>
-
-        {/* Barcode value */}
-        {barcodeValue ? (
-          <View style={styles.barcodeRow}>
-            <MaterialCommunityIcons name="barcode" size={14} color={colors.onSurfaceVariant} />
-            <Text style={[typography.labelSmall, styles.metaText]}>{barcodeValue}</Text>
-          </View>
-        ) : null}
-
-        {/* Divider */}
-        <View style={styles.divider} />
-
-        {/* OCR text block */}
-        <Text style={[typography.labelMedium, styles.sectionLabel]}>Texte extrait</Text>
-        <View style={styles.ocrCard}>
-          <Text
-            selectable
-            style={[
-              typography.bodyLarge,
-              { color: hasText ? colors.onSurface : colors.onSurfaceVariant },
-            ]}
-          >
-            {hasText ? ocrText : 'Aucun texte extrait — étiquette vide ou illisible.'}
-          </Text>
-        </View>
-      </ScrollView>
-
-      {/* Action row */}
-      <View style={[styles.actionRow, { paddingBottom: insets.bottom + spacing.md }]}>
-        <Pressable
-          onPress={handleRetake}
-          style={styles.retakeButton}
-          android_ripple={{ color: colors.primaryContainer }}
-        >
-          <MaterialCommunityIcons
-            name="camera-retake-outline"
-            size={18}
-            color={colors.primary}
-            style={{ marginRight: spacing.xs }}
-          />
-          <Text style={[typography.labelLarge, { color: colors.primary }]}>Reprendre</Text>
-        </Pressable>
-
-        <Pressable
-          onPress={handleSaveDisabled}
-          style={[styles.saveButton, styles.saveButtonDisabled]}
-          android_ripple={{ color: colors.primaryContainer }}
-        >
-          <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>Enregistrer (backend uniquement)</Text>
-        </Pressable>
-      </View>
-    </View>
-  );
-}
-
-// ── Backend (server extraction) — single homogeneous editable list ────────────────
+// ── Server extraction — single homogeneous editable list ──────────────────────────
 
 // A field "needs attention" only when it is EMPTY (a value to fill in). We deliberately
 // do NOT surface AI confidence or an "à vérifier" flag here: manual validation is the
@@ -461,39 +341,52 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   );
 });
 
-function BackendReview({ params }: { params: BackendReviewParams }) {
+export function ReviewScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
+  const route = useRoute<RouteType>();
   const { user } = useAuth();
-  const { ingestionId, photoUri, barcodeRaw, capturedAt: capturedAtParam, submittedAt } = params;
+  const { pendingScanId } = route.params;
+
+  // Single source of truth (workflow v1): photo, barcode, ingestion id and the
+  // extraction result are read LIVE from the scan queue, never carried through
+  // navigation — this screen always reflects the queue's current truth, whether it
+  // mounted while the scan was still extracting or already ready.
+  const { scan, result, interimValues } = useScan(pendingScanId);
+  const ocrDone = scan?.ocrDone === true;
+  const ready = scan?.status === 'ready';
+  const ingestion = result?.ingestion ?? null;
+  const run = result?.run ?? null;
+  const ingestionId = scan?.ingestionId ?? null;
+  const photoUri = scan?.photoUri;
+  const barcodeRaw = scan?.barcodeRaw;
 
   const [saving, setSaving] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
-  // Tier 5 — start the staged-progress clock at mount (≈ the Valider tap) so the banner
-  // advances Lecture → Analyse while the run is polled (docs/LATENCY-REVIEW.md §5).
+  // Tier 5 — start the staged-progress clock at mount so the banner advances
+  // Lecture → Analyse while the run is polled (docs/LATENCY-REVIEW.md §5). A scan
+  // opened already 'ready' never shows this (see the `ready` render branch below).
   const [mountedAt] = useState(() => Date.now());
 
-  // T+0 — decode the scanned GS1 barcode locally. This data is exact (it comes from the
-  // barcode symbology, not OCR), so lot / DLC / weight appear the instant this screen
-  // mounts, before the server extraction returns.
-  const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
-  // The slow half — poll the server extraction (OCR + LLM + reconciliation) in the
-  // background and reveal the editable field list once it's ready. Wave 2 (Tier 3):
-  // interimValues carries deterministic previews the moment the OCR finishes, and
-  // ocrDone flips the progress banner to its REAL 'llm' stage.
-  const { phase, ingestion, run, interimValues, ocrDone } = useIngestionResult(ingestionId);
+  // Guard: the scan was removed from the queue while this screen was open (e.g.
+  // validated/discarded from another device sync) — leave silently.
+  useEffect(() => {
+    if (!scan) navigation.goBack();
+  }, [scan, navigation]);
 
+  const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
   const fields = run?.fields ?? [];
 
-  // Instrumentation (dev only): the perceived wait from tap Valider to the run landing —
-  // the number that was invisible before (docs/LATENCY-REVIEW.md §6). Fires once when the
-  // phase reaches a terminal state.
+  // Instrumentation (dev only): the photo→ready latency (docs/LATENCY-REVIEW.md §6),
+  // measured from the scan's creation (workflow v1 — there is no more "Valider tap"
+  // T0; the shutter itself starts the clock). Logged once per scan, the moment it's
+  // found ready (which, by construction, is how the operator got to this screen).
+  const loggedForScan = React.useRef<string | null>(null);
   useEffect(() => {
-    if (submittedAt == null) return;
-    if (phase === 'ready' || phase === 'failed' || phase === 'timeout' || phase === 'error') {
-      logLatency('review', { wait_ms: Date.now() - submittedAt, status: phase });
-    }
-  }, [phase, submittedAt]);
+    if (!scan || !ready || loggedForScan.current === scan.id) return;
+    loggedForScan.current = scan.id;
+    logLatency('review', { wait_ms: Date.now() - Date.parse(scan.createdAt), status: 'ready' });
+  }, [scan, ready]);
 
   // Allergen decision-support (chantier B): derive ONE EU-family suggestion from the
   // species/product fields. Pure + returns null when unsure (mixed/empty). It is shown
@@ -528,14 +421,17 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
   const lotValue = gs1.lot ?? fields.find((f) => f.field_name === 'batch_number')?.value ?? null;
   const expiryIso = gs1.expiryDate ?? gs1.bestBefore;
   const capturedAt =
-    capturedAtParam ?? ingestion?.client_captured_at ?? ingestion?.server_received_at ?? null;
+    scan?.capturedAt ?? ingestion?.client_captured_at ?? ingestion?.server_received_at ?? null;
 
-  const handleRetake = useCallback(() => {
+  // No more "Reprendre": Review no longer sits above a live Camera to reshoot onto —
+  // it opens from the home screen, so the back control is a plain return. Re-shooting
+  // a bad photo means discarding the card at home and scanning again.
+  const handleBack = useCallback(() => {
     navigation.goBack();
   }, [navigation]);
 
   const handleSave = useCallback(async () => {
-    if (!run || !ingestion) return;
+    if (!run || !ingestion || !ingestionId || !scan) return;
     setSaving(true);
     try {
       const savedFields: ArticleField[] = run.fields.map((f): ArticleField => {
@@ -599,14 +495,13 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
         await drainOutbox();
       })();
 
+      // The scan's job is done: leave the queue (drops the pending/ photo copy too —
+      // saveBackendArticle already made its own permanent copy above).
+      await completeScan(scan.id);
+
       // Satisfying confirmation the arrivage was saved (light success haptic, non-blocking).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      // Continuous-capture loop: after a successful save, return to the still-mounted
-      // Camera (directly beneath this modal) ready for the next label — NOT all the way
-      // back to Articles. The Camera screen reset its pending photo before pushing
-      // Review, so popping back lands on the live viewfinder. The operator returns to
-      // Articles from the camera's own back control. canGoBack() guards the (unexpected)
-      // case where Review is the only screen on the stack.
+      // Review opens from the home screen now — a successful save simply returns there.
       if (navigation.canGoBack()) {
         navigation.goBack();
       } else {
@@ -622,9 +517,9 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
     } finally {
       setSaving(false);
     }
-  }, [run, ingestion, ingestionId, photoUri, barcodeRaw, edits, user, navigation]);
+  }, [run, ingestion, ingestionId, scan, photoUri, barcodeRaw, edits, user, navigation]);
 
-  const canSave = phase === 'ready' && run != null && ingestion != null;
+  const canSave = ready && run != null && ingestion != null;
 
   return (
     <View style={styles.root}>
@@ -633,7 +528,7 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
             <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="contain" />
             <View style={[styles.photoAppBar, { paddingTop: insets.top + 8 }]}>
               <Pressable
-                onPress={handleRetake}
+                onPress={handleBack}
                 hitSlop={12}
                 android_ripple={{ color: 'rgba(255,255,255,0.2)', borderless: true }}
               >
@@ -701,24 +596,24 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
 
           <View style={styles.divider} />
 
-          {phase === 'failed' || phase === 'timeout' || phase === 'error' ? (
+          {scan?.status === 'submit_error' || scan?.status === 'extract_error' ? (
+            // Defensive only — a card in error state is not tappable from home, so this
+            // normally can't be reached; kept in case the scan regresses while open.
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
-                {phase === 'timeout'
-                  ? 'Le serveur traite encore cette étiquette. Patientez un instant, puis reprenez la photo si besoin.'
-                  : phase === 'failed'
-                    ? 'Le serveur n’a pas pu extraire cette étiquette. Reprenez la photo.'
-                    : 'Impossible de joindre le serveur. Vérifiez votre connexion, puis reprenez la photo.'}
+                {scan.status === 'submit_error'
+                  ? 'L’envoi de cette étiquette a échoué. Revenez à l’accueil pour réessayer.'
+                  : 'L’analyse de cette étiquette a échoué. Revenez à l’accueil pour réessayer.'}
               </Text>
             </View>
-          ) : phase === 'ready' && run == null ? (
+          ) : ready && run == null ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Impossible de charger les champs extraits. L'étiquette a été traitée sur le serveur
                 (statut : {ingestion ? ingestionStatusFr(ingestion.status) : '—'}).
               </Text>
             </View>
-          ) : phase === 'ready' && fields.length === 0 ? (
+          ) : ready && fields.length === 0 ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Aucun champ extrait.
@@ -729,7 +624,7 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
             // filled at T+0, the rest skeleton IN PLACE, then swap to editable when the run
             // lands — same rows, order and heights → zero layout shift (audit §2.1/2.2).
             <>
-              {phase === 'ready' ? (
+              {ready ? (
                 <Text style={[typography.labelMedium, styles.sectionLabel]}>
                   {`Champs (${fields.length})`}
                 </Text>
@@ -777,17 +672,17 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
 
         <View style={[styles.actionRow, { paddingBottom: insets.bottom + spacing.md }]}>
           <Pressable
-            onPress={handleRetake}
+            onPress={handleBack}
             style={styles.retakeButton}
             android_ripple={{ color: colors.primaryContainer }}
           >
             <MaterialCommunityIcons
-              name="camera-retake-outline"
+              name="arrow-left"
               size={18}
               color={colors.primary}
               style={{ marginRight: spacing.xs }}
             />
-            <Text style={[typography.labelLarge, { color: colors.primary }]}>Reprendre</Text>
+            <Text style={[typography.labelLarge, { color: colors.primary }]}>Retour</Text>
           </Pressable>
 
           <Pressable
@@ -799,7 +694,7 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
             <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>
               {saving
                 ? 'Enregistrement…'
-                : phase === 'loading'
+                : !ready
                   ? 'Analyse en cours…'
                   : 'Enregistrer l’arrivage'}
             </Text>

@@ -1,17 +1,15 @@
 /**
  * RootNavigator — single root stack.
  *
- * Articles is the HOME screen. Capture is no longer a bottom tab; it is launched
- * on demand from a FAB on the article list and lives as pushed screens on the same
- * stack (Camera → Review). The Camera screen is therefore mounted only while the
- * capture module is open and unmounted as soon as it is popped — which frees the
- * camera resource when the operator is not capturing (expo-camera allows only one
- * active preview at a time).
+ * Articles is the HOME screen. Capture (Camera) is launched on demand from the
+ * FAB and stays open for chained shots — the shutter enqueues each photo in the
+ * scan queue (src/services/scanQueue.ts) and the operator keeps shooting; there
+ * is no per-photo review pushed from the camera anymore (workflow v1).
  *
- * Capture loop (rapid continuous capture):
- *   ArticleList --FAB--> Camera --take--> Review --Valider--> back to the open Camera
- *   (ready for the next label). The Camera has a back control to return to Articles,
- *   which pops the whole capture module (unmounting the camera).
+ * Review is now opened ONLY from the home screen's "En cours" section, once a
+ * queued scan reaches its 'ready' step — by `pendingScanId`, never by carrying
+ * the ingestion/photo data through navigation params (the scan queue is the
+ * single source of truth for that data, screen-independent).
  */
 
 import React, { Suspense } from 'react';
@@ -28,42 +26,15 @@ import { colors } from '../theme';
 
 // ── Param lists ────────────────────────────────────────────────────────────────
 
-/** Legacy on-device OCR review params (backend_first=false). */
-export type LegacyReviewParams = {
-  mode?: 'legacy';
-  photoUri: string;
-  ocrText: string;
-  barcodeValue?: string;
-  capturedAt: string;
-};
-
 /**
- * Backend-extraction review params (backend_first=true).
- *
- * Cascade: Camera navigates here the instant the upload is accepted — it does NOT
- * wait for extraction. Review decodes `barcodeRaw` (GS1) for the T+0 fields and polls
- * the rest itself (useIngestionResult), so only the id + the already-known capture
- * context travel through navigation.
+ * Review params (workflow v1): a queued scan's LOCAL id. Everything else (photo,
+ * barcode, ingestion id, extraction result) is read live from the scan queue
+ * (useScan) — never carried through navigation, so Review always shows the
+ * queue's current truth even if it changed while this screen wasn't mounted.
  */
-export type BackendReviewParams = {
-  mode: 'backend';
-  ingestionId: string;
-  photoUri?: string;
-  barcodeRaw?: string;
-  /** Client capture time — shown in the header at T+0, before the server responds. */
-  capturedAt?: string;
-  /** ms epoch of the Valider tap (Tier 1: the upload already started at capture) — Review
-   *  measures the perceived wait wait_ms from here (dev only). */
-  submittedAt?: number;
-};
+export type ReviewParams = { pendingScanId: string };
 
-type ReviewParams = LegacyReviewParams | BackendReviewParams;
-
-/**
- * One flat root stack. Camera + Review are the capture module (pushed on demand);
- * keeping them on the same stack as the article screens lets Review pop straight
- * back to the still-mounted Camera to continue the capture loop.
- */
+/** One flat root stack. Camera is the capture module; Review opens from Articles. */
 export type RootStackParamList = {
   ArticleList: undefined;
   /** Full immutable record (the "lot") for one saved article, by local id. */
