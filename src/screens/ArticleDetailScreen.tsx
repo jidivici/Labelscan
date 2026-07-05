@@ -19,11 +19,11 @@ import {
   View,
   Text,
   StyleSheet,
-  Image,
   ScrollView,
   Pressable,
   ActivityIndicator,
   TextInput,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -342,7 +342,7 @@ export function ArticleDetailScreen() {
             accessibilityRole="button"
             accessibilityLabel="Voir la photo en plein écran"
           >
-            <Image source={{ uri: article.photo_uri }} style={styles.photo} resizeMode="cover" />
+            <Image source={{ uri: article.photo_uri }} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
             <View style={styles.expandHint}>
               <MaterialCommunityIcons name="arrow-expand" size={16} color={colors.onPrimary} />
             </View>
@@ -393,13 +393,13 @@ export function ArticleDetailScreen() {
           {!editing ? (
             <Pressable
               onPress={enterEdit}
-              hitSlop={8}
-              style={styles.editToggle}
-              android_ripple={{ color: colors.primaryContainer, borderless: true }}
+              style={styles.editButton}
+              android_ripple={{ color: colors.primaryContainer }}
               accessibilityRole="button"
               accessibilityLabel="Modifier la fiche"
             >
-              <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.primary} />
+              <MaterialCommunityIcons name="pencil-outline" size={15} color={colors.primary} />
+              <Text style={[typography.labelMedium, styles.editButtonText]}>Modifier</Text>
             </Pressable>
           ) : null}
         </View>
@@ -484,22 +484,19 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
+  // Same hero height as ReviewScreen (PHOTO_HEIGHT_LANDSCAPE) so every large photo
+  // in the app is framed identically.
   photoContainer: {
-    height: 220,
+    height: 200,
     position: 'relative',
     backgroundColor: colors.onSurface,
   },
-  // §6.3 — rounded cover card, same treatment as ReviewScreen; a tap opens
-  // PhotoViewerModal at full resolution, so the cover crop never loses content.
+  // Full-bleed cover photo (no inner frame) — fills the header edge-to-edge, same
+  // clean treatment as ReviewScreen's hero. A tap opens PhotoViewerModal at full
+  // resolution, so the cover crop never loses content.
   photoCard: {
     ...StyleSheet.absoluteFillObject,
-    margin: spacing.md,
-    borderRadius: radius.lg,
     overflow: 'hidden',
-  },
-  photo: {
-    width: '100%',
-    height: '100%',
   },
   photoPlaceholder: {
     alignItems: 'center',
@@ -558,13 +555,20 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceVariant,
     marginTop: spacing.xs,
   },
-  editToggle: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.primaryContainer,
+  // Clear "touch to edit" affordance — a labeled pill, not a bare icon.
+  editButton: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.primaryContainer,
+  },
+  editButtonText: {
+    color: colors.primary,
   },
   savedBanner: {
     flexDirection: 'row',

@@ -12,9 +12,8 @@
  * label content that used to overflow a small frame from being cropped away.
  *
  * Review/validation moved OFF this screen entirely: the home screen's "En cours"
- * section (PendingScanCard/ScanStepper) is where each queued scan is tracked and
- * opened once ready. This screen stays a pure viewfinder — the ScanTray only shows
- * a thumbnail stack + count, never an error (errors surface on the home screen).
+ * section (PendingScanCard) is where each queued scan is tracked and opened. This
+ * screen stays a pure, distraction-free viewfinder — no thumbnail tray or badge.
  *
  * Extraction is backend-only — the legacy on-device OCR path was removed for
  * security (audit §7.3); this screen no longer has an opt-out branch.
@@ -47,9 +46,9 @@ import { v4 as uuidv4 } from 'uuid';
 import { CaptureButton } from '../components/CaptureButton';
 import { FrameOverlay, FrameState } from '../components/FrameOverlay';
 import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
-import { ScanTray } from '../components/ScanTray';
 import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
+import { registerVolumeShutter } from '../services/volumeShutter';
 import { logLatency } from '../services/latencyLog';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -146,7 +145,10 @@ export function CameraScreen() {
   const [permission, requestPermission] = useCameraPermissions();
   const [frameState, setFrameState] = useState<FrameState>('ready');
   const [taking, setTaking] = useState(false);
-  const [flashMode, setFlashMode] = useState<'off' | 'on' | 'auto'>('off');
+  // Torch toggle (off/on). The old 3-state `flash` prop only fired AT capture, so the
+  // button gave no visible feedback and read as broken. A torch lights the scene
+  // immediately (clearly "works") AND stays on through the capture.
+  const [torchOn, setTorchOn] = useState(false);
 
   const cameraRef = useRef<CameraView>(null);
   const flashRef = useRef<FlashOverlayRef>(null);
@@ -182,8 +184,10 @@ export function CameraScreen() {
     setFrameState('capturing');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     flashRef.current?.trigger();
+
+    let photo: Awaited<ReturnType<CameraView['takePictureAsync']>> | undefined;
     try {
-      const photo = await cameraRef.current.takePictureAsync({
+      photo = await cameraRef.current.takePictureAsync({
         // Max fidelity so small print on the label OCRs well (no source-side
         // recompression beyond the single capture encode).
         quality: 1.0,
@@ -192,75 +196,6 @@ export function CameraScreen() {
         // unrotated buffer on Android, which made computeFrameCrop crop the wrong region.
         skipProcessing: false,
       });
-      if (!photo) throw new Error('Photo capture failed');
-      if (!mountedRef.current) return;
-
-      // Durable copy FIRST, before anything else touches the file. expo-camera's raw
-      // capture lives in an OS-managed Caches subdirectory that is NOT guaranteed to
-      // survive — under rapid chained capture it can vanish mid-crop (observed on
-      // device: NSCocoaErrorDomain 260 "no such file" reading the Camera/ cache file
-      // at UPLOAD time, well after capture). Crop from OUR OWN durable copy so a slow
-      // crop, or a slow enqueue, never races a source the OS can reclaim at any time.
-      const scanId = uuidv4();
-      const durableRawUri = await persistPendingPhoto(`${scanId}-raw`, photo.uri);
-      if (!durableRawUri) {
-        // Could not even secure a durable copy — nothing safe to submit this shot.
-        throw new Error('Could not persist the captured photo');
-      }
-
-      // ALWAYS produce a downscaled JPEG for upload + Vision OCR, and apply the frame crop
-      // WHEN available. Decoupling the resize from the crop is deliberate: a crop failure
-      // (orientation mismatch → computeFrameCrop null, or a manipulate throw) must NOT ship a
-      // full-size image to Vision. Cap the LONG edge at ~1600px + compress 0.8 (Tier 7 —
-      // docs/LATENCY-REVIEW.md §0; OCR is co-dominant on a slow egress, and `cropped=false`
-      // was silently defeating the resize).
-      let croppedUri: string | undefined;
-      let framed = false;
-      const crop = computeFrameCrop(photo.width, photo.height);
-      if (!crop) {
-        // Why `framed=false` happens — almost always an orientation mismatch between the
-        // photo buffer and the portrait preview. Dev-only diagnostic (dimensions only).
-        logLatency('frame_crop_skipped', {
-          photo: `${photo.width}x${photo.height}`,
-          screen: `${Math.round(SCREEN_WIDTH)}x${Math.round(SCREEN_HEIGHT)}`,
-        });
-      }
-      const srcW = crop ? crop.width : photo.width;
-      const srcH = crop ? crop.height : photo.height;
-      // Cap the LONGER side so portrait OR landscape buffers both shrink.
-      const resize =
-        srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
-      try {
-        const out = await ImageManipulator.manipulateAsync(
-          durableRawUri,
-          crop ? [{ crop }, { resize }] : [{ resize }],
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-        );
-        croppedUri = out.uri;
-        framed = crop != null;
-      } catch (e) {
-        console.warn('Immediate crop/resize failed; durable raw copy will be used:', e);
-      }
-
-      const capturedAt = new Date().toISOString();
-      const barcodeRaw = lastBarcodeRef.current?.data;
-
-      // Enqueue and move on — the scan queue owns submit + extraction from here.
-      // Never throws; a submit failure surfaces as a 'submit_error' card at home.
-      void enqueueScan({
-        id: scanId,
-        tempUri: croppedUri ?? durableRawUri,
-        barcodeRaw,
-        capturedAt,
-      }).then((scan) => {
-        logLatency('capture', { framed: String(framed) });
-        // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
-        // fell back to this exact uri (then it's the scan's only copy; keep it).
-        if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
-      });
-
-      lastBarcodeRef.current = null;
-      setFrameState('ready');
     } catch (err) {
       console.error('Capture error:', err);
       if (mountedRef.current) {
@@ -268,11 +203,111 @@ export function CameraScreen() {
         setTimeout(() => {
           if (mountedRef.current) setFrameState('ready');
         }, 2500);
+        setTaking(false);
       }
-    } finally {
-      if (mountedRef.current) setTaking(false);
+      return;
     }
+
+    // The camera is FREE the instant the frame is grabbed: re-enable the shutter NOW
+    // for fluid chained capture (fire again immediately). The heavy pipeline — durable
+    // copy + frame crop + downscale + enqueue — runs in the BACKGROUND, off the shutter's
+    // critical path, so nothing blocks the next shot.
+    if (mountedRef.current) {
+      setTaking(false);
+      setFrameState('ready');
+    }
+    if (!photo || !mountedRef.current) return;
+
+    const capturedPhoto = photo;
+    const capturedAt = new Date().toISOString();
+    const barcodeRaw = lastBarcodeRef.current?.data;
+    lastBarcodeRef.current = null;
+
+    void (async () => {
+      try {
+        // Durable copy FIRST, before anything else touches the file. expo-camera's raw
+        // capture lives in an OS-managed Caches subdirectory that is NOT guaranteed to
+        // survive — under rapid chained capture it can vanish mid-crop (observed on
+        // device: NSCocoaErrorDomain 260 "no such file" at UPLOAD time). Crop from OUR
+        // OWN durable copy so a slow crop/enqueue never races a source the OS can reclaim.
+        const scanId = uuidv4();
+        const durableRawUri = await persistPendingPhoto(`${scanId}-raw`, capturedPhoto.uri);
+        if (!durableRawUri) throw new Error('Could not persist the captured photo');
+
+        // ALWAYS produce a downscaled JPEG for upload + Vision OCR, and apply the frame
+        // crop WHEN available. Decoupling the resize from the crop is deliberate: a crop
+        // failure (orientation mismatch → computeFrameCrop null) must NOT ship a full-size
+        // image to Vision. Cap the LONG edge at ~1600px + compress 0.8 (Tier 7).
+        let croppedUri: string | undefined;
+        let framed = false;
+        const crop = computeFrameCrop(capturedPhoto.width, capturedPhoto.height);
+        if (!crop) {
+          logLatency('frame_crop_skipped', {
+            photo: `${capturedPhoto.width}x${capturedPhoto.height}`,
+            screen: `${Math.round(SCREEN_WIDTH)}x${Math.round(SCREEN_HEIGHT)}`,
+          });
+        }
+        const srcW = crop ? crop.width : capturedPhoto.width;
+        const srcH = crop ? crop.height : capturedPhoto.height;
+        const resize =
+          srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
+        try {
+          // Bake the −90° (counter-clockwise) rotation INTO the file (workflow v2): labels
+          // are shot in portrait but read landscape, so the stored/uploaded JPEG is now
+          // already upright — no display-time RotatedPhoto anywhere. Rotation is applied
+          // LAST, after crop+resize (the crop math needs the upright pixel space).
+          const out = await ImageManipulator.manipulateAsync(
+            durableRawUri,
+            crop ? [{ crop }, { resize }, { rotate: -90 }] : [{ resize }, { rotate: -90 }],
+            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+          );
+          croppedUri = out.uri;
+          framed = crop != null;
+        } catch (e) {
+          console.warn('Immediate crop/resize failed; durable raw copy will be used:', e);
+        }
+
+        // Enqueue — the scan queue owns submit + extraction from here. Never throws;
+        // a submit failure surfaces as a 'submit_error' card at home.
+        const scan = await enqueueScan({
+          id: scanId,
+          tempUri: croppedUri ?? durableRawUri,
+          barcodeRaw,
+          capturedAt,
+        });
+        logLatency('capture', { framed: String(framed) });
+        // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
+        // fell back to this exact uri (then it's the scan's only copy; keep it).
+        if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
+      } catch (err) {
+        // A shot must NEVER be lost silently (prod audit): the only throw path here is
+        // the durable-copy failure, so fall back to enqueueing the ORIGINAL cache
+        // capture as-is (uncropped/unrotated — degraded but recoverable; enqueueScan
+        // retries its own durable copy and tolerates a cache uri). If even that fails,
+        // the error card at home is the operator's signal.
+        console.error('Background capture pipeline error:', err);
+        try {
+          await enqueueScan({ tempUri: capturedPhoto.uri, barcodeRaw, capturedAt });
+          logLatency('capture', { framed: 'false', fallback: 'raw_cache' });
+        } catch (fallbackErr) {
+          console.error('Capture fallback enqueue failed — shot lost:', fallbackErr);
+        }
+      }
+    })();
   }, [taking]);
+
+  // ── Hardware volume button (−/+) as a shutter ──────────────────────────────
+  // Registered ONCE per focus; a ref forwards to the latest takePhoto so the listener
+  // is not re-armed on every capture. No-op until the dev client is rebuilt with
+  // react-native-volume-manager (the service guards a missing native module).
+  const takePhotoRef = useRef(takePhoto);
+  takePhotoRef.current = takePhoto;
+  useEffect(() => {
+    if (!isFocused) return;
+    return registerVolumeShutter(() => {
+      void takePhotoRef.current();
+    });
+  }, [isFocused]);
 
   // ── Barcode detected — store for the next capture, no auto-shoot ───────────
   const handleBarcodeScanned = useCallback(
@@ -285,7 +320,7 @@ export function CameraScreen() {
   );
 
   const toggleFlash = useCallback(() => {
-    setFlashMode((f) => (f === 'off' ? 'on' : f === 'on' ? 'auto' : 'off'));
+    setTorchOn((on) => !on);
   }, []);
 
   // ── Leave the capture module → back to Articles (pops Camera → unmounts it) ──
@@ -297,12 +332,7 @@ export function CameraScreen() {
     }
   }, [navigation]);
 
-  const flashIcon =
-    flashMode === 'off'
-      ? 'flash-off'
-      : flashMode === 'on'
-      ? 'flash'
-      : 'flash-auto';
+  const flashIcon = torchOn ? 'flash' : 'flash-off';
 
   // ── No permission ─────────────────────────────────────────────────────────
   if (!permission?.granted) {
@@ -354,7 +384,8 @@ export function CameraScreen() {
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="back"
-          flash={flashMode}
+          flash={torchOn ? 'on' : 'off'}
+          enableTorch={torchOn}
           onBarcodeScanned={taking ? undefined : handleBarcodeScanned}
           barcodeScannerSettings={{
             barcodeTypes: [
@@ -392,21 +423,21 @@ export function CameraScreen() {
         </Text>
         <Pressable
           onPress={toggleFlash}
-          style={styles.topBarAction}
+          style={[styles.topBarAction, torchOn && styles.topBarActionActive]}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel="Basculer le flash"
+          accessibilityLabel={torchOn ? 'Éteindre le flash' : 'Allumer le flash'}
+          accessibilityState={{ selected: torchOn }}
         >
-          <MaterialCommunityIcons name={flashIcon} size={24} color={colors.onPrimary} />
+          <MaterialCommunityIcons name={flashIcon} size={22} color={colors.onPrimary} />
         </Pressable>
       </View>
 
-      {/* Bottom control tray — left slot is the scan tray (workflow v1): thumbnail
-          stack + count of scans currently submitting/extracting, tap → home. */}
+      {/* Bottom control tray — just the centered shutter. The scan queue (thumbnail
+          stack + count) lives on the home screen's "En cours" section, so the camera
+          stays a clean, distraction-free viewfinder. */}
       <View style={styles.bottomTray}>
-        <View style={styles.traySlot}>
-          <ScanTray onPress={closeCapture} />
-        </View>
+        <View style={styles.traySlot} />
         <CaptureButton onPress={takePhoto} loading={taking} disabled={taking} />
         <View style={styles.traySlot} />
       </View>
@@ -443,12 +474,25 @@ const styles = StyleSheet.create({
   topBarBack: {
     position: 'absolute',
     left: spacing.lg,
-    bottom: 12,
+    bottom: 6,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   topBarAction: {
     position: 'absolute',
     right: spacing.lg,
-    bottom: 12,
+    bottom: 6,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  // Torch ON — a filled accent pill makes the state unmistakable.
+  topBarActionActive: {
+    backgroundColor: colors.primary,
   },
   bottomTray: {
     position: 'absolute',

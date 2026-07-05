@@ -9,16 +9,16 @@
  * saveBackendArticle, then removes the scan from the queue.
  */
 
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Image,
   ScrollView,
   Pressable,
   Alert,
   TextInput,
+  Image,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -49,12 +49,12 @@ import {
   type WeightUnit,
 } from '../services/inputMasks';
 import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
-import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
+import { parseGs1, gs1FieldValues } from '../services/gs1';
 import { useScan } from '../hooks/useScanQueue';
-import { completeScan } from '../services/scanQueue';
+import { completeScan, saveScanEdits } from '../services/scanQueue';
+import { filledCountFromValues } from '../services/fieldCompleteness';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
-import { CascadeReveal, cascadeDelay } from '../components/CascadeReveal';
 import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
@@ -67,15 +67,16 @@ import type { ArticleField } from '../types/Article';
 type RouteType = RouteProp<RootStackParamList, 'Review'>;
 type NavProp = StackNavigationProp<RootStackParamList, 'Review'>;
 
+// Landscape photo height at the top of the review — wide and low so the whole label
+// reads landscape, leaving maximum room for the field list below (coherence request).
+const PHOTO_HEIGHT_LANDSCAPE = 200;
+
 // ── Server extraction — single homogeneous editable list ──────────────────────────
 
-// A field "needs attention" only when it is EMPTY (a value to fill in). We deliberately
-// do NOT surface AI confidence or an "à vérifier" flag here: manual validation is the
-// single source of truth (CLAUDE.md "Clean UI Radicale", audit §6.2). The highlight is
-// purely a fill-in affordance, never a quality judgement on an extracted value.
-function needsReview(field: ExtractionField): boolean {
-  return field.value == null || field.value === '';
-}
+// Empty fields get a BLUE "à compléter" highlight, computed reactively from the live
+// draft inside EditableFieldRow (so it clears the instant a value is typed). We
+// deliberately do NOT surface AI confidence or an "à vérifier" flag: manual validation
+// is the single source of truth (CLAUDE.md "Clean UI Radicale", audit §6.2).
 
 // Canonical display order for the 16 fields. The SAME order drives the loading skeleton
 // list AND the ready list, so rows never reshuffle when the run lands (audit §2.2 — zero
@@ -88,17 +89,14 @@ function needsReview(field: ExtractionField): boolean {
  * field LABEL is shown, and the VALUE is the GS1-decoded value (T+0), the Tier 3 wave-2
  * deterministic preview (~OCR done), or a pulsing skeleton. Same geometry as
  * EditableFieldRow → swapping it in at ready does not move anything (audit §2.1/2.2).
- * A value that ARRIVES (skeleton → GS1/preview) reveals through CascadeReveal, keyed on
- * the value so the animation runs exactly once per reveal, staggered by row position.
+ * Values swap in plainly (no cascade animation — the review stays dead simple).
  */
 function PendingFieldRow({
   fieldName,
   gs1Value,
-  revealDelay = 0,
 }: {
   fieldName: string;
   gs1Value?: string;
-  revealDelay?: number;
 }) {
   return (
     <View style={styles.fieldRow}>
@@ -106,11 +104,9 @@ function PendingFieldRow({
         <Text style={[typography.labelSmall, styles.fieldName]}>{fieldLabelFr(fieldName)}</Text>
       </View>
       {gs1Value != null ? (
-        <CascadeReveal key={gs1Value} delay={revealDelay}>
-          <View style={styles.input}>
-            <Text style={[typography.bodyMedium, { color: colors.onSurface }]}>{gs1Value}</Text>
-          </View>
-        </CascadeReveal>
+        <View style={styles.input}>
+          <Text style={[typography.bodyMedium, { color: colors.onSurface }]}>{gs1Value}</Text>
+        </View>
       ) : (
         <SkeletonValue />
       )}
@@ -260,7 +256,6 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   field,
   draft,
   onChange,
-  highlighted,
   suggestion,
 }: {
   field: ExtractionField;
@@ -268,12 +263,14 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // (name, text) so the parent keeps ONE stable callback for all rows — combined with
   // React.memo, a keystroke then re-renders ONLY the edited row (audit §7.1).
   onChange: (name: string, text: string) => void;
-  highlighted: boolean;
   suggestion?: string | null;
 }) {
+  // "À compléter" highlight is REACTIVE to the live draft (not the server value): an
+  // empty field is highlighted BLUE, and the highlight vanishes the instant it's filled.
+  const empty = draft.trim() === '';
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
-  const showSuggestion = !!suggestion && draft.trim() === '';
+  const showSuggestion = !!suggestion && empty;
   // Bind this row's field name once; the affix inputs and the suggestion chip emit through it.
   const emit = (text: string) => onChange(field.field_name, text);
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
@@ -294,28 +291,28 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
     <View style={styles.fieldRow}>
       <View style={styles.fieldHeader}>
         <Text style={[typography.labelSmall, styles.fieldName]}>{fieldLabelFr(field.field_name)}</Text>
-        {highlighted ? (
+        {empty ? (
           <Text style={[typography.labelSmall, styles.attentionTag]}>À compléter</Text>
         ) : null}
       </View>
       {field.field_name === 'weight' ? (
-        <WeightInput draft={draft} onChange={emit} highlighted={highlighted} />
+        <WeightInput draft={draft} onChange={emit} highlighted={empty} />
       ) : field.field_name === 'storage_temperature' ? (
-        <TempRangeInput draft={draft} onChange={emit} highlighted={highlighted} />
+        <TempRangeInput draft={draft} onChange={emit} highlighted={empty} />
       ) : field.field_name === 'price' ? (
-        <PriceInput draft={draft} onChange={emit} highlighted={highlighted} />
+        <PriceInput draft={draft} onChange={emit} highlighted={empty} />
       ) : (
         <TextInput
           value={draft}
           onChangeText={handleChange}
           keyboardType={isDate ? 'number-pad' : 'default'}
           maxLength={isDate ? 10 : undefined}
-          placeholder={isDate ? 'JJ/MM/AAAA' : highlighted ? 'Saisir la valeur' : 'Valeur extraite'}
+          placeholder={isDate ? 'JJ/MM/AAAA' : empty ? 'Saisir la valeur' : 'Valeur extraite'}
           placeholderTextColor={colors.onSurfaceVariant}
           style={[
             typography.bodyMedium,
             styles.input,
-            highlighted ? styles.inputHighlighted : null,
+            empty ? styles.inputHighlighted : null,
           ]}
           autoCapitalize="words"
           autoCorrect={false}
@@ -364,16 +361,32 @@ export function ReviewScreen() {
 
   const [saving, setSaving] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
-  const [edits, setEdits] = useState<Record<string, string>>({});
-  // Tier 5 — start the staged-progress clock at mount so the banner advances
-  // Lecture → Analyse while the run is polled (docs/LATENCY-REVIEW.md §5). A scan
-  // opened already 'ready' never shows this (see the `ready` render branch below).
+  // Workflow v2 "session": seed the draft from the scan's persisted edits so a
+  // partially-filled arrivage is restored on re-open (the scan stays "en cours" until
+  // all 17 fields are filled and validated). Lazy init — the queue is already hydrated
+  // by the time this screen is reached (it also redirects home when the scan is gone).
+  const [edits, setEdits] = useState<Record<string, string>>(() => scan?.edits ?? {});
+  // Persist the latest edits ONCE when leaving the screen (not on every keystroke).
+  // A ref keeps the newest value for the unmount cleanup; saveScanEdits no-ops if the
+  // scan was validated/discarded meanwhile (findScan miss).
+  const editsRef = useRef(edits);
+  editsRef.current = edits;
+  useEffect(() => {
+    return () => {
+      saveScanEdits(pendingScanId, editsRef.current);
+    };
+  }, [pendingScanId]);
+  // Start the staged-progress clock at mount so the 3-step box advances Lecture →
+  // Analyse while the run is polled. A scan opened already 'ready' never shows it.
   const [mountedAt] = useState(() => Date.now());
 
   // Guard: the scan was removed from the queue while this screen was open (e.g.
-  // validated/discarded from another device sync) — leave silently.
+  // validated/discarded from another device sync) — leave silently. `closingRef` is set
+  // by handleSave BEFORE completeScan removes the scan: without it this effect races the
+  // save's own navigation (the queue notifies during the await → double goBack).
+  const closingRef = useRef(false);
   useEffect(() => {
-    if (!scan) navigation.goBack();
+    if (!scan && !closingRef.current) navigation.goBack();
   }, [scan, navigation]);
 
   const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
@@ -418,10 +431,29 @@ export function ReviewScreen() {
     return { ...out, ...gs1Values };
   }, [interimValues, gs1Values]);
 
+  // Effective value of each canonical field = the operator's draft if present, else the
+  // display-formatted extracted value. This is exactly what handleSave will persist, so
+  // it drives the 17/17 completeness gate (workflow v2) AND seeds each editable row (no
+  // divergence between the count and what's on screen).
+  const effectiveValues = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const name of FIELD_ORDER) {
+      const field = fields.find((f) => f.field_name === name);
+      const extracted = field
+        ? isDateField(name)
+          ? displayDate(field.value ?? '')
+          : field.value ?? ''
+        : '';
+      out[name] = edits[name] ?? extracted;
+    }
+    return out;
+  }, [fields, edits]);
+  // How many of the 17 fields are filled (non-blank). "Enregistrer l'arrivage" unlocks
+  // only at 17/17 — until then the arrivage stays "en cours" and is never counted.
+  const filledCount = useMemo(() => filledCountFromValues(effectiveValues), [effectiveValues]);
+
   // GS1 wins on lot/DLC at T+0; the backend reconciles the same way, so the values stay
   // stable once the run lands.
-  const lotValue = gs1.lot ?? fields.find((f) => f.field_name === 'batch_number')?.value ?? null;
-  const expiryIso = gs1.expiryDate ?? gs1.bestBefore;
   const capturedAt =
     scan?.capturedAt ?? ingestion?.client_captured_at ?? ingestion?.server_received_at ?? null;
 
@@ -499,7 +531,9 @@ export function ReviewScreen() {
       })();
 
       // The scan's job is done: leave the queue (drops the pending/ photo copy too —
-      // saveBackendArticle already made its own permanent copy above).
+      // saveBackendArticle already made its own permanent copy above). closingRef stops
+      // the !scan guard effect from double-navigating while this await yields.
+      closingRef.current = true;
       await completeScan(scan.id);
 
       // Satisfying confirmation the arrivage was saved (light success haptic, non-blocking).
@@ -511,6 +545,7 @@ export function ReviewScreen() {
         navigation.navigate('ArticleList');
       }
     } catch (err) {
+      closingRef.current = false; // stay on screen — re-arm the removed-scan guard
       console.error('Save error:', err);
       Alert.alert(
         "Échec de l\u2019enregistrement",
@@ -522,93 +557,50 @@ export function ReviewScreen() {
     }
   }, [run, ingestion, ingestionId, scan, photoUri, barcodeRaw, edits, user, navigation]);
 
-  const canSave = ready && run != null && ingestion != null;
+  // Save is gated on 17/17 (workflow v2): the arrivage is only recorded — and counted —
+  // once every field is filled. Below that the button stays disabled and reads "Compléter
+  // (n/17)"; the modifications made so far are still persisted on leave.
+  const complete = filledCount === FIELD_ORDER.length;
+  const canSave = ready && run != null && ingestion != null && complete;
 
   return (
     <View style={styles.root}>
-      {photoUri ? (
-          <View style={styles.photoContainer}>
-            <Pressable
-              onPress={() => setViewerOpen(true)}
-              style={styles.photoCard}
-              accessibilityRole="button"
-              accessibilityLabel="Voir la photo en plein écran"
-            >
-              <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />
-              <View style={styles.expandHint}>
-                <MaterialCommunityIcons name="arrow-expand" size={16} color={colors.onPrimary} />
-              </View>
-            </Pressable>
-            <View style={[styles.photoAppBar, { paddingTop: insets.top + 8 }]}>
-              <Pressable
-                onPress={handleBack}
-                hitSlop={12}
-                android_ripple={{ color: 'rgba(255,255,255,0.2)', borderless: true }}
-              >
-                <MaterialCommunityIcons name="arrow-left" size={24} color={colors.onPrimary} />
-              </Pressable>
-              <Text style={[typography.titleLarge, { color: colors.onPrimary }]}>Vérification</Text>
-              <View style={{ width: 24 }} />
-            </View>
+      {/* Fixed photo header — SAME system as ArticleDetail: the photo stays put while the
+          content sheet scrolls over it. The captured file is already rotated upright
+          (baked client-side at capture), so a plain cover Image reads landscape. Tap the
+          photo to open it full-screen; the return control is the bottom action bar. */}
+      <View style={styles.photoContainer}>
+        {photoUri ? (
+          <Pressable
+            onPress={() => setViewerOpen(true)}
+            style={styles.photoCard}
+            accessibilityRole="button"
+            accessibilityLabel="Voir la photo en plein écran"
+          >
+            <Image source={{ uri: photoUri }} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
+          </Pressable>
+        ) : (
+          <View style={[styles.photoCard, styles.photoPlaceholder]}>
+            <MaterialCommunityIcons name="image-off-outline" size={48} color={colors.onSurfaceVariant} />
           </View>
-        ) : null}
+        )}
+      </View>
+
       <PhotoViewerModal visible={viewerOpen} photoUri={photoUri} onClose={() => setViewerOpen(false)} />
 
-        <ScrollView
-          style={styles.contentCard}
-          contentContainerStyle={styles.contentInner}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          automaticallyAdjustKeyboardInsets
-        >
-          <View style={styles.metaRow}>
-            <MaterialCommunityIcons name="identifier" size={14} color={colors.onSurfaceVariant} />
-            <Text style={[typography.labelSmall, styles.metaText]}>
-              Lot : {lotValue ?? '—'}
-            </Text>
-          </View>
-          {expiryIso ? (
-            <View style={styles.metaRow}>
-              <MaterialCommunityIcons name="calendar-alert" size={14} color={colors.onSurfaceVariant} />
-              <Text style={[typography.labelSmall, styles.metaText]}>DLC : {displayDate(expiryIso)}</Text>
-            </View>
-          ) : null}
-          {gs1.netWeightKg != null ? (
-            <View style={styles.metaRow}>
-              <MaterialCommunityIcons name="weight-kilogram" size={14} color={colors.onSurfaceVariant} />
-              <Text style={[typography.labelSmall, styles.metaText]}>
-                Poids : {formatGs1WeightKg(gs1.netWeightKg)}
-              </Text>
-            </View>
-          ) : null}
-          {capturedAt ? (
-            <View style={styles.metaRow}>
-              <MaterialCommunityIcons name="calendar-outline" size={14} color={colors.onSurfaceVariant} />
-              <Text style={[typography.labelSmall, styles.metaText]}>
-                {formatDate(capturedAt)}
-              </Text>
-            </View>
-          ) : null}
-          {user ? (
-            <View style={styles.metaRow}>
-              <MaterialCommunityIcons name="account-outline" size={14} color={colors.onSurfaceVariant} />
-              <Text style={[typography.labelSmall, styles.metaText]}>{user}</Text>
-            </View>
-          ) : null}
-          <View style={styles.metaRow}>
-            <MaterialCommunityIcons name="cloud-check-outline" size={14} color={colors.onSurfaceVariant} />
-            <Text style={[typography.labelSmall, styles.metaText]}>
-              Statut : {ingestion ? ingestionStatusFr(ingestion.status) : 'Analyse en cours…'}
-            </Text>
-          </View>
-          {barcodeRaw ? (
-            <View style={styles.barcodeRow}>
-              <MaterialCommunityIcons name="barcode" size={14} color={colors.onSurfaceVariant} />
-              <Text style={[typography.labelSmall, styles.metaText]}>{barcodeRaw}</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.divider} />
+      <ScrollView
+        style={styles.contentCard}
+        contentContainerStyle={styles.contentInner}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        automaticallyAdjustKeyboardInsets
+      >
+        {/* Épuré au maximum : au plus l'admin + la date d'enregistrement, un point. */}
+        {user || capturedAt ? (
+          <Text style={[typography.bodySmall, styles.metaLine]} numberOfLines={1}>
+            {[user, capturedAt ? formatDate(capturedAt) : null].filter(Boolean).join('  ·  ')}
+          </Text>
+        ) : null}
 
           {scan?.status === 'submit_error' || scan?.status === 'extract_error' ? (
             // Defensive only — a card in error state is not tappable from home, so this
@@ -634,55 +626,33 @@ export function ReviewScreen() {
               </Text>
             </View>
           ) : (
-            // loading OR (ready with fields): a STABLE list in FIELD_ORDER. GS1 rows are
-            // filled at T+0, the rest skeleton IN PLACE, then swap to editable when the run
-            // lands — same rows, order and heights → zero layout shift (audit §2.1/2.2).
+            // Photo + (chargement) + champs. Le plus simple possible : une liste STABLE
+            // en FIELD_ORDER, lignes GS1/interim préremplies, le reste en skeleton en
+            // place, qui deviennent éditables au ready — SANS cascade, sans compteur.
             <>
-              {ready ? (
-                <Text style={[typography.labelMedium, styles.sectionLabel]}>
-                  {`Champs (${fields.length})`}
-                </Text>
-              ) : (
+              {ready ? null : (
                 <ExtractionProgress startedAt={mountedAt} ready={false} ocrDone={ocrDone} />
               )}
-              {FIELD_ORDER.map((name, rowIndex) => {
+              {FIELD_ORDER.map((name) => {
                 const field = fields.find((f) => f.field_name === name);
                 if (field) {
-                  const row = (
+                  return (
                     <EditableFieldRow
                       key={name}
                       field={field}
-                      draft={
-                        edits[name] ??
-                        (isDateField(name) ? displayDate(field.value ?? '') : field.value ?? '')
-                      }
+                      draft={effectiveValues[name]}
                       onChange={handleFieldChange}
-                      highlighted={needsReview(field)}
                       suggestion={name === 'allergens' ? allergenSuggestion : undefined}
                     />
                   );
-                  // Wave 3 sweep: only rows that were STILL skeletons animate in — a value
-                  // already visible (GS1 / wave-2 preview) swaps silently, never re-flashes.
-                  return pendingValues[name] == null ? (
-                    <CascadeReveal key={name} delay={cascadeDelay(rowIndex)}>
-                      {row}
-                    </CascadeReveal>
-                  ) : (
-                    <View key={name}>{row}</View>
-                  );
                 }
                 return (
-                  <PendingFieldRow
-                    key={name}
-                    fieldName={name}
-                    gs1Value={pendingValues[name]}
-                    revealDelay={cascadeDelay(rowIndex)}
-                  />
+                  <PendingFieldRow key={name} fieldName={name} gs1Value={pendingValues[name]} />
                 );
               })}
             </>
           )}
-        </ScrollView>
+      </ScrollView>
 
         <View style={[styles.actionRow, { paddingBottom: insets.bottom + spacing.md }]}>
           <Pressable
@@ -710,7 +680,9 @@ export function ReviewScreen() {
                 ? 'Enregistrement…'
                 : !ready
                   ? 'Analyse en cours…'
-                  : 'Enregistrer l’arrivage'}
+                  : !complete
+                    ? `Compléter (${filledCount}/${FIELD_ORDER.length})`
+                    : 'Enregistrer l’arrivage'}
             </Text>
           </Pressable>
         </View>
@@ -723,83 +695,39 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  // Fixed photo header (same system as ArticleDetail): the photo stays put while the
+  // content sheet scrolls over it. A tap opens PhotoViewerModal at full resolution.
   photoContainer: {
-    height: 260,
+    height: PHOTO_HEIGHT_LANDSCAPE,
     position: 'relative',
     backgroundColor: colors.onSurface,
   },
-  // §6.3 — rounded cover card. The rognage this implies is safe now: a tap always
-  // opens PhotoViewerModal at full resolution (`contain`), so nothing is ever lost,
-  // only initially cropped for a tidy thumbnail.
   photoCard: {
     ...StyleSheet.absoluteFillObject,
-    margin: spacing.md,
-    borderRadius: radius.lg,
     overflow: 'hidden',
   },
-  photo: {
-    width: '100%',
-    height: '100%',
-  },
-  expandHint: {
-    position: 'absolute',
-    right: spacing.sm,
-    bottom: spacing.sm,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+  photoPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  photoAppBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    backgroundColor: 'rgba(0,0,0,0.35)',
-  },
+  // Content sheet — rises over the bottom of the fixed photo with a rounded top
+  // (same overlap as ArticleDetail), then scrolls its fields internally.
   contentCard: {
     flex: 1,
     backgroundColor: colors.surface,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     marginTop: -radius.lg,
-    ...elevation[2],
   },
   contentInner: {
     padding: spacing.lg,
     paddingBottom: spacing['2xl'],
   },
-  metaRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  barcodeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-  },
-  metaText: {
+  // The single allowed meta line: admin · date d'enregistrement. Nothing else.
+  metaLine: {
     color: colors.onSurfaceVariant,
-    marginLeft: spacing.xs,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: colors.outlineVariant,
-    marginVertical: spacing.md,
-  },
-  sectionLabel: {
-    color: colors.onSurfaceVariant,
-    marginBottom: spacing.sm,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
+    marginTop: spacing.md,
+    marginBottom: spacing.md,
   },
   ocrCard: {
     backgroundColor: colors.surfaceContainer,
@@ -828,10 +756,10 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     flexShrink: 1,
   },
-  // Attention reason tag — neutral tint (no red), subtle highlight for weak fields.
+  // "À compléter" tag — BLUE, shown only while the field is empty (clears on fill).
   attentionTag: {
-    color: colors.onSecondaryContainer,
-    backgroundColor: colors.secondaryContainer,
+    color: colors.onPrimaryContainer,
+    backgroundColor: colors.primaryContainer,
     borderRadius: radius.sm,
     paddingHorizontal: spacing.xs,
     paddingVertical: 1,
@@ -846,9 +774,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
+  // Empty-field highlight — a soft BLUE tint + accent border; disappears once filled.
   inputHighlighted: {
-    backgroundColor: colors.secondaryContainer,
-    borderColor: colors.secondary,
+    backgroundColor: colors.primaryContainer,
+    borderColor: colors.primary,
   },
   // Neutral, non-blocking validity hint under an input (Clean UI: never red/alarmist).
   inputHint: {
@@ -891,8 +820,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   affixInputHighlighted: {
-    backgroundColor: colors.secondaryContainer,
-    borderColor: colors.secondary,
+    backgroundColor: colors.primaryContainer,
+    borderColor: colors.primary,
   },
   affixUnitToggle: {
     paddingHorizontal: spacing.md,

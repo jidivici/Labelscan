@@ -71,6 +71,13 @@ export interface PendingScan {
   status: PendingScanStatus;
   ocrDone?: boolean; // Tier 3 wave 2 reached (drives the banner/stepper detail)
   errorCode?: string;
+  /**
+   * Persisted review draft (workflow v2 — "session"): the operator's per-field edits,
+   * keyed by field_name. Saved when leaving the Review screen so a partially-filled
+   * arrivage survives navigating away; the scan stays "en cours" until all 17 fields
+   * are filled and it is validated (then completeScan drops it). Undefined = untouched.
+   */
+  edits?: Record<string, string>;
 }
 
 /** Review-ready payload for one scan (in-memory only — the server is the truth). */
@@ -363,6 +370,16 @@ export async function discardScan(id: string): Promise<void> {
   // the server ingestion (append-only, harmless) or dead-letter on the missing file.
   const removed = removeScan(id);
   if (removed) await deletePendingPhoto(removed.photoUri);
+}
+
+/**
+ * Persist the operator's in-progress review edits for a scan (workflow v2 "session").
+ * Called when leaving the Review screen so a partially-filled arrivage is restored on
+ * re-open. No-op if the scan is gone (validated/discarded meanwhile).
+ */
+export function saveScanEdits(id: string, edits: Record<string, string>): void {
+  if (!findScan(id)) return;
+  updateScan(id, { edits });
 }
 
 /** Remove a validated scan (the article save already copied the photo out). */
