@@ -38,7 +38,8 @@ export type OutboxStatus = 'pending' | 'in_flight' | 'succeeded' | 'dead_letter'
 export type OutboxOperationType =
   | 'create_ingestion'
   | 'poll_ingestion_status'
-  | 'override_field';
+  | 'override_field'
+  | 'confirm_ingestion';
 
 /** Payload for POST /v1/ingestions (mirrors the Batch-4 createIngestion args). */
 export interface CreateIngestionPayload {
@@ -58,6 +59,11 @@ export interface OverrideFieldPayload {
   field_name: string;
   value: string | null; // null => the reviewer cleared the field
   note?: string;
+}
+
+/** Payload for POST /v1/ingestions/{id}/confirm — finalize the review (P3). */
+export interface ConfirmIngestionPayload {
+  ingestion_id: string;
 }
 
 /** Result recorded on a succeeded create_ingestion op (read by the polling batch). */
@@ -96,10 +102,16 @@ export interface OverrideFieldOperation extends OutboxOperationBase {
   payload: OverrideFieldPayload;
 }
 
+export interface ConfirmIngestionOperation extends OutboxOperationBase {
+  type: 'confirm_ingestion';
+  payload: ConfirmIngestionPayload;
+}
+
 export type OutboxOperation =
   | CreateIngestionOperation
   | PollIngestionStatusOperation
-  | OverrideFieldOperation;
+  | OverrideFieldOperation
+  | ConfirmIngestionOperation;
 
 /** Error info supplied to markFailed (e.g. derived from the Batch-4 ApiError). */
 export interface OperationError {
@@ -254,6 +266,13 @@ export function enqueueOverrideField(
   return enqueue({ type: 'override_field', payload }, opts) as Promise<OverrideFieldOperation>;
 }
 
+export function enqueueConfirmIngestion(
+  payload: ConfirmIngestionPayload,
+  opts: EnqueueOptions = {},
+): Promise<ConfirmIngestionOperation> {
+  return enqueue({ type: 'confirm_ingestion', payload }, opts) as Promise<ConfirmIngestionOperation>;
+}
+
 // ── Status transitions ─────────────────────────────────────────────────────────
 
 /** Claim a pending op for execution. No-op (returns null) if not pending/found. */
@@ -330,6 +349,32 @@ export function markFailed(
       return updated;
     });
     return { ops: next, result: updated };
+  });
+}
+
+/**
+ * Purge terminal ops so the queue cannot grow without bound (every scan enqueues
+ * ops that would otherwise live in AsyncStorage forever). Removes:
+ *  - `succeeded` ops older than `succeededAfterMs` (kept a while for diagnostics —
+ *    create_ingestion results are read shortly after success, never days later);
+ *  - `dead_letter` ops older than `deadLetterAfterMs` (kept longer: they represent
+ *    lost writes an operator might still requeue).
+ * Pending / in-flight ops are NEVER touched. Returns the number removed.
+ */
+export function purgeTerminalOps(
+  opts: { succeededAfterMs?: number; deadLetterAfterMs?: number; now?: number } = {},
+): Promise<number> {
+  const now = opts.now ?? Date.now();
+  const succeededAfterMs = opts.succeededAfterMs ?? 24 * 60 * 60 * 1_000; // 1 day
+  const deadLetterAfterMs = opts.deadLetterAfterMs ?? 14 * 24 * 60 * 60 * 1_000; // 14 days
+  return mutate((ops) => {
+    const keep = ops.filter((op) => {
+      const age = now - Date.parse(op.updated_at);
+      if (op.status === 'succeeded') return age < succeededAfterMs;
+      if (op.status === 'dead_letter') return age < deadLetterAfterMs;
+      return true; // pending / in_flight always kept
+    });
+    return { ops: keep, result: ops.length - keep.length };
   });
 }
 

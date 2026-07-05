@@ -51,20 +51,13 @@ import { CaptureButton } from '../components/CaptureButton';
 import { FrameOverlay, FrameState } from '../components/FrameOverlay';
 import { ProcessingOverlay } from '../components/ProcessingOverlay';
 import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
-import { extractTextFromImage } from '../services/ocr';
-import { submitCapture } from '../services/ingestionSubmit';
+import { submitCapture, type SubmitOutcome } from '../services/ingestionSubmit';
 import { logLatency } from '../services/latencyLog';
 import { BACKEND_FIRST } from '../config';
 import { colors, spacing, radius, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
-// Legacy on-device OCR crop region (used ONLY when BACKEND_FIRST=false). Unchanged.
-const ZONE_WIDTH = SCREEN_WIDTH * 0.8;
-const ZONE_HEIGHT = 72;
-const ZONE_LEFT = (SCREEN_WIDTH - ZONE_WIDTH) / 2;
-const ZONE_TOP = SCREEN_HEIGHT * 0.52;
 
 // Label-placement frame — both the VISUAL GUIDE and the crop region. The full
 // photo is captured, then cropped to this rectangle before submit (see
@@ -153,7 +146,8 @@ interface PendingPhoto {
   uri: string;
   width: number;
   height: number;
-  croppedUri?: string;
+  croppedUri?: string; // downscaled JPEG actually uploaded (frame-cropped when possible)
+  framed?: boolean; // whether the frame crop was applied (false = orientation mismatch)
   barcodeRaw?: string;
   capturedAt: string;
 }
@@ -178,6 +172,15 @@ export function CameraScreen() {
   const lastBarcodeRef = useRef<BarcodeScanningResult | null>(null);
   const mountedRef = useRef(true);
   const submitInFlightRef = useRef(false);
+  // Tier 1 — speculative submission (docs/LATENCY-REVIEW.md §4): the upload + extraction
+  // started at capture time, so OCR+LLM overlap the human photo-review pause. Holds the
+  // in-flight (or already-resolved) outcome; Valider consumes it instead of waiting on a
+  // fresh upload, and Reprendre/refocus abandon it (the orphaned ingestion is append-only
+  // and harmless). `startedAt` is the upload T0 used to report the real upload_ms.
+  const speculativeRef = useRef<{
+    startedAt: number;
+    promise: Promise<{ outcome: SubmitOutcome; finishedAt: number }>;
+  } | null>(null);
 
   // ── Permission guard ──────────────────────────────────────────────────────
   useEffect(() => {
@@ -197,6 +200,7 @@ export function CameraScreen() {
     if (isFocused) {
       setPending(null);
       lastBarcodeRef.current = null;
+      speculativeRef.current = null;
       setFrameState('ready');
     }
   }, [isFocused]);
@@ -221,37 +225,69 @@ export function CameraScreen() {
       if (!photo) throw new Error('Photo capture failed');
       if (!mountedRef.current) return;
 
+      // ALWAYS produce a downscaled JPEG for upload + Vision OCR, and apply the frame crop
+      // WHEN available. Decoupling the resize from the crop is deliberate: a crop failure
+      // (orientation mismatch → computeFrameCrop null, or a manipulate throw) must NOT ship a
+      // full-size image to Vision. Cap the LONG edge at ~1600px + compress 0.8 (Tier 7 —
+      // docs/LATENCY-REVIEW.md §0; OCR is co-dominant on a slow egress, and `cropped=false`
+      // was silently defeating the resize).
       let croppedUri: string | undefined;
+      let framed = false;
       if (BACKEND_FIRST) {
         const crop = computeFrameCrop(photo.width, photo.height);
-        if (crop) {
-          try {
-            // Crop to the frame, then cap the long edge at ~2000px and encode at 0.8.
-            // Cloud Vision + Haiku read small print fine at this size, and the upload —
-            // the only thing the operator waits on — is several times smaller/faster than
-            // a full-res lossless JPEG (audit §1.4). Resize runs AFTER the crop, so the
-            // width bound is relative to the cropped image.
-            const cropped = await ImageManipulator.manipulateAsync(
-              photo.uri,
-              [{ crop }, { resize: { width: Math.min(crop.width, 2000) } }],
-              { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG }
-            );
-            croppedUri = cropped.uri;
-          } catch (e) {
-            console.warn('Immediate frame crop failed; full image will be used:', e);
-          }
+        if (!crop) {
+          // Why `framed=false` happens — almost always an orientation mismatch between the
+          // photo buffer and the portrait preview. Dev-only diagnostic (dimensions only).
+          logLatency('frame_crop_skipped', {
+            photo: `${photo.width}x${photo.height}`,
+            screen: `${Math.round(SCREEN_WIDTH)}x${Math.round(SCREEN_HEIGHT)}`,
+          });
+        }
+        const srcW = crop ? crop.width : photo.width;
+        const srcH = crop ? crop.height : photo.height;
+        // Cap the LONGER side so portrait OR landscape buffers both shrink.
+        const resize =
+          srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
+        try {
+          const out = await ImageManipulator.manipulateAsync(
+            photo.uri,
+            crop ? [{ crop }, { resize }] : [{ resize }],
+            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+          );
+          croppedUri = out.uri;
+          framed = crop != null;
+        } catch (e) {
+          console.warn('Immediate crop/resize failed; full image will be used:', e);
         }
       }
 
+      const capturedAt = new Date().toISOString();
+      const barcodeRaw = lastBarcodeRef.current?.data;
       setPending({
         uri: photo.uri,
         width: photo.width,
         height: photo.height,
         croppedUri,
-        barcodeRaw: lastBarcodeRef.current?.data,
-        capturedAt: new Date().toISOString(),
+        framed,
+        barcodeRaw,
+        capturedAt,
       });
       setFrameState('ready');
+
+      // Tier 1 — fire the upload + extraction NOW (in the background), while the operator
+      // reviews the photo. By the time they tap Valider the result is often already in, so
+      // the perceived wait (measured from Valider) collapses. Inputs (crop + barcode) are
+      // all known here; submitCapture never throws (it returns a typed outcome).
+      if (BACKEND_FIRST) {
+        const submitUri = croppedUri ?? photo.uri;
+        const startedAt = Date.now();
+        speculativeRef.current = {
+          startedAt,
+          promise: submitCapture({ fileUri: submitUri, barcodeRaw, capturedAt }).then(
+            (outcome) => ({ outcome, finishedAt: Date.now() }),
+          ),
+        };
+      }
     } catch (err) {
       console.error('Capture error:', err);
       if (mountedRef.current) {
@@ -269,6 +305,7 @@ export function CameraScreen() {
   const retake = useCallback(() => {
     setPending(null);
     lastBarcodeRef.current = null;
+    speculativeRef.current = null; // Tier 1: abandon the speculative ingestion (harmless)
     setFrameState('ready');
   }, []);
 
@@ -282,20 +319,46 @@ export function CameraScreen() {
       // backend_first: use the already-cropped frame photo (cropped on capture),
       // fallback to the full image if immediate crop failed.
       if (BACKEND_FIRST) {
-        let submitUri = pending.croppedUri ?? pending.uri;
-        const submittedAt = Date.now(); // T0 for the perceived-wait measurement
-        const outcome = await submitCapture({
-          fileUri: submitUri,
-          barcodeRaw: pending.barcodeRaw,
-          capturedAt: pending.capturedAt,
-        });
+        const submitUri = pending.croppedUri ?? pending.uri;
+        // Tier 1: the upload almost always started at capture. The PERCEIVED wait starts
+        // HERE, at Valider — that's the T0 handed to Review (wait_ms). Consume the
+        // speculative result; only submit now if there was none or it failed.
+        const validatedAt = Date.now();
+        const spec = speculativeRef.current;
+        speculativeRef.current = null;
+        const specResult = spec ? await spec.promise : null;
+
+        let outcome: SubmitOutcome;
+        let uploadMs: number;
+        let speculative = false;
+        if (specResult && specResult.outcome.kind === 'succeeded') {
+          outcome = specResult.outcome;
+          uploadMs = specResult.finishedAt - spec!.startedAt;
+          speculative = true;
+        } else {
+          // No speculative submit, or it failed — submit now (the operator wants it sent).
+          const freshStart = Date.now();
+          outcome = await submitCapture({
+            fileUri: submitUri,
+            barcodeRaw: pending.barcodeRaw,
+            capturedAt: pending.capturedAt,
+          });
+          uploadMs = Date.now() - freshStart;
+        }
+
         if (outcome.kind === 'succeeded') {
-          // Cascade: do NOT block on extraction here. The upload is the only thing the
-          // operator waited for — hand off to Review immediately. Review decodes the GS1
-          // barcode for the T+0 fields (lot, DLC) and polls the OCR/LLM result itself
-          // (useIngestionResult), filling the rest in place. This replaces the old
-          // full-screen spinner that froze the UI for the whole server round-trip.
-          logLatency('capture', { upload_ms: Date.now() - submittedAt, replayed: String(outcome.replayed) });
+          // Cascade: do NOT block on extraction here. Hand off to Review immediately — it
+          // decodes the GS1 barcode for the T+0 fields (lot, DLC) and polls the OCR/LLM
+          // result itself (useIngestionResult), filling the rest in place.
+          logLatency('capture', {
+            upload_ms: uploadMs,
+            // Tier 1 proof: how long the photo was ALREADY being processed (uploaded +
+            // extracted) before the operator tapped Valider — i.e. the recovered overlap.
+            overlap_ms: spec ? validatedAt - spec.startedAt : 0,
+            replayed: String(outcome.replayed),
+            speculative: String(speculative),
+            framed: String(pending.framed === true), // false = frame crop failed (image still resized)
+          });
           if (!mountedRef.current) return;
           setPending(null);
           navigation.push('Review', {
@@ -304,7 +367,7 @@ export function CameraScreen() {
             photoUri: submitUri, // the cropped image actually sent for extraction
             barcodeRaw: pending.barcodeRaw,
             capturedAt: pending.capturedAt,
-            submittedAt,
+            submittedAt: validatedAt,
           });
           return;
         } else {
@@ -327,33 +390,17 @@ export function CameraScreen() {
         return; // backend_first path complete (finally still runs)
       }
 
-      // Legacy on-device OCR: crop the fixed zone (screen proportions mapped to the
-      // photo resolution), then OCR it — same crop math as before.
-      const scaleX = pending.width / SCREEN_WIDTH;
-      const scaleY = pending.height / SCREEN_HEIGHT;
-      const cropped = await ImageManipulator.manipulateAsync(
-        pending.uri,
-        [
-          {
-            crop: {
-              originX: Math.floor(ZONE_LEFT * scaleX),
-              originY: Math.floor(ZONE_TOP * scaleY),
-              width: Math.floor(ZONE_WIDTH * scaleX),
-              height: Math.floor(ZONE_HEIGHT * scaleY * 2.5),
-            },
-          },
-        ],
-        { compress: 0.9, format: ImageManipulator.SaveFormat.JPEG }
-      );
-      const ocrText = await extractTextFromImage(cropped.uri);
+      // Legacy on-device OCR REMOVED (audit §7.3): it called Google Vision straight
+      // from the device with an EXPO_PUBLIC_* key — extractable from any built APK
+      // (Expo inlines those vars into the JS bundle; even a lazy import would keep
+      // the key in the bundle). Extraction is server-side only; this branch is only
+      // reachable with the unsupported EXPO_PUBLIC_BACKEND_FIRST=false opt-out.
       if (!mountedRef.current) return;
       setPending(null);
-      navigation.push('Review', {
-        photoUri: pending.uri,
-        ocrText,
-        barcodeValue: pending.barcodeRaw,
-        capturedAt: pending.capturedAt,
-      });
+      Alert.alert(
+        'Mode hors serveur indisponible',
+        'L’analyse d’étiquette sur l’appareil a été retirée pour des raisons de sécurité. Réactivez le mode backend (EXPO_PUBLIC_BACKEND_FIRST).'
+      );
     } catch (err) {
       console.error('Submit/OCR error:', err);
       if (mountedRef.current) {

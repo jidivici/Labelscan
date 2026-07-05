@@ -119,6 +119,31 @@ export async function saveBackendArticle(input: SaveBackendArticleInput): Promis
   return saved;
 }
 
+// ─── Update an existing article (in-place human correction from the detail screen) ──
+
+/**
+ * Apply human edits to an already-saved article: replace its fields and RE-RECORD the
+ * save (fresh `saved_at`, and `saved_by` = the editor) so the record reflects who last
+ * touched it. Same id ⇒ store.put overwrites the existing record in place (O(1)); the
+ * authoritative backend override is pushed separately (submitFieldOverrides). Returns the
+ * updated article, or null if it no longer exists.
+ */
+export async function updateBackendArticle(
+  id: string,
+  patch: { fields: ArticleField[]; saved_by?: string | null },
+): Promise<Article | null> {
+  const existing = await store.getById(id);
+  if (!existing) return null;
+  const updated: Article = {
+    ...existing,
+    fields: patch.fields,
+    saved_at: new Date().toISOString(),
+    saved_by: patch.saved_by !== undefined ? patch.saved_by : existing.saved_by,
+  };
+  await store.put(updated);
+  return updated;
+}
+
 // ─── Delete an article ────────────────────────────────────────────────────────
 
 export async function deleteArticle(id: string): Promise<void> {

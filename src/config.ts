@@ -1,10 +1,10 @@
 /**
  * App configuration — read from Expo public env vars (`process.env.EXPO_PUBLIC_*`,
- * inlined at build time). Mirrors the existing pattern used by src/services/ocr.ts.
+ * inlined at build time).
  *
- * Nothing secret lives here. The dev-auth values below are a TEMPORARY seam (see
- * src/services/api.ts) and must never carry a privileged production identity —
- * they are sourced from env only, with no hardcoded defaults.
+ * Nothing secret lives here — and nothing secret CAN live here: EXPO_PUBLIC_* values
+ * are baked into the JS bundle and extractable from any build (which is why the
+ * legacy on-device OCR key was removed, audit §7.3).
  */
 
 /**
@@ -14,9 +14,10 @@
 export const API_BASE_URL: string = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim();
 
 /**
- * Capture path selector. Backend extraction is the DEFAULT saved-article path;
- * legacy on-device OCR is a fallback only when explicitly opted out via
- * EXPO_PUBLIC_BACKEND_FIRST=false (or 0). Missing / any other value => backend mode.
+ * Capture path selector. Backend extraction is the DEFAULT saved-article path.
+ * EXPO_PUBLIC_BACKEND_FIRST=false (or 0) is an UNSUPPORTED opt-out: the legacy
+ * on-device OCR was removed (audit §7.3), so the camera now refuses to submit in
+ * that mode. Missing / any other value => backend mode.
  */
 function backendFirstFromEnv(value: string | undefined): boolean {
   const v = (value ?? '').trim().toLowerCase();

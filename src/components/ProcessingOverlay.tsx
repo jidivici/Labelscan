@@ -5,7 +5,8 @@
  */
 
 import React from 'react';
-import { View, Text, StyleSheet, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, Modal } from 'react-native';
+import { PulseDot } from './PulseDot';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 
 interface ProcessingOverlayProps {
@@ -23,7 +24,7 @@ export function ProcessingOverlay({
     <Modal transparent animationType="fade" visible={visible}>
       <View style={styles.scrim}>
         <View style={styles.card}>
-          <ActivityIndicator size="large" color={colors.primary} />
+          <PulseDot size={18} />
           <Text style={[typography.titleMedium, styles.title]}>{message}</Text>
           {subtitle ? (
             <Text style={[typography.bodySmall, styles.subtitle]}>{subtitle}</Text>

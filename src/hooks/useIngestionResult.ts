@@ -24,11 +24,25 @@ export interface IngestionResultState {
   phase: IngestionPhase;
   ingestion: IngestionStatusResponse | null;
   run: ExtractionRunResponse | null;
+  /**
+   * Tier 3 wave 2 — deterministic preview values by field name, shown while the LLM
+   * is still running (phase 'loading'). Non-authoritative: the run's fields replace
+   * them at 'ready'; callers must never persist these.
+   */
+  interimValues: Record<string, string>;
+  /** True once the backend reported the real `ocr_done` transit — drives the banner. */
+  ocrDone: boolean;
   /** Operator-facing reason, set only for the 'error' phase. */
   message?: string;
 }
 
-const LOADING: IngestionResultState = { phase: 'loading', ingestion: null, run: null };
+const LOADING: IngestionResultState = {
+  phase: 'loading',
+  ingestion: null,
+  run: null,
+  interimValues: {},
+  ocrDone: false,
+};
 
 export function useIngestionResult(ingestionId: string | null | undefined): IngestionResultState {
   const [state, setState] = useState<IngestionResultState>(LOADING);
@@ -40,7 +54,22 @@ export function useIngestionResult(ingestionId: string | null | undefined): Inge
     setState(LOADING);
 
     (async () => {
-      const result = await pollIngestionUntilReady(ingestionId, { signal: controller.signal });
+      const result = await pollIngestionUntilReady(ingestionId, {
+        signal: controller.signal,
+        // Wave 2 (Tier 3): the OCR finished server-side — surface the deterministic
+        // preview values NOW (the LLM is still running) and flip the banner to its
+        // real 'llm' stage. Still phase 'loading': nothing here is editable/saveable.
+        onInterim: (ingestion) => {
+          if (!active) return;
+          const interimValues: Record<string, string> = {};
+          for (const f of ingestion.interim_fields ?? []) {
+            interimValues[f.field_name] = f.value;
+          }
+          setState((prev) =>
+            prev.phase === 'loading' ? { ...prev, interimValues, ocrDone: true } : prev,
+          );
+        },
+      });
       if (!active) return;
 
       if (result.kind === 'review_ready') {
@@ -76,17 +105,32 @@ export function useIngestionResult(ingestionId: string | null | undefined): Inge
             run = null;
           }
         }
-        if (active) setState({ phase: 'ready', ingestion: result.ingestion, run });
+        if (active)
+          setState({
+            phase: 'ready',
+            ingestion: result.ingestion,
+            run,
+            // The run's fields are now the truth — the wave-2 preview is superseded.
+            interimValues: {},
+            ocrDone: true,
+          });
         return;
       }
 
       if (result.kind === 'aborted') return; // unmounted / id changed — keep last state
       if (result.kind === 'failed') {
-        setState({ phase: 'failed', ingestion: null, run: null });
+        setState({ phase: 'failed', ingestion: null, run: null, interimValues: {}, ocrDone: false });
       } else if (result.kind === 'timeout') {
-        setState({ phase: 'timeout', ingestion: null, run: null });
+        setState({ phase: 'timeout', ingestion: null, run: null, interimValues: {}, ocrDone: false });
       } else {
-        setState({ phase: 'error', ingestion: null, run: null, message: result.message });
+        setState({
+          phase: 'error',
+          ingestion: null,
+          run: null,
+          interimValues: {},
+          ocrDone: false,
+          message: result.message,
+        });
       }
     })();
 

@@ -17,13 +17,21 @@ export interface CreateIngestionResponse {
   correlation_id: string;
 }
 
-/** Lifecycle status of an ingestion / outcome of an extraction run. */
+/** Lifecycle status of an ingestion / outcome of an extraction run — mirror of the
+ * server's 12-state machine (ingestion/domain/status.py). */
 export type IngestionStatus =
   | 'raw_stored'
-  | 'extracted'
-  | 'needs_review'
+  | 'ocr_running'
+  | 'ocr_done' // Tier 3 transit: OCR finished, LLM running — interim_fields may be present
+  | 'ocr_failed'
   | 'ocr_skipped_garbage' // OCR-quality gate skipped the LLM (illegible image) → review
-  | 'extraction_failed';
+  | 'extraction_running'
+  | 'extracted'
+  | 'extraction_failed'
+  | 'needs_review'
+  | 'confirmed' // reviewer finalized (P3) — a replayed scan of a reviewed label lands here
+  | 'rejected'
+  | 'halted_missing_context';
 
 /** Summary of one extraction attempt (append-only; the newest is `is_latest`). */
 export interface ExtractionRunSummary {
@@ -52,6 +60,19 @@ export interface IngestionStatusResponse {
    * 2nd GET /extraction-runs round-trip (audit §1.3). Null/absent until a run exists.
    */
   latest_fields?: ExtractionField[] | null;
+  /**
+   * Tier 3 wave 2 — deterministic (regex) preview fields written between OCR and LLM.
+   * Present ONLY while no run exists (status ocr_done); the final run supersedes them.
+   */
+  interim_fields?: InterimField[] | null;
+}
+
+/** One wave-2 preview field (server InterimFieldView). Non-authoritative. */
+export interface InterimField {
+  field_name: string;
+  value: string;
+  source: string; // 'deterministic'
+  created_at: string;
 }
 
 /** Per-field validation status (extraction.v1). */
