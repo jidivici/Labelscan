@@ -382,7 +382,13 @@ export function ArticleListScreen() {
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={
           articles.length === 0 ? (
-            <EmptyState onCapture={openCapture} />
+            // Never show the big "no articles, scan a label" empty state while a
+            // scan is already "en cours" (rendered above via ListHeaderComponent) —
+            // that would contradict the section right above it. The list is simply
+            // empty below the pending zone until the first arrivage is validated.
+            pendingScans.length === 0 ? (
+              <EmptyState onCapture={openCapture} />
+            ) : null
           ) : (
             <View style={styles.noResults}>
               <MaterialCommunityIcons name="magnify-close" size={40} color={colors.onSurfaceVariant} />
