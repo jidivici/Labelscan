@@ -145,10 +145,12 @@ soit un nouveau cycle de sondage (`retryScan` sur `extract_error`).
 > `edits` optionnel qui prime dans les deux sens (une saisie remplit, un champ vidé dé-remplit).
 > La jauge avance donc à chaque retour de revue, au fil de la session de saisie.
 >
-> **Suppression** : toute carte non-erreur porte une **corbeille discrète** (à droite de la jauge) —
-> un scan « à compléter », « à valider » ou même encore en extraction peut être supprimé sans ouvrir
-> la revue (confirmation ; le message signale la perte du brouillon s'il existe). Les cartes en
-> erreur gardent leurs boutons Réessayer/Supprimer.
+> **Suppression uniforme (v2.1) = swipe gauche.** Chaque carte « En cours » se supprime par un
+> **glissement vers la gauche révélant Supprimer** — exactement le même geste que les fiches
+> articles (`ArticleCard` : Pan gesture, seuil −60, révélateur rouge 80 px). Actif sur TOUS les
+> états (une photo ratée se supprime même pendant l'extraction) ; confirmation systématique, le
+> message signale la perte du brouillon s'il existe. Les cartes en erreur gardent le bouton
+> « Réessayer » ; leur suppression passe aussi par le swipe.
 
 - **`scanSteps.ts`** ([`services/scanSteps.ts`](../../src/services/scanSteps.ts)) : mapping **pur**
   `scanStepFromStatus(status, ocrDone)` → 3 étapes (Photo envoyée / Extraction / À valider) +
@@ -225,6 +227,25 @@ Règles de conformité :
 
 Couvert par [`__tests__/allergenSuggestions.test.ts`](../../src/__tests__/allergenSuggestions.test.ts).
 
+### Autocomplétion par champ depuis l'historique (v2.1)
+
+[`services/fieldHistory.ts`](../../src/services/fieldHistory.ts) — les valeurs **récurrentes**
+d'une criée (espèces, producteurs, zones FAO, marques sanitaires…) se resaisissent en un tap :
+
+- **Source = les articles enregistrés** (`getAllArticles`, vérité validée par un humain) — jamais
+  une valeur machine ni calculée. Index construit au mount de la revue (`buildFieldHistory`) :
+  dédup par forme normalisée (accents/casse — `normalize` partagé avec l'omni-recherche), casse de
+  l'occurrence la plus récente, tri **fréquence puis récence**.
+- **9 champs concernés** (`HISTORY_FIELDS`) : désignation commerciale, nom scientifique,
+  producteur, marque revendeur, méthode de production, engin/méthode d'élevage, zone FAO, pays
+  d'origine, marque sanitaire. **Exclus** : lot/dates/GTIN (uniques par arrivage), poids/temp/prix
+  (inputs à affixe), allergènes (suggestion conformité Annexe II dédiée, inchangée).
+- **UX** : jusqu'à 3 **chips neutres** (icône horloge) sous le champ, uniquement quand il est
+  **focalisé** ; champ vide → top 3, sinon complétion **préfixe puis substring** ; la valeur déjà
+  saisie n'est jamais re-suggérée. Tap → remplit le champ = **édition humaine** (même chemin que la
+  frappe ; gate anti-fabrication intact). Couvert par
+  [`__tests__/fieldHistory.test.ts`](../../src/__tests__/fieldHistory.test.ts).
+
 ### Aide à la saisie des dates (`expiry_date` / `packaging_date`)
 
 Clavier numérique (`number-pad`) + masque **DD/MM/YYYY** (insertion auto du `/`) —
@@ -281,7 +302,7 @@ retirée avec ce chemin — audit §7.3.)
 
 ## 9. Tests
 
-`npx jest --config jest.config.js` (ts-jest, environnement node) — 20 suites, **187 tests** ;
+`npx jest --config jest.config.js` (ts-jest, environnement node) — 21 suites, **193 tests** ;
 notables : `scanQueue` (transitions, cap de sondages, hydratation/réconciliation, dédoublonnage,
 nettoyage photo, **`saveScanEdits` persiste + ré-hydrate le brouillon**), `ingestionResult`,
 `scanSteps` (mapping 5 statuts × `ocrDone`), `fieldCompleteness` (**`filledCountFromValues` = verrou

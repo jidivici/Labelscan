@@ -8,8 +8,9 @@
 import type { Article } from '../types/Article';
 import { productionMethodFr } from './fieldLabels';
 
-/** Lowercase + strip NFD combining accents (so "cabillaud" matches "Cabillaud"). */
-function normalize(s: string): string {
+/** Lowercase + strip NFD combining accents (so "cabillaud" matches "Cabillaud").
+ *  Exported: fieldHistory reuses the exact same matching rule for its suggestions. */
+export function normalize(s: string): string {
   let out = '';
   for (const ch of s.toLowerCase().normalize('NFD')) {
     const c = ch.charCodeAt(0);

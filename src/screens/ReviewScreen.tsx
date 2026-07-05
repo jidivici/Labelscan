@@ -26,9 +26,10 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
-import { saveBackendArticle } from '../services/storage';
+import { saveBackendArticle, getAllArticles } from '../services/storage';
 import { FIELD_ORDER } from '../services/fieldOrder';
 import { suggestAllergen } from '../services/allergenSuggestions';
+import { buildFieldHistory, suggestForField, type FieldHistory } from '../services/fieldHistory';
 import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
 import { enqueueConfirmIngestion } from '../services/outbox';
 import { drainOutbox } from '../services/outboxDrain';
@@ -257,6 +258,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   draft,
   onChange,
   suggestion,
+  history,
 }: {
   field: ExtractionField;
   draft: string;
@@ -264,6 +266,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // React.memo, a keystroke then re-renders ONLY the edited row (audit §7.1).
   onChange: (name: string, text: string) => void;
   suggestion?: string | null;
+  /** Per-field autocomplete history (workflow v2.1) — STABLE reference, built once. */
+  history?: FieldHistory | null;
 }) {
   // "À compléter" highlight is REACTIVE to the live draft (not the server value): an
   // empty field is highlighted BLUE, and the highlight vanishes the instant it's filled.
@@ -277,6 +281,15 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // formats the digits the operator reads off the label — it never computes a date.
   const isDate = isDateField(field.field_name);
   const handleChange = (text: string) => emit(isDate ? maskDate(text) : text);
+  // History autocomplete (workflow v2.1): chips shown ONLY while this row's input is
+  // focused, so the 16 other rows never render suggestion clutter. suggestForField
+  // returns [] for non-history fields (dates, lot, gtin, affix inputs) — no per-field
+  // wiring needed here. Applying a chip goes through emit → a HUMAN edit, exactly like
+  // typing it (no-fabrication gate untouched).
+  const [focused, setFocused] = useState(false);
+  const historySuggestions =
+    focused && history ? suggestForField(history, field.field_name, draft) : [];
+
   // Real-time, NEUTRAL, non-blocking validity hint (Clean UI: no red, never blocks the
   // save). Computed from the live draft so it updates as the operator types; null while
   // the value is empty, valid, or still being typed.
@@ -305,6 +318,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         <TextInput
           value={draft}
           onChangeText={handleChange}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
           keyboardType={isDate ? 'number-pad' : 'default'}
           maxLength={isDate ? 10 : undefined}
           placeholder={isDate ? 'JJ/MM/AAAA' : empty ? 'Saisir la valeur' : 'Valeur extraite'}
@@ -321,6 +336,25 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         />
       )}
       {hint ? <Text style={[typography.labelSmall, styles.inputHint]}>{hint}</Text> : null}
+      {historySuggestions.length > 0 ? (
+        <View style={styles.historyChipsRow}>
+          {historySuggestions.map((value) => (
+            <Pressable
+              key={value}
+              onPress={() => emit(value)}
+              style={styles.historyChip}
+              android_ripple={{ color: colors.primaryContainer }}
+              accessibilityRole="button"
+              accessibilityLabel={`Utiliser ${value}`}
+            >
+              <MaterialCommunityIcons name="history" size={13} color={colors.onSurfaceVariant} />
+              <Text style={[typography.labelSmall, styles.historyChipText]} numberOfLines={1}>
+                {value}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+      ) : null}
       {showSuggestion ? (
         <Pressable
           onPress={() => emit(suggestion as string)}
@@ -391,6 +425,23 @@ export function ReviewScreen() {
 
   const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
   const fields = run?.fields ?? [];
+
+  // Per-field autocomplete history (workflow v2.1): built ONCE at mount from the saved
+  // articles (validated truth). A stable reference — rows recompute their own chips
+  // from it, React.memo stays effective. Best-effort: a storage hiccup just means no
+  // suggestions this session.
+  const [fieldHistory, setFieldHistory] = useState<FieldHistory | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getAllArticles()
+      .then((articles) => {
+        if (!cancelled) setFieldHistory(buildFieldHistory(articles));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Instrumentation (dev only): the photo→ready latency (docs/LATENCY-REVIEW.md §6),
   // measured from the scan's creation (workflow v1 — there is no more "Valider tap"
@@ -643,6 +694,7 @@ export function ReviewScreen() {
                       draft={effectiveValues[name]}
                       onChange={handleFieldChange}
                       suggestion={name === 'allergens' ? allergenSuggestion : undefined}
+                      history={fieldHistory}
                     />
                   );
                 }
@@ -801,6 +853,30 @@ const styles = StyleSheet.create({
   },
   suggestionChipText: {
     color: colors.onPrimaryContainer,
+  },
+  // History autocomplete chips (workflow v2.1) — quieter than the allergen compliance
+  // chip (neutral surface, no accent border): these are recall aids, not guidance.
+  historyChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+  },
+  historyChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    maxWidth: '100%',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surfaceContainer,
+  },
+  historyChipText: {
+    color: colors.onSurface,
+    flexShrink: 1,
   },
   // Unit-affix inputs (weight: [amount] kg/g ; temperature: [min] – [max] °C).
   affixRow: {
