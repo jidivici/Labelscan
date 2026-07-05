@@ -391,8 +391,9 @@ caler le seuil V2 sur la vraie durée OCR.
 ### P4 — Scale local mobile (au moment des tests device réels)
 - [ ] **`SqliteArticleStore`** (expo-sqlite, colonnes indexées + FTS5) derrière le port
   `ArticleStore` déjà en place ; migration AsyncStorage→SQLite au 1er lancement. Effort : M.
-- [ ] **Autocomplétion par champ depuis l'historique** (espèce/producteur/FAO) — étape 5
-  du Fix 5. Effort : S-M.
+- [x] **Autocomplétion par champ depuis l'historique** (espèce/producteur/FAO) — étape 5
+  du Fix 5. ✅ LIVRÉ (6 juillet 2026, workflow v2.1 — `services/fieldHistory.ts`, chips au
+  focus dans la revue ; voir §🔁 v2.1 en fin de document).
 
 ### P5 — Industrialisation prod (avant mise en service réelle)
 - [ ] Postgres managé + backups ; stockage objet (S3-compatible) pour le raw store ;
@@ -537,6 +538,31 @@ d'une carte non-erreur** : corbeille discrète sur les cartes extracting/ready (
 
 **Reste (checklist device, app lancée) :** photo à l'endroit partout (revue/détail/vignette/
 visionneuse) + photos legacy en portrait tolérées ; brouillon partiel restauré après aller-retour ;
-bouton « Compléter (n/17) » désactivé jusqu'à 17/17 puis « Enregistrer l'arrivage » → article compté ;
-**Volume+ ET Volume−** prennent une photo de façon fiable (un appui = un tir, pas de boucle, HUD
-masqué) après rebuild natif.
+bouton « Compléter (n/17) » désactivé jusqu'à 17/17 puis « Enregistrer l'arrivage » → article compté.
+(La ligne volume de cette checklist est caduque — déclencheur abandonné en v2.1, voir ci-dessous.)
+
+---
+
+## 🔁 Workflow v2.1 — abandon volume, autocomplétion historique, suppression en swipe (6 juillet 2026)
+
+① **Déclencheur touches volume ABANDONNÉ** (décision utilisateur) : sur device les touches +/-
+continuaient de contrôler le son → comportement imprévisible. Tout est retiré :
+`services/volumeShutter.ts` supprimé, câblage `CameraScreen` enlevé, dépendance
+`react-native-volume-manager` désinstallée. Le déclenchement = bouton à l'écran uniquement.
+
+② **Autocomplétion par champ depuis l'historique** (P4/Fix 5 étape 5 — LIVRÉ) :
+`services/fieldHistory.ts` (pur, 6 tests) — index construit depuis les articles ENREGISTRÉS
+(vérité humaine, jamais une valeur machine) : dédup normalisée (`normalize` exporté
+d'`articleSearch`), casse la plus récente, tri fréquence>récence ; `suggestForField` (préfixe >
+substring, valeur déjà saisie exclue, max 3). Revue : chips neutres (icône horloge) sous le champ
+**focalisé** uniquement (9 champs récurrents ; allergènes exclu — suggestion Annexe II dédiée
+inchangée) ; tap = édition humaine. Gros gain de vitesse vers le 17/17.
+
+③ **Suppression uniforme = swipe gauche** : `PendingScanCard` réplique le geste d'`ArticleCard`
+(Pan `activeOffsetX ±10`, borne −80, seuil −60, révélateur rouge « Supprimer », confirmation avec
+mention du brouillon) sur TOUS les états ; l'icône corbeille (v2) et le bouton texte « Supprimer »
+des cartes erreur sont retirés — un seul geste de suppression dans toute l'app.
+
+**Vérifié** : typecheck 0 erreur, **193 jest verts** (21 suites, +6 `fieldHistory`). Backend inchangé.
+**Reste (device)** : swipe gauche carte en cours (tous états) ; chips au focus espèce/producteur/FAO,
+tap → champ rempli ; plus aucun effet des touches volume dans la caméra.

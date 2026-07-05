@@ -48,7 +48,6 @@ import { FrameOverlay, FrameState } from '../components/FrameOverlay';
 import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
 import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
-import { registerVolumeShutter } from '../services/volumeShutter';
 import { logLatency } from '../services/latencyLog';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -295,19 +294,6 @@ export function CameraScreen() {
       }
     })();
   }, [taking]);
-
-  // ── Hardware volume button (−/+) as a shutter ──────────────────────────────
-  // Registered ONCE per focus; a ref forwards to the latest takePhoto so the listener
-  // is not re-armed on every capture. No-op until the dev client is rebuilt with
-  // react-native-volume-manager (the service guards a missing native module).
-  const takePhotoRef = useRef(takePhoto);
-  takePhotoRef.current = takePhoto;
-  useEffect(() => {
-    if (!isFocused) return;
-    return registerVolumeShutter(() => {
-      void takePhotoRef.current();
-    });
-  }, [isFocused]);
 
   // ── Barcode detected — store for the next capture, no auto-shoot ───────────
   const handleBarcodeScanned = useCallback(
