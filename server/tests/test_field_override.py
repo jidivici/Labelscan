@@ -163,6 +163,7 @@ def test_repeated_identical_override_is_idempotent(client, engine, ingestion_id)
 
 
 def test_gs1_owned_field_cannot_be_overridden(client, ingestion_id):
+    # Without the explicit force_gs1 flag the historical contract is unchanged.
     r = client.patch(
         f"/v1/ingestions/{ingestion_id}/fields/batch_number",
         json={"value": "TAMPERED"},
@@ -170,6 +171,75 @@ def test_gs1_owned_field_cannot_be_overridden(client, ingestion_id):
     )
     assert r.status_code == 409
     assert r.json()["error_code"] == "FIELD_NOT_EDITABLE"
+
+
+def test_gs1_override_with_force_appends_human_run(client, engine, ingestion_id):
+    # Workflow v1: the operator may correct a barcode-derived field, but only under
+    # the explicit flag — append-only, source='human', dedicated audit action.
+    r = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/batch_number",
+        json={"value": "LOT-CORRIGE-7", "force_gs1": True},
+        headers={"Idempotency-Key": "g1", **REVIEW},
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["value"] == "LOT-CORRIGE-7"
+    assert body["source"] == "human"
+
+    # Append-only: the machine value is retained on the original run.
+    lots = _field_by_run(engine, ingestion_id, "batch_number")
+    assert lots[0][2] != "human"
+    assert lots[-1] == (lots[-1][0], "LOT-CORRIGE-7", "human")
+
+    # The anomaly is queryable in the audit trail under its own action.
+    with engine.connect() as c:
+        action = c.execute(
+            text(
+                "SELECT action FROM audit.audit_log "
+                "WHERE subject_table = 'extraction_run' AND subject_id = :rid"
+            ),
+            {"rid": body["run_id"]},
+        ).scalar_one()
+    assert action == "ingestion.gs1_field_overridden"
+
+
+def test_gs1_override_force_is_idempotent(client, engine, ingestion_id):
+    body = {"value": "LOT-REPLAY", "force_gs1": True}
+    first = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/batch_number",
+        json=body,
+        headers={"Idempotency-Key": "g2", **REVIEW},
+    )
+    assert first.status_code == 200 and first.json()["replayed"] is False
+    runs_after_first = len(_runs(engine, ingestion_id))
+
+    second = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/batch_number",
+        json=body,
+        headers={"Idempotency-Key": "g2", **REVIEW},
+    )
+    assert second.status_code == 200
+    assert second.json()["replayed"] is True
+    assert len(_runs(engine, ingestion_id)) == runs_after_first
+
+
+def test_force_flag_is_noop_on_regular_fields(client, engine, ingestion_id):
+    # force_gs1 on a non-GS1 field changes nothing: ordinary audit action, normal path.
+    r = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/FAO_area",
+        json={"value": "37.1", "force_gs1": True},
+        headers={"Idempotency-Key": "g3", **REVIEW},
+    )
+    assert r.status_code == 200, r.text
+    with engine.connect() as c:
+        action = c.execute(
+            text(
+                "SELECT action FROM audit.audit_log "
+                "WHERE subject_table = 'extraction_run' AND subject_id = :rid"
+            ),
+            {"rid": r.json()["run_id"]},
+        ).scalar_one()
+    assert action == "ingestion.field_overridden"
 
 
 def test_override_requires_review_scope(client, ingestion_id):

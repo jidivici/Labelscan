@@ -157,10 +157,20 @@ paths:
               properties:
                 value: { description: "Corrected value (type depends on field); null to clear" }
                 note:  { type: string, nullable: true }
+                force_gs1:
+                  type: boolean
+                  default: false
+                  description: >
+                    Explicit acknowledgement required to override a GS1-owned
+                    (barcode-derived) field: batch_number, expiry_date, weight, gtin,
+                    packaging_date. Without it those fields return 409
+                    FIELD_NOT_EDITABLE (historical contract unchanged). With it, the
+                    override is append-only (source='human') and recorded in the audit
+                    trail under the dedicated action `ingestion.gs1_field_overridden`.
       responses:
         '200': { content: { application/json: { schema: { $ref: '#/components/schemas/ExtractedField' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/IngestionInvalidState' }   # e.g. already confirmed
+        '409': { $ref: '#/components/responses/IngestionInvalidState' }   # GS1-owned sans force_gs1 (FIELD_NOT_EDITABLE), ou état invalide
 
   /v1/ingestions/{id}/confirm:
     post:

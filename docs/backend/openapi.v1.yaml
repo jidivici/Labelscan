@@ -139,7 +139,7 @@ paths:
         - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [value], properties: { value: {}, note: { type: string } } } } }
+        content: { application/json: { schema: { type: object, required: [value], properties: { value: {}, note: { type: string }, force_gs1: { type: boolean, default: false, description: "Required to override a GS1-owned field (batch_number/expiry_date/weight/gtin/packaging_date); without it those fields return 409 FIELD_NOT_EDITABLE" } } } } }
       responses:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ExtractedField' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
