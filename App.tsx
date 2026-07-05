@@ -10,6 +10,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet } from 'react-native';
 
 import { registerOutboxDrainOnForeground } from './src/services/outboxDrain';
+import { initScanQueue, registerScanQueueLifecycle } from './src/services/scanQueue';
 import {
   useFonts,
   Inter_400Regular,
@@ -34,6 +35,14 @@ export default function App() {
   // starts or returns to the foreground — the moment connectivity most plausibly
   // came back. Server-side Idempotency-Key dedup makes replays safe.
   useEffect(() => registerOutboxDrainOnForeground(), []);
+
+  // Workflow v1: restore queued scans (they survive a restart) and let the queue
+  // pause/resume its polls with the app state.
+  useEffect(() => {
+    const unsubscribe = registerScanQueueLifecycle();
+    void initScanQueue();
+    return unsubscribe;
+  }, []);
 
   // Don't render until fonts are ready (prevents flash of unstyled text).
   // If font loading fails, render anyway — Inter will fall back to system font.

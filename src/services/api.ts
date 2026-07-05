@@ -288,19 +288,25 @@ export interface OverrideFieldResponse {
 /**
  * PATCH /v1/ingestions/{id}/fields/{name} — record a human-validated correction on the
  * AUTHORITATIVE backend store (append-only, source='human'). `value: null` clears the
- * field. GS1-owned fields (lot/DLC/weight/GTIN/packaging) are rejected server-side
- * (FIELD_NOT_EDITABLE / 409) — submit only human-editable fields. See audit §4.2.
+ * field. GS1-owned fields (lot/DLC/weight/GTIN/packaging) require the explicit
+ * `forceGs1` flag — without it the server answers FIELD_NOT_EDITABLE / 409; with it
+ * the override is audited under a dedicated action. See audit §4.2 + workflow v1.
  */
 export function overrideField(
   ingestionId: string,
   fieldName: string,
   value: string | null,
   note?: string,
-  options: RequestOptions = {},
+  options: RequestOptions & { forceGs1?: boolean } = {},
 ): Promise<OverrideFieldResponse> {
+  const { forceGs1, ...opts } = options;
   return apiRequest<OverrideFieldResponse>(
     `/v1/ingestions/${encodeURIComponent(ingestionId)}/fields/${encodeURIComponent(fieldName)}`,
-    { method: 'PATCH', body: { value, note }, ...options },
+    {
+      method: 'PATCH',
+      body: { value, note, ...(forceGs1 ? { force_gs1: true } : {}) },
+      ...opts,
+    },
   );
 }
 

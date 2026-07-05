@@ -22,6 +22,10 @@ import type { ArticleStore } from './articleStore';
 import { AsyncStorageArticleStore } from './articleStoreAsyncStorage';
 
 const PHOTOS_DIR = `${FileSystem.documentDirectory}photos/`;
+// Workflow v1: photos of scans still in the queue (not yet validated). Durable — the
+// ImageManipulator cache uri the camera hands over may be purged by the OS before the
+// operator reviews the scan. Owned by scanQueue.ts; swept of orphans at startup.
+const PENDING_DIR = `${FileSystem.documentDirectory}pending/`;
 
 // The active persistence engine. Default = per-key AsyncStorage (§7.2). SWAP POINT for a
 // future SqliteArticleStore (expo-sqlite, indexed + FTS5): inject it once at app init.
@@ -34,10 +38,79 @@ export function setArticleStore(next: ArticleStore): void {
 
 // ─── Ensure photos dir exists ────────────────────────────────────────────────
 
-async function ensurePhotosDirExists(): Promise<void> {
-  const dirInfo = await FileSystem.getInfoAsync(PHOTOS_DIR);
+async function ensureDirExists(dir: string): Promise<void> {
+  const dirInfo = await FileSystem.getInfoAsync(dir);
   if (!dirInfo.exists) {
-    await FileSystem.makeDirectoryAsync(PHOTOS_DIR, { intermediates: true });
+    await FileSystem.makeDirectoryAsync(dir, { intermediates: true });
+  }
+}
+
+/**
+ * Copy a photo into `dir` as `<name>.jpg` and verify the copy landed.
+ *  - COPY, not move: the source may still be displayed/uploaded from its original uri.
+ *  - Fixed ".jpg": the capture+crop pipeline always emits JPEG; deriving the extension
+ *    from an ImageManipulator cache uri is unreliable (silent persistence failure).
+ * Returns the destination uri, or null if the source is missing / the copy failed.
+ */
+async function persistPhotoInto(dir: string, name: string, srcUri: string): Promise<string | null> {
+  try {
+    await ensureDirExists(dir);
+    const src = await FileSystem.getInfoAsync(srcUri);
+    if (!src.exists) {
+      console.warn('Photo source missing at persist time:', srcUri);
+      return null;
+    }
+    const destPath = `${dir}${name}.jpg`;
+    await FileSystem.copyAsync({ from: srcUri, to: destPath });
+    const dest = await FileSystem.getInfoAsync(destPath);
+    if (!dest.exists) {
+      console.warn('Photo copy reported done but the file is missing:', destPath);
+      return null;
+    }
+    return destPath;
+  } catch (err) {
+    console.warn('Photo persist failed:', err);
+    return null;
+  }
+}
+
+// ─── Pending-scan photos (workflow v1 — owned by scanQueue) ─────────────────────
+
+/** Persist a captured photo durably for a queued scan. Null on failure. */
+export function persistPendingPhoto(scanId: string, srcUri: string): Promise<string | null> {
+  return persistPhotoInto(PENDING_DIR, scanId, srcUri);
+}
+
+/** Delete a pending photo. Idempotent, never throws. */
+export async function deletePendingPhoto(uri: string): Promise<void> {
+  // Only ever delete inside the pending dir (a failed persist can leave a scan
+  // pointing at its original cache uri — that one is the OS's to purge, not ours).
+  if (!uri.startsWith(PENDING_DIR)) return;
+  try {
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  } catch (err) {
+    console.warn('Pending photo delete failed:', err);
+  }
+}
+
+/**
+ * Startup sweep: delete every file in the pending dir that no queued scan references
+ * (crash between the photo copy and the queue write leaves an orphan). Never throws.
+ */
+export async function sweepPendingPhotos(referencedUris: readonly string[]): Promise<void> {
+  try {
+    const dirInfo = await FileSystem.getInfoAsync(PENDING_DIR);
+    if (!dirInfo.exists) return;
+    const referenced = new Set(referencedUris);
+    const names = await FileSystem.readDirectoryAsync(PENDING_DIR);
+    for (const name of names) {
+      const uri = `${PENDING_DIR}${name}`;
+      if (!referenced.has(uri)) {
+        await FileSystem.deleteAsync(uri, { idempotent: true });
+      }
+    }
+  } catch (err) {
+    console.warn('Pending photo sweep failed:', err);
   }
 }
 
@@ -68,35 +141,11 @@ export interface SaveBackendArticleInput {
 export async function saveBackendArticle(input: SaveBackendArticleInput): Promise<Article> {
   const id = uuidv4();
 
-  // Persist the captured photo into permanent storage.
-  //  - COPY, not move: the temp file is also the image shown in Review and the one
-  //    uploaded for extraction; moving it out from under those was fragile. The OS
-  //    purges the cache copy later.
-  //  - Fixed ".jpg" extension: the capture+crop pipeline always emits JPEG. Deriving
-  //    the extension from the cache URI (split('.').pop()) was unreliable —
-  //    ImageManipulator cache URIs are not guaranteed to end in ".jpg", which produced
-  //    a malformed destination path and a silent persistence failure (lost photo).
+  // Persist the captured photo into permanent storage (shared persistPhotoInto —
+  // copy + verify; a failure saves the article without photo rather than aborting).
   let photoUri: string | null = null;
   if (input.tempPhotoUri) {
-    try {
-      await ensurePhotosDirExists();
-      const src = await FileSystem.getInfoAsync(input.tempPhotoUri);
-      if (!src.exists) {
-        console.warn('Photo source missing at save time; saving without photo:', input.tempPhotoUri);
-      } else {
-        const permanentPath = `${PHOTOS_DIR}${id}.jpg`;
-        await FileSystem.copyAsync({ from: input.tempPhotoUri, to: permanentPath });
-        const dest = await FileSystem.getInfoAsync(permanentPath);
-        if (dest.exists) {
-          photoUri = permanentPath;
-        } else {
-          console.warn('Photo copy reported done but the file is missing:', permanentPath);
-        }
-      }
-    } catch (err) {
-      console.warn('Photo persist failed; saving article without photo:', err);
-      photoUri = null;
-    }
+    photoUri = await persistPhotoInto(PHOTOS_DIR, id, input.tempPhotoUri);
   }
 
   const saved: Article = {
