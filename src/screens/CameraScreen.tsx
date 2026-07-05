@@ -1,26 +1,23 @@
 /**
- * CameraScreen — Live viewfinder, barcode detect, manual capture, photo review.
+ * CameraScreen — Live viewfinder, barcode detect, chained capture (workflow v1).
  *
- * Flow: aim → tap shutter to TAKE a photo → REVIEW it (retake or validate) →
- * only on "Valider" is the image sent for extraction. Capture is manual only
- * (no auto-capture); the on-screen frame is BOTH the placement guide AND the crop
- * region — on validate the captured photo is cropped to the frame before it is
- * sent (with a safe fallback to the full image if the frame can't be mapped).
+ * Flow: aim → tap shutter → the photo is cropped and enqueued in the SCAN QUEUE
+ * (background submit + extraction) → the operator keeps shooting immediately, no
+ * modal, no wait. The on-screen frame is BOTH the placement guide AND the crop
+ * region applied before the photo is enqueued (with a safe fallback to the full
+ * image if the frame can't be mapped).
  *
  * The frame is sized to ≈the whole useful zone so the ENTIRE label fits inside, and
  * computeFrameCrop expands the crop by a small safety margin — together these keep
  * label content that used to overflow a small frame from being cropped away.
  *
- * Capture module / loop: this screen is pushed from the Articles FAB and popped when
- * the operator leaves (top-left back control → Articles). The live preview mounts
- * only while focused (freed whenever Review sits on top, fully released on pop). On
- * "Valider", Review saves then pops back here so the operator can shoot the next
- * label without re-opening the camera (rapid continuous capture).
+ * Review/validation moved OFF this screen entirely: the home screen's "En cours"
+ * section (PendingScanCard/ScanStepper) is where each queued scan is tracked and
+ * opened once ready. This screen stays a pure viewfinder — the ScanTray only shows
+ * a thumbnail stack + count, never an error (errors surface on the home screen).
  *
- * Two extraction paths, selected by BACKEND_FIRST (default: backend):
- *  - backend: crop to frame → POST /v1/ingestions → poll status → fetch run → Review.
- *  - legacy (EXPO_PUBLIC_BACKEND_FIRST=false): crop below the frame → on-device OCR
- *    via Cloud Vision → Review (display only; saving requires backend mode).
+ * Extraction is backend-only — the legacy on-device OCR path was removed for
+ * security (audit §7.3); this screen no longer has an opt-out branch.
  */
 
 import React, {
@@ -33,13 +30,10 @@ import {
   StyleSheet,
   View,
   Text,
-  Image,
   Dimensions,
   Pressable,
-  Alert,
 } from 'react-native';
 import { StatusBar } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
@@ -49,12 +43,11 @@ import { StackNavigationProp } from '@react-navigation/stack';
 
 import { CaptureButton } from '../components/CaptureButton';
 import { FrameOverlay, FrameState } from '../components/FrameOverlay';
-import { ProcessingOverlay } from '../components/ProcessingOverlay';
 import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
-import { submitCapture, type SubmitOutcome } from '../services/ingestionSubmit';
+import { ScanTray } from '../components/ScanTray';
+import { enqueueScan } from '../services/scanQueue';
 import { logLatency } from '../services/latencyLog';
-import { BACKEND_FIRST } from '../config';
-import { colors, spacing, radius, typography } from '../theme';
+import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -141,73 +134,46 @@ function computeFrameCrop(
 
 type NavProp = StackNavigationProp<RootStackParamList, 'Camera'>;
 
-/** A photo taken but not yet sent for extraction (awaiting user validation). */
-interface PendingPhoto {
-  uri: string;
-  width: number;
-  height: number;
-  croppedUri?: string; // downscaled JPEG actually uploaded (frame-cropped when possible)
-  framed?: boolean; // whether the frame crop was applied (false = orientation mismatch)
-  barcodeRaw?: string;
-  capturedAt: string;
-}
-
 export function CameraScreen() {
   const navigation = useNavigation<NavProp>();
-  const insets = useSafeAreaInsets();
-  // Mount the live preview only while this screen is focused. While Review (modal)
-  // sits on top, the preview unmounts — freeing the single camera resource — and
-  // remounts when we pop back to continue the capture loop. Once popped off the
-  // stack entirely (back to Articles) the screen unmounts, releasing it for good.
+  // Mount the live preview only while this screen is focused (freed whenever another
+  // screen sits on top; released for good once popped back to Articles).
   const isFocused = useIsFocused();
   const [permission, requestPermission] = useCameraPermissions();
   const [frameState, setFrameState] = useState<FrameState>('ready');
   const [taking, setTaking] = useState(false);
-  const [processing, setProcessing] = useState(false);
-  const [pending, setPending] = useState<PendingPhoto | null>(null);
   const [flashMode, setFlashMode] = useState<'off' | 'on' | 'auto'>('off');
 
   const cameraRef = useRef<CameraView>(null);
   const flashRef = useRef<FlashOverlayRef>(null);
   const lastBarcodeRef = useRef<BarcodeScanningResult | null>(null);
   const mountedRef = useRef(true);
-  const submitInFlightRef = useRef(false);
-  // Tier 1 — speculative submission (docs/LATENCY-REVIEW.md §4): the upload + extraction
-  // started at capture time, so OCR+LLM overlap the human photo-review pause. Holds the
-  // in-flight (or already-resolved) outcome; Valider consumes it instead of waiting on a
-  // fresh upload, and Reprendre/refocus abandon it (the orphaned ingestion is append-only
-  // and harmless). `startedAt` is the upload T0 used to report the real upload_ms.
-  const speculativeRef = useRef<{
-    startedAt: number;
-    promise: Promise<{ outcome: SubmitOutcome; finishedAt: number }>;
-  } | null>(null);
 
   // ── Permission guard ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!permission?.granted) requestPermission();
   }, [permission, requestPermission]);
 
-  // ── Mark unmounted so an in-flight submit doesn't navigate after teardown ──
+  // ── Mark unmounted so a still-running capture doesn't touch state after teardown ──
   useEffect(() => {
     return () => {
       mountedRef.current = false;
     };
   }, []);
 
-  // ── Reset transient state for a clean next capture when the live viewfinder
-  //    regains focus (e.g. after a save pops Review off the top). ─────────────
+  // ── Reset the barcode hint when the live viewfinder regains focus ─────────
   useEffect(() => {
     if (isFocused) {
-      setPending(null);
       lastBarcodeRef.current = null;
-      speculativeRef.current = null;
       setFrameState('ready');
     }
   }, [isFocused]);
 
-  // ── Take a photo (manual shutter) — does NOT submit; opens the review step ──
+  // ── Take a photo and enqueue it — TERMINAL: the operator keeps shooting ────
   const takePhoto = useCallback(async () => {
-    if (!cameraRef.current || taking || processing || pending) return;
+    // `taking` is the ONLY lock: N scans in flight is the point of the chained
+    // workflow, so nothing here waits on the previous submit or extraction.
+    if (!cameraRef.current || taking) return;
     setTaking(true);
     setFrameState('capturing');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -233,61 +199,43 @@ export function CameraScreen() {
       // was silently defeating the resize).
       let croppedUri: string | undefined;
       let framed = false;
-      if (BACKEND_FIRST) {
-        const crop = computeFrameCrop(photo.width, photo.height);
-        if (!crop) {
-          // Why `framed=false` happens — almost always an orientation mismatch between the
-          // photo buffer and the portrait preview. Dev-only diagnostic (dimensions only).
-          logLatency('frame_crop_skipped', {
-            photo: `${photo.width}x${photo.height}`,
-            screen: `${Math.round(SCREEN_WIDTH)}x${Math.round(SCREEN_HEIGHT)}`,
-          });
-        }
-        const srcW = crop ? crop.width : photo.width;
-        const srcH = crop ? crop.height : photo.height;
-        // Cap the LONGER side so portrait OR landscape buffers both shrink.
-        const resize =
-          srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
-        try {
-          const out = await ImageManipulator.manipulateAsync(
-            photo.uri,
-            crop ? [{ crop }, { resize }] : [{ resize }],
-            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-          );
-          croppedUri = out.uri;
-          framed = crop != null;
-        } catch (e) {
-          console.warn('Immediate crop/resize failed; full image will be used:', e);
-        }
+      const crop = computeFrameCrop(photo.width, photo.height);
+      if (!crop) {
+        // Why `framed=false` happens — almost always an orientation mismatch between the
+        // photo buffer and the portrait preview. Dev-only diagnostic (dimensions only).
+        logLatency('frame_crop_skipped', {
+          photo: `${photo.width}x${photo.height}`,
+          screen: `${Math.round(SCREEN_WIDTH)}x${Math.round(SCREEN_HEIGHT)}`,
+        });
+      }
+      const srcW = crop ? crop.width : photo.width;
+      const srcH = crop ? crop.height : photo.height;
+      // Cap the LONGER side so portrait OR landscape buffers both shrink.
+      const resize =
+        srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
+      try {
+        const out = await ImageManipulator.manipulateAsync(
+          photo.uri,
+          crop ? [{ crop }, { resize }] : [{ resize }],
+          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+        );
+        croppedUri = out.uri;
+        framed = crop != null;
+      } catch (e) {
+        console.warn('Immediate crop/resize failed; full image will be used:', e);
       }
 
       const capturedAt = new Date().toISOString();
       const barcodeRaw = lastBarcodeRef.current?.data;
-      setPending({
-        uri: photo.uri,
-        width: photo.width,
-        height: photo.height,
-        croppedUri,
-        framed,
-        barcodeRaw,
-        capturedAt,
-      });
-      setFrameState('ready');
 
-      // Tier 1 — fire the upload + extraction NOW (in the background), while the operator
-      // reviews the photo. By the time they tap Valider the result is often already in, so
-      // the perceived wait (measured from Valider) collapses. Inputs (crop + barcode) are
-      // all known here; submitCapture never throws (it returns a typed outcome).
-      if (BACKEND_FIRST) {
-        const submitUri = croppedUri ?? photo.uri;
-        const startedAt = Date.now();
-        speculativeRef.current = {
-          startedAt,
-          promise: submitCapture({ fileUri: submitUri, barcodeRaw, capturedAt }).then(
-            (outcome) => ({ outcome, finishedAt: Date.now() }),
-          ),
-        };
-      }
+      // Enqueue and move on — the scan queue owns submit + extraction from here.
+      // Never throws; a submit failure surfaces as a 'submit_error' card at home.
+      void enqueueScan({ tempUri: croppedUri ?? photo.uri, barcodeRaw, capturedAt }).then(() => {
+        logLatency('capture', { framed: String(framed) });
+      });
+
+      lastBarcodeRef.current = null;
+      setFrameState('ready');
     } catch (err) {
       console.error('Capture error:', err);
       if (mountedRef.current) {
@@ -299,127 +247,16 @@ export function CameraScreen() {
     } finally {
       if (mountedRef.current) setTaking(false);
     }
-  }, [taking, processing, pending]);
-
-  // ── Retake: discard the pending photo, back to the live viewfinder ─────────
-  const retake = useCallback(() => {
-    setPending(null);
-    lastBarcodeRef.current = null;
-    speculativeRef.current = null; // Tier 1: abandon the speculative ingestion (harmless)
-    setFrameState('ready');
-  }, []);
-
-  // ── Validate: send the reviewed photo for extraction ──────────────────────
-  const confirmAndSubmit = useCallback(async () => {
-    if (!pending || processing || submitInFlightRef.current) return;
-    submitInFlightRef.current = true;
-    setProcessing(true);
-
-    try {
-      // backend_first: use the already-cropped frame photo (cropped on capture),
-      // fallback to the full image if immediate crop failed.
-      if (BACKEND_FIRST) {
-        const submitUri = pending.croppedUri ?? pending.uri;
-        // Tier 1: the upload almost always started at capture. The PERCEIVED wait starts
-        // HERE, at Valider — that's the T0 handed to Review (wait_ms). Consume the
-        // speculative result; only submit now if there was none or it failed.
-        const validatedAt = Date.now();
-        const spec = speculativeRef.current;
-        speculativeRef.current = null;
-        const specResult = spec ? await spec.promise : null;
-
-        let outcome: SubmitOutcome;
-        let uploadMs: number;
-        let speculative = false;
-        if (specResult && specResult.outcome.kind === 'succeeded') {
-          outcome = specResult.outcome;
-          uploadMs = specResult.finishedAt - spec!.startedAt;
-          speculative = true;
-        } else {
-          // No speculative submit, or it failed — submit now (the operator wants it sent).
-          const freshStart = Date.now();
-          outcome = await submitCapture({
-            fileUri: submitUri,
-            barcodeRaw: pending.barcodeRaw,
-            capturedAt: pending.capturedAt,
-          });
-          uploadMs = Date.now() - freshStart;
-        }
-
-        if (outcome.kind === 'succeeded') {
-          // Cascade: do NOT block on extraction here. Hand off to Review immediately — it
-          // decodes the GS1 barcode for the T+0 fields (lot, DLC) and polls the OCR/LLM
-          // result itself (useIngestionResult), filling the rest in place.
-          logLatency('capture', {
-            upload_ms: uploadMs,
-            // Tier 1 proof: how long the photo was ALREADY being processed (uploaded +
-            // extracted) before the operator tapped Valider — i.e. the recovered overlap.
-            overlap_ms: spec ? validatedAt - spec.startedAt : 0,
-            replayed: String(outcome.replayed),
-            speculative: String(speculative),
-            framed: String(pending.framed === true), // false = frame crop failed (image still resized)
-          });
-          if (!mountedRef.current) return;
-          setPending(null);
-          navigation.push('Review', {
-            mode: 'backend',
-            ingestionId: outcome.ingestionId,
-            photoUri: submitUri, // the cropped image actually sent for extraction
-            barcodeRaw: pending.barcodeRaw,
-            capturedAt: pending.capturedAt,
-            submittedAt: validatedAt,
-          });
-          return;
-        } else {
-          // Backend submit failure: never reached the server, or was rejected.
-          console.warn('Ingestion submission incomplete:', outcome);
-          let title = 'Échec de l’envoi';
-          let message = 'Le serveur a rejeté cette capture. Reprenez la photo et réessayez.';
-          if (outcome.kind === 'pending') {
-            title = 'Enregistré localement';
-            message = 'Enregistré localement mais non envoyé. La nouvelle tentative automatique n’est pas encore disponible.';
-          } else if (outcome.code === 'CONFIG_ERROR') {
-            title = 'Non configuré';
-            message = 'L’application n’est pas configurée pour joindre le serveur. Contactez le développeur.';
-          } else if (outcome.code === 'UNAUTHENTICATED' || outcome.code === 'FORBIDDEN') {
-            title = 'Connexion requise';
-            message = 'Votre session a peut-être expiré. Reconnectez-vous et réessayez.';
-          }
-          Alert.alert(title, message);
-        }
-        return; // backend_first path complete (finally still runs)
-      }
-
-      // Legacy on-device OCR REMOVED (audit §7.3): it called Google Vision straight
-      // from the device with an EXPO_PUBLIC_* key — extractable from any built APK
-      // (Expo inlines those vars into the JS bundle; even a lazy import would keep
-      // the key in the bundle). Extraction is server-side only; this branch is only
-      // reachable with the unsupported EXPO_PUBLIC_BACKEND_FIRST=false opt-out.
-      if (!mountedRef.current) return;
-      setPending(null);
-      Alert.alert(
-        'Mode hors serveur indisponible',
-        'L’analyse d’étiquette sur l’appareil a été retirée pour des raisons de sécurité. Réactivez le mode backend (EXPO_PUBLIC_BACKEND_FIRST).'
-      );
-    } catch (err) {
-      console.error('Submit/OCR error:', err);
-      if (mountedRef.current) {
-        Alert.alert('Échec de l’envoi', 'Une erreur est survenue. Reprenez la photo et réessayez.');
-      }
-    } finally {
-      submitInFlightRef.current = false;
-      if (mountedRef.current) setProcessing(false);
-    }
-  }, [pending, processing, navigation]);
+  }, [taking]);
 
   // ── Barcode detected — store for the next capture, no auto-shoot ───────────
   const handleBarcodeScanned = useCallback(
     (result: BarcodeScanningResult) => {
-      if (processing || taking || pending) return;
+      if (taking) return;
       lastBarcodeRef.current = result;
       setFrameState('barcodeFound');
     },
-    [processing, taking, pending]
+    [taking]
   );
 
   const toggleFlash = useCallback(() => {
@@ -428,13 +265,12 @@ export function CameraScreen() {
 
   // ── Leave the capture module → back to Articles (pops Camera → unmounts it) ──
   const closeCapture = useCallback(() => {
-    if (processing) return; // don't abandon an in-flight submit
     if (navigation.canGoBack()) {
       navigation.goBack();
     } else {
       navigation.navigate('ArticleList');
     }
-  }, [navigation, processing]);
+  }, [navigation]);
 
   const flashIcon =
     flashMode === 'off'
@@ -494,7 +330,7 @@ export function CameraScreen() {
           style={StyleSheet.absoluteFill}
           facing="back"
           flash={flashMode}
-          onBarcodeScanned={processing || taking || pending ? undefined : handleBarcodeScanned}
+          onBarcodeScanned={taking ? undefined : handleBarcodeScanned}
           barcodeScannerSettings={{
             barcodeTypes: [
               'ean13', 'ean8', 'upc_a', 'upc_e',
@@ -521,7 +357,6 @@ export function CameraScreen() {
           onPress={closeCapture}
           style={styles.topBarBack}
           hitSlop={8}
-          disabled={processing}
           accessibilityRole="button"
           accessibilityLabel="Revenir aux articles"
         >
@@ -541,78 +376,18 @@ export function CameraScreen() {
         </Pressable>
       </View>
 
-      {/* Bottom control tray */}
+      {/* Bottom control tray — left slot is the scan tray (workflow v1): thumbnail
+          stack + count of scans currently submitting/extracting, tap → home. */}
       <View style={styles.bottomTray}>
-        <View style={styles.traySlot} />
-        <CaptureButton
-          onPress={takePhoto}
-          loading={taking}
-          disabled={taking || processing}
-        />
+        <View style={styles.traySlot}>
+          <ScanTray onPress={closeCapture} />
+        </View>
+        <CaptureButton onPress={takePhoto} loading={taking} disabled={taking} />
         <View style={styles.traySlot} />
       </View>
 
       {/* Flash white overlay */}
       <FlashOverlay ref={flashRef} />
-
-      {/* Photo review step (take → VALIDATE → extract) */}
-      {pending ? (
-        <View style={styles.previewRoot}>
-          <Image source={{ uri: pending.croppedUri ?? pending.uri }} style={StyleSheet.absoluteFill} resizeMode="contain" />
-          <View style={[styles.previewHeader, { paddingTop: insets.top + spacing.md }]}>
-            <Text style={[typography.titleMedium, styles.previewTitle]}>Vérifiez la photo</Text>
-            <Text style={[typography.bodySmall, styles.previewSubtitle]}>
-              L’étiquette est-elle nette et entièrement visible ?
-            </Text>
-          </View>
-          <View style={[styles.previewActions, { paddingBottom: insets.bottom + spacing.lg }]}>
-            <Pressable
-              onPress={retake}
-              disabled={processing}
-              style={styles.retakeButton}
-              android_ripple={{ color: colors.primaryContainer }}
-              accessibilityRole="button"
-              accessibilityLabel="Reprendre la photo"
-            >
-              <MaterialCommunityIcons
-                name="camera-retake-outline"
-                size={18}
-                color={colors.onPrimary}
-                style={{ marginRight: spacing.xs }}
-              />
-              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>Reprendre</Text>
-            </Pressable>
-            <Pressable
-              onPress={confirmAndSubmit}
-              disabled={processing}
-              style={styles.validateButton}
-              android_ripple={{ color: colors.primaryContainer }}
-              accessibilityRole="button"
-              accessibilityLabel="Valider la photo et lancer l’extraction"
-            >
-              <MaterialCommunityIcons
-                name="check"
-                size={18}
-                color={colors.onPrimary}
-                style={{ marginRight: spacing.xs }}
-              />
-              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>Valider</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
-
-      {/* Upload overlay only. In backend mode the extraction itself is NOT awaited
-          here — it runs on the Review screen (GS1 at T+0 + progressive fill). */}
-      <ProcessingOverlay
-        visible={processing}
-        message={BACKEND_FIRST ? 'Envoi de la photo…' : 'Lecture du texte…'}
-        subtitle={
-          BACKEND_FIRST
-            ? 'Téléversement en cours'
-            : 'Cela prend généralement 1 à 2 secondes'
-        }
-      />
     </View>
   );
 }
@@ -666,61 +441,8 @@ const styles = StyleSheet.create({
   traySlot: {
     width: 48,
     height: 48,
-  },
-  // ── Photo review overlay ──
-  previewRoot: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000',
-  },
-  previewHeader: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.md,
-    backgroundColor: 'rgba(0,0,0,0.45)',
-  },
-  previewTitle: {
-    color: colors.onPrimary,
-    textAlign: 'center',
-  },
-  previewSubtitle: {
-    color: colors.onPrimary,
-    opacity: 0.85,
-    textAlign: 'center',
-    marginTop: 2,
-  },
-  previewActions: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
-    paddingTop: spacing.md,
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  retakeButton: {
-    flex: 1,
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    height: 52,
-    borderRadius: radius.xl,
-    borderWidth: 1,
-    borderColor: colors.onPrimary,
-  },
-  validateButton: {
-    flex: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 52,
-    borderRadius: radius.xl,
-    backgroundColor: colors.primary,
   },
   permissionContainer: {
     flex: 1,

@@ -1,8 +1,8 @@
 /**
  * A softly pulsing filled dot — the sober "live / working" cue used across loading states
  * INSTEAD of a spinning wheel (docs/LATENCY-REVIEW.md §5). Shared by the extraction cascade
- * (ExtractionProgress) and the upload overlay (ProcessingOverlay) so the whole capture→review
- * flow speaks one visual language: no `ActivityIndicator` anywhere on the hot path.
+ * (ExtractionProgress) and the scan tray (ScanTray) so the whole capture→review flow speaks
+ * one visual language: no `ActivityIndicator` anywhere on the hot path.
  */
 
 import React, { useEffect, useRef } from 'react';
