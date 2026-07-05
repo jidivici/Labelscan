@@ -47,6 +47,9 @@ import {
   validateDate,
   validateTempRange,
   validateWeight,
+  isHealthMarkField,
+  maskHealthMark,
+  validateHealthMark,
   type WeightUnit,
 } from '../services/inputMasks';
 import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
@@ -280,7 +283,11 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
   // formats the digits the operator reads off the label — it never computes a date.
   const isDate = isDateField(field.field_name);
-  const handleChange = (text: string) => emit(isDate ? maskDate(text) : text);
+  // Health mark ("estampille sanitaire"): the official stamp is always uppercase, so
+  // every keystroke is force-cased — never a stripped/computed character.
+  const isHealthMark = isHealthMarkField(field.field_name);
+  const handleChange = (text: string) =>
+    emit(isDate ? maskDate(text) : isHealthMark ? maskHealthMark(text) : text);
   // History autocomplete (workflow v2.1): chips shown ONLY while this row's input is
   // focused, so the 16 other rows never render suggestion clutter. suggestForField
   // returns [] for non-history fields (dates, lot, gtin, affix inputs) — no per-field
@@ -299,7 +306,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   else if (field.field_name === 'storage_temperature') {
     const t = parseTemp(draft);
     hint = validateTempRange(t.min, t.max);
-  }
+  } else if (isHealthMark) hint = validateHealthMark(draft);
   return (
     <View style={styles.fieldRow}>
       <View style={styles.fieldHeader}>
@@ -329,7 +336,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
             styles.input,
             empty ? styles.inputHighlighted : null,
           ]}
-          autoCapitalize="words"
+          autoCapitalize={isHealthMark ? 'characters' : 'words'}
           autoCorrect={false}
           returnKeyType="done"
           accessibilityLabel={`Champ ${fieldLabelFr(field.field_name)}`}
