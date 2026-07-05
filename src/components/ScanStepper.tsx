@@ -31,10 +31,19 @@ function StepDot({ status }: { status: ScanStepStatus }) {
 export interface ScanStepperProps {
   steps: [ScanStepStatus, ScanStepStatus, ScanStepStatus];
   activeLabel: string;
+  /**
+   * Whether the product name (commercial_designation) is already known. While the
+   * extraction step is active and the name is STILL unknown, the active label is
+   * highlighted (primary + bold) so the operator's eye lands on "still identifying
+   * the product" — the single most identifying field. Ignored for non-extracting steps.
+   */
+  nameKnown?: boolean;
 }
 
-export function ScanStepper({ steps, activeLabel }: ScanStepperProps) {
+export function ScanStepper({ steps, activeLabel, nameKnown = true }: ScanStepperProps) {
   const hasError = steps.includes('error');
+  // Step 2 is the Extraction step. Highlight its label until the product name lands.
+  const highlightExtraction = steps[1] === 'active' && !nameKnown;
   return (
     <View style={styles.root}>
       <View style={styles.dots}>
@@ -46,7 +55,12 @@ export function ScanStepper({ steps, activeLabel }: ScanStepperProps) {
         ))}
       </View>
       <Text
-        style={[typography.labelMedium, styles.label, hasError && styles.labelError]}
+        style={[
+          typography.labelMedium,
+          styles.label,
+          hasError && styles.labelError,
+          highlightExtraction && styles.labelHighlight,
+        ]}
         numberOfLines={1}
       >
         {activeLabel}
@@ -82,5 +96,9 @@ const styles = StyleSheet.create({
   },
   labelError: {
     color: colors.error,
+  },
+  labelHighlight: {
+    color: colors.primary,
+    fontWeight: '700',
   },
 });

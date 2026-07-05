@@ -7,18 +7,18 @@ describe('scanStepFromStatus', () => {
     expect(view.openable).toBe(false);
   });
 
-  it('extracting (ocrDone=false): step 1 done, step 2 active as "Lecture du texte"', () => {
+  it('extracting (ocrDone=false): step 1 done, step 2 active as "Lecture du texte", openable', () => {
     const view = scanStepFromStatus('extracting', false);
     expect(view.steps).toEqual(['done', 'active', 'pending']);
     expect(view.activeLabel).toBe('Lecture du texte');
-    expect(view.openable).toBe(false);
+    expect(view.openable).toBe(true);
   });
 
-  it('extracting (ocrDone=true): same steps, label switches to "Analyse en cours"', () => {
+  it('extracting (ocrDone=true): same steps, label switches to "Analyse en cours", openable', () => {
     const view = scanStepFromStatus('extracting', true);
     expect(view.steps).toEqual(['done', 'active', 'pending']);
     expect(view.activeLabel).toBe('Analyse en cours');
-    expect(view.openable).toBe(false);
+    expect(view.openable).toBe(true);
   });
 
   it('ready: all done up to step 3 active, tappable', () => {

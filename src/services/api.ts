@@ -16,6 +16,7 @@
 
 import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
 import { v4 as uuidv4 } from 'uuid';
+import * as FileSystem from 'expo-file-system/legacy';
 
 import { API_BASE_URL } from '../config';
 import { clearToken, emitUnauthenticated, getToken } from './authStorage';
@@ -193,16 +194,45 @@ export function apiUpload<T>(
   options: RequestOptions = {},
 ): Promise<T> {
   const form = new FormData();
-  // RN accepts a { uri, name, type } object as a file part; cast for the DOM typing.
-  form.append(parts.fileField ?? 'image', parts.file as unknown as Blob);
-  if (parts.fields) {
-    for (const [key, value] of Object.entries(parts.fields)) form.append(key, value);
-  }
-  const opts: RequestOptions = {
-    ...options,
-    idempotencyKey: options.idempotencyKey ?? uuidv4(),
-  };
-  return send<T>(path, { method: 'POST', body: form }, opts, {});
+  // RN's fetch reads the file uri straight off disk to build the multipart body; if the
+  // OS already purged the cache uri (expo-camera's Camera/ dir, ImageManipulator's cache,
+  // or a pending/ photo deleted after the scan was discarded) it throws a low-level
+  // NSCocoaErrorDomain 260 "no such file" that surfaces here as a generic retriable
+  // NETWORK_ERROR — which then retries 5× with a scary native log for a file that will
+  // never come back. Verify existence once at the upload chokepoint and fail fast +
+  // non-retryably so the op dead-letters cleanly and the card shows "Envoi impossible".
+  return (async () => {
+    try {
+      const info = await FileSystem.getInfoAsync(parts.file.uri);
+      if (!info.exists) {
+        throw new ApiError({
+          code: 'FILE_NOT_FOUND',
+          status: 0,
+          message: `upload file no longer exists: ${parts.file.uri}`,
+          retriable: false,
+        });
+      }
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      // getInfoAsync itself failed (permission / IO) — treat as non-retryable too.
+      throw new ApiError({
+        code: 'FILE_NOT_FOUND',
+        status: 0,
+        message: `upload file unreadable: ${parts.file.uri}`,
+        retriable: false,
+      });
+    }
+    // RN accepts a { uri, name, type } object as a file part; cast for the DOM typing.
+    form.append(parts.fileField ?? 'image', parts.file as unknown as Blob);
+    if (parts.fields) {
+      for (const [key, value] of Object.entries(parts.fields)) form.append(key, value);
+    }
+    const opts: RequestOptions = {
+      ...options,
+      idempotencyKey: options.idempotencyKey ?? uuidv4(),
+    };
+    return send<T>(path, { method: 'POST', body: form }, opts, {});
+  })();
 }
 
 // ── Thin typed endpoint wrappers (prepared for the upcoming flow; not yet called) ──

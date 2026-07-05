@@ -156,6 +156,7 @@ const NON_RETRYABLE_CODES = new Set<string>([
   'PAYLOAD_TOO_LARGE',
   'IDEMPOTENCY_KEY_CONFLICT',
   'ALERT_INVALID_TRANSITION',
+  'FILE_NOT_FOUND', // the upload file is gone (OS-purged cache / discarded scan) — never comes back
 ]);
 
 /** Whether an error is worth retrying. 429/5xx/network(0) yes; other 4xx no. */

@@ -11,7 +11,8 @@
       "supportsTablet": false,
       "infoPlist": {
         "NSCameraUsageDescription": "LabelScan uses your camera to photograph product labels and scan barcodes."
-      }
+      },
+      "bundleIdentifier": "com.anonymous.LabelScan"
     },
     "android": {
       "adaptiveIcon": {
@@ -19,8 +20,10 @@
         "backgroundColor": "#F8F9FF"
       },
       "permissions": [
-        "android.permission.CAMERA"
-      ]
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.anonymous.LabelScan"
     },
     "web": {
       "favicon": "./assets/favicon.png"

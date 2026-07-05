@@ -1,14 +1,12 @@
 /**
- * Staged extraction-progress CASCADE (Tier 5 — docs/LATENCY-REVIEW.md §5).
- *
- * Replaces the spinning wheel during the OCR+LLM wait with a vertical CASCADE OF STATES:
+ * ExtractionProgress — the 3-step "box" shown on the Review screen while a scan is
+ * still being processed:
  *   Photo envoyée ✓  ·  Lecture du texte…  ·  Analyse de l'espèce…
- * The active step is a gently pulsing dot — never a spinner. The upload is already done by
- * the time Review mounts (Tier 1 overlap), so "Photo envoyée" starts complete; the next steps
- * advance on an estimated timer (services/extractionStage). When the backend later exposes a
- * real "OCR fait" interim state (Tier 3), the SAME cascade binds to actual transitions.
  *
- * Sober by design (Clean UI): no percentages, no confidence, no wheel.
+ * The active step is a gently pulsing accent dot (never a spinner); a completed step
+ * "pops" a check. Steps advance on an estimated timer until the backend's real
+ * `ocr_done` transit (Tier 3) pins the stage to the LLM step. Sober card styling:
+ * hairline border on surface, no percentages, no confidence.
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -21,8 +19,7 @@ import { colors, spacing, radius, typography } from '../theme';
 
 type StepStatus = 'done' | 'active' | 'pending';
 
-/** The check "pops" (scale 0.4→1 + fade, ~200 ms) the moment a step completes —
- * a real transition now that Tier 3/4 report actual stage changes. */
+/** The check "pops" (scale 0.4→1 + fade) the moment a step completes. */
 function AnimatedCheck() {
   const pop = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -42,6 +39,7 @@ function AnimatedCheck() {
         transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }],
       }}
     >
+      {/* Loading uses the accent BLUE end-to-end (green is reserved for a saved state). */}
       <MaterialCommunityIcons name="check-circle" size={16} color={colors.primary} />
     </Animated.View>
   );
@@ -62,7 +60,7 @@ function StepRow({ label, status }: { label: string; status: StepStatus }) {
         {status === 'done' ? (
           <AnimatedCheck />
         ) : status === 'active' ? (
-          <PulseDot />
+          <PulseDot size={11} color={colors.primary} />
         ) : (
           <View style={[styles.dot, styles.dotPending]} />
         )}
@@ -72,7 +70,7 @@ function StepRow({ label, status }: { label: string; status: StepStatus }) {
           typography.bodyMedium,
           styles.label,
           status === 'pending' && { color: colors.onSurfaceVariant },
-          status === 'active' && { color: colors.onSurface, fontWeight: '600' },
+          status === 'active' && { color: colors.onSurface, fontFamily: 'Inter_600SemiBold' },
         ]}
       >
         {status === 'active' ? `${label}…` : label}
@@ -101,7 +99,7 @@ export function ExtractionProgress({
 
   const stage = extractionStage(Date.now() - startedAt, ready, ocrDone);
   const statusFor = (key: StepKey): StepStatus => {
-    if (key === 'upload') return 'done'; // upload finished during the photo-review overlap (Tier 1)
+    if (key === 'upload') return 'done'; // upload finished during the background submit
     if (key === 'ocr') return stage === 'ocr' ? 'active' : 'done';
     // llm
     if (stage === 'ready') return 'done';
@@ -109,7 +107,7 @@ export function ExtractionProgress({
   };
 
   return (
-    <View style={styles.banner}>
+    <View style={styles.box}>
       {STEPS.map((s) => (
         <StepRow key={s.key} label={s.label} status={statusFor(s.key)} />
       ))}
@@ -118,17 +116,20 @@ export function ExtractionProgress({
 }
 
 const styles = StyleSheet.create({
-  banner: {
-    backgroundColor: colors.surfaceVariant,
-    borderRadius: radius.md,
+  // Sober bordered card (hairline on surface) — not a heavy filled bandeau.
+  box: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
     paddingVertical: spacing.sm + 2,
     paddingHorizontal: spacing.md,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 4,
+    marginVertical: 5,
   },
   indicator: {
     width: 18,
@@ -139,9 +140,9 @@ const styles = StyleSheet.create({
     marginLeft: spacing.sm,
   },
   dot: {
-    width: 13,
-    height: 13,
-    borderRadius: 7,
+    width: 12,
+    height: 12,
+    borderRadius: 6,
   },
   dotPending: {
     borderWidth: 1.5,

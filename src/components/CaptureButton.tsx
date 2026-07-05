@@ -4,7 +4,7 @@
  */
 
 import React, { useCallback } from 'react';
-import { ActivityIndicator, StyleSheet, View, Pressable } from 'react-native';
+import { StyleSheet, View, Pressable } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -50,15 +50,13 @@ export function CaptureButton({
         onPressIn={handlePressIn}
         onPressOut={handlePressOut}
         disabled={isDisabled}
-        style={[styles.outer, isDisabled && styles.outerDisabled]}
-        // Transparent ripple — spring animation is the primary feedback (Agent 1 Rule 3)
+        style={styles.outer}
+        // Transparent ripple — spring animation is the primary feedback (Agent 1 Rule 3).
+        // No spinner: the capture lock is momentary now (the heavy work runs in the
+        // background), so the shutter stays a clean, always-ready white circle.
         android_ripple={{ color: 'transparent' }}
       >
-        <View style={[styles.inner, loading && styles.innerLoading]}>
-          {loading ? (
-            <ActivityIndicator size={24} color={colors.primary} />
-          ) : null}
-        </View>
+        <View style={styles.inner} />
       </Pressable>
     </Animated.View>
   );
@@ -74,9 +72,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  outerDisabled: {
-    opacity: 0.38,
-  },
   inner: {
     width: sizing.captureButtonInner,
     height: sizing.captureButtonInner,
@@ -84,8 +79,5 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  innerLoading: {
-    backgroundColor: colors.surfaceVariant,
   },
 });

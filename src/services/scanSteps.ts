@@ -34,10 +34,12 @@ export function scanStepFromStatus(status: PendingScanStatus, ocrDone: boolean):
     case 'submitting':
       return { steps: ['active', 'pending', 'pending'], activeLabel: LABELS.submitting, openable: false };
     case 'extracting':
+      // Openable DURING analysis: Review opens mid-extraction and shows the 3-step
+      // progress box + the fields filling in live (GS1 → interim → LLM run).
       return {
         steps: ['done', 'active', 'pending'],
         activeLabel: ocrDone ? LABELS.llm : LABELS.ocr,
-        openable: false,
+        openable: true,
       };
     case 'ready':
       return { steps: ['done', 'done', 'active'], activeLabel: LABELS.ready, openable: true };
