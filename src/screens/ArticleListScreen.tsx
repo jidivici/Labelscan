@@ -35,9 +35,15 @@ import { exportAsJSON, exportAsCSV } from '../services/export';
 import { useArticleSearch } from '../hooks/useArticleSearch';
 import { useScanQueue } from '../hooks/useScanQueue';
 import { discardScan, retryScan, type PendingScan } from '../services/scanQueue';
+import {
+  filledCountFromInterim,
+  filledCountFromRun,
+  isProductNameKnownFromInterim,
+  isProductNameKnownFromRun,
+} from '../services/fieldCompleteness';
 import { sortArticlesByName } from '../services/articleGrouping';
 import { useAuth } from '../context/AuthContext';
-import { colors, spacing, radius, typography, elevation } from '../theme';
+import { colors, spacing, radius, typography } from '../theme';
 
 // Each card has a FIXED height (CARD_HEIGHT) + its marginBottom, so FlatList can place
 // rows without measuring them — O(1) scroll at thousands of lots (audit §7.1). The
@@ -63,8 +69,9 @@ export function ArticleListScreen() {
   // "En cours" (workflow v1): scans queued by the camera, tracked across screens by
   // the scan queue. Rendered as the FlatList's header so there's one scroll surface;
   // its MEASURED height (not hardcoded) keeps getItemLayout exact for the articles
-  // below it (audit §7.1 — O(1) scroll).
-  const { scans: pendingScans } = useScanQueue();
+  // below it (audit §7.1 — O(1) scroll). The full snapshot (results + interim) drives
+  // the "n/17 champs" text + the "name known" highlight on each card.
+  const { scans: pendingScans, results: scanResults, interim: scanInterim } = useScanQueue();
   const [pendingHeaderHeight, setPendingHeaderHeight] = useState(0);
   useEffect(() => {
     if (pendingScans.length === 0) setPendingHeaderHeight(0);
@@ -99,18 +106,42 @@ export function ArticleListScreen() {
         <Text style={[typography.labelMedium, styles.pendingTitle]}>
           {`En cours (${pendingScans.length})`}
         </Text>
-        {pendingScans.map((scan) => (
-          <PendingScanCard
-            key={scan.id}
-            scan={scan}
-            onOpen={handleOpenScan}
-            onRetry={handleRetryScan}
-            onDiscard={handleDiscardScan}
-          />
-        ))}
+        {pendingScans.map((scan) => {
+          // /17 score + name-known probe: prefer the FINAL run when ready, else the
+          // Tier-3 interim preview (while extracting); submitting scans show 0/17.
+          // The scan's persisted review draft (edits) OVERLAYS both, so the gauge
+          // advances live as the operator fills fields across review sessions.
+          const result = scanResults[scan.id];
+          const interimValues = scanInterim[scan.id];
+          const filledCount = result?.run
+            ? filledCountFromRun(result.run.fields, scan.edits)
+            : filledCountFromInterim(interimValues, scan.edits);
+          const nameKnown = result?.run
+            ? isProductNameKnownFromRun(result.run.fields, scan.edits)
+            : isProductNameKnownFromInterim(interimValues, scan.edits);
+          return (
+            <PendingScanCard
+              key={scan.id}
+              scan={scan}
+              filledCount={filledCount}
+              nameKnown={nameKnown}
+              onOpen={handleOpenScan}
+              onRetry={handleRetryScan}
+              onDiscard={handleDiscardScan}
+            />
+          );
+        })}
       </View>
     );
-  }, [pendingScans, handlePendingHeaderLayout, handleOpenScan, handleRetryScan, handleDiscardScan]);
+  }, [
+    pendingScans,
+    scanResults,
+    scanInterim,
+    handlePendingHeaderLayout,
+    handleOpenScan,
+    handleRetryScan,
+    handleDiscardScan,
+  ]);
 
   // Search slides open from the header (homogeneous with the other actions).
   const [searchOpen, setSearchOpen] = useState(false);
@@ -375,15 +406,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
+  // Sober header: a hairline separator instead of a drop shadow (Linear/Vercel).
   appBar: {
-    minHeight: 68,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
     backgroundColor: colors.surface,
-    ...elevation[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colors.outlineVariant,
   },
   // ── Brand ────────────────────────────────────────────────────────────────────
   brand: {
@@ -455,13 +488,14 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   listContent: {
-    paddingTop: spacing.sm,
+    paddingTop: spacing.md,
   },
   pendingTitle: {
     color: colors.onSurfaceVariant,
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginHorizontal: spacing.lg,
+    marginTop: spacing.xs,
     marginBottom: spacing.sm,
   },
   noResults: {

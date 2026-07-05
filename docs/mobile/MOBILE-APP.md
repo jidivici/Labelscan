@@ -3,7 +3,7 @@
 **Statut :** Implémenté. Client mince Expo (SDK 54) ; l'extraction « lourde » (OCR + LLM) vit côté
 serveur. Ce document est la **référence du front mobile** — les docs `docs/` étant historiquement
 côté backend, celui-ci comble le manque.
-**Date :** 2026-07-05 (refonte workflow v1 — capture enchaînée).
+**Date :** 2026-07-05 (refonte workflow v2 — verrou 17/17, brouillon persistant, photo cuite).
 **Périmètre :** `src/` uniquement.
 
 > **À lire en regard :**
@@ -82,6 +82,10 @@ Le **cadre à l'écran est à la fois le guide de placement ET la région de rec
   upload et OCR plus rapides sans perte de lisibilité).
 - **Robustesse** : `skipProcessing: false` applique la rotation capteur ; si l'image revient
   transposée ou le rectangle est dégénéré, on **envoie l'image entière** (repli sans perte).
+- **Zéro cliché perdu (audit prod v2)** : si le pipeline d'arrière-plan échoue (copie durable
+  impossible — disque plein…), un **repli last-ditch** met quand même le scan en file avec l'uri de
+  capture d'origine (non recadrée/pivotée, dégradé mais récupérable) — l'opérateur voit toujours une
+  carte à l'accueil, jamais une photo évaporée. Log `capture … fallback=raw_cache`.
 - **Côté serveur** : aucun sous-échantillonnage (l'image envoyée par le client est prise telle
   quelle) — voir [`AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §2.5.
 
@@ -129,6 +133,23 @@ soit un nouveau cycle de sondage (`retryScan` sur `extract_error`).
 
 ## 4. Accueil : compteur 3 étapes et validation
 
+> **Workflow v2 — un scan « en cours » n'est JAMAIS un article.** Chaque scan reste dans la zone
+> « En cours » tant que ses **17 champs ne sont pas tous remplis** ; il n'entre dans la liste des
+> articles (et n'incrémente le comptage) qu'à l'**enregistrement 17/17** (§5). Plusieurs scans
+> peuvent coexister « en cours » (empilement inchangé). Sur la carte, quand un scan est `ready`
+> mais `< 17/17`, l'étape 3 lit **« À compléter »** (bleu) au lieu de « À valider » (vert) —
+> `PendingScanCard` compare `filledCount` à `CANONICAL_FIELD_COUNT`.
+>
+> **Jauge vivante** : le score `n/17` de la carte est calculé run/interim **+ overlay du brouillon
+> persistant** (`scan.edits`) — les fonctions de `fieldCompleteness.ts` prennent un paramètre
+> `edits` optionnel qui prime dans les deux sens (une saisie remplit, un champ vidé dé-remplit).
+> La jauge avance donc à chaque retour de revue, au fil de la session de saisie.
+>
+> **Suppression** : toute carte non-erreur porte une **corbeille discrète** (à droite de la jauge) —
+> un scan « à compléter », « à valider » ou même encore en extraction peut être supprimé sans ouvrir
+> la revue (confirmation ; le message signale la perte du brouillon s'il existe). Les cartes en
+> erreur gardent leurs boutons Réessayer/Supprimer.
+
 - **`scanSteps.ts`** ([`services/scanSteps.ts`](../../src/services/scanSteps.ts)) : mapping **pur**
   `scanStepFromStatus(status, ocrDone)` → 3 étapes (Photo envoyée / Extraction / À valider) +
   libellé de l'étape active. Sobre par construction (Clean UI) : pas de pourcentage, pas de
@@ -158,17 +179,31 @@ soit un nouveau cycle de sondage (`retryScan` sur `extract_error`).
   (`ingestion.gs1_field_overridden`, append-only, jamais un écrasement — voir
   [`API-CONTRACTS.md`](../backend/API-CONTRACTS.md) §3). Sans le flag, le champ reste 409
   `FIELD_NOT_EDITABLE` (rétrocompatibilité totale avec un serveur non redéployé).
+- **Verrou 17/17 (workflow v2)** : « Enregistrer l'arrivage » n'est **actif qu'à 17/17**. Le
+  compteur de complétude est calculé sur les **valeurs effectives** (brouillon prioritaire sur la
+  valeur extraite) via `filledCountFromValues` ([`services/fieldCompleteness.ts`](../../src/services/fieldCompleteness.ts)) —
+  même map que celle affichée, donc zéro divergence compteur ⇄ écran. En dessous, le bouton lit
+  **« Compléter (n/17) »** (désactivé).
+- **Brouillon persistant (« session »)** : l'état d'édition est **seedé depuis `scan.edits`** et
+  **ré-écrit une seule fois** au départ de l'écran (`saveScanEdits`, effet de nettoyage sur unmount).
+  Quitter puis rouvrir une revue partielle **restaure les modifications** ; le scan reste « en cours »
+  tant qu'il n'est pas validé à 17/17. `saveScanEdits` est un no-op si le scan a été validé/supprimé.
 - **Visionneuse plein écran** (`PhotoViewerModal.tsx`) : pinch-to-zoom (bornes ×1–5), pan, double-tap
   pour zoomer/dézoomer, fermeture par bouton. Aucune dépendance nouvelle (`react-native-gesture-handler`
   + `react-native-reanimated` déjà utilisés par `ArticleCard`) ; le `Modal` RN a sa propre racine
   native, donc la visionneuse embarque son propre `GestureHandlerRootView`.
-- **Carte photo arrondie (§6.3, livré)** : la photo (Revue + Détail article) est affichée en
-  `resizeMode="cover"` dans une carte à coins arrondis avec une icône d'agrandissement discrète —
-  le rognage est désormais sans perte puisque le tap ouvre la visionneuse en `contain`
-  (l'objection historique — « ne jamais rogner l'étiquette » — est levée par cette bascule).
+- **Photo cuite à l'endroit (workflow v2)** : la rotation −90° est désormais **cuite dans le fichier**
+  à la capture (`ImageManipulator`, action `rotate: -90` en fin de pipeline dans `CameraScreen`), au
+  lieu d'une rotation d'affichage. Le composant `RotatedPhoto` est **supprimé** ; Revue, Détail
+  article, vignette « En cours » et visionneuse affichent tous un `Image`/`contain` standard (plus de
+  double rotation). **Caveat** : les articles enregistrés AVANT ce changement (données de test
+  pré-prod) ont un fichier non pivoté → ils s'affichent en portrait ; un re-scan corrige.
+- **Nettoyage Revue** : l'**icône agrandir** et le **bouton retour flottant en haut** sont retirés de
+  `ReviewScreen` (le tap sur la photo ouvre toujours la visionneuse ; le retour se fait par le bouton
+  « Retour » de la barre d'action du bas). `ArticleDetailScreen` conserve son icône d'agrandissement.
 - **Au save** : chemin inchangé (`saveBackendArticle` local → overrides → `confirm` → drain), puis
   `completeScan(scanId)` retire l'entrée de la file (et sa photo `pending/`) — la carte quitte la
-  zone « En cours ».
+  zone « En cours » et l'article apparaît dans la liste (comptage à jour).
 
 ---
 
@@ -246,10 +281,11 @@ retirée avec ce chemin — audit §7.3.)
 
 ## 9. Tests
 
-`npx jest --config jest.config.js` (ts-jest, environnement node) — 18 suites, **170 tests** ;
+`npx jest --config jest.config.js` (ts-jest, environnement node) — 20 suites, **187 tests** ;
 notables : `scanQueue` (transitions, cap de sondages, hydratation/réconciliation, dédoublonnage,
-nettoyage photo), `ingestionResult`, `scanSteps` (mapping 5 statuts × `ocrDone`),
-`fieldOverrideSubmit` (force_gs1). Vérification de types : `npx tsc --noEmit`.
+nettoyage photo, **`saveScanEdits` persiste + ré-hydrate le brouillon**), `ingestionResult`,
+`scanSteps` (mapping 5 statuts × `ocrDone`), `fieldCompleteness` (**`filledCountFromValues` = verrou
+17/17**), `fieldOverrideSubmit` (force_gs1). Vérification de types : `npx tsc --noEmit`.
 
 ---
 

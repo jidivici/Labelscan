@@ -44,6 +44,7 @@ import {
   initScanQueue,
   reconcileScanQueue,
   retryScan,
+  saveScanEdits,
   subscribe,
 } from '../services/scanQueue';
 
@@ -140,6 +141,34 @@ describe('scanQueue', () => {
 
     expect(scan.id).toBe('fixed-id-123');
     expect(mockedPersistPhoto).toHaveBeenCalledWith('fixed-id-123', 'file:///pending/fixed-id-123-raw.jpg');
+  });
+
+  it('saveScanEdits persists the review draft and it survives a restart (workflow v2 session)', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockReturnValue(new Promise(() => {})); // stays 'submitting'
+
+    const scan = await enqueueScan({
+      id: 'scan-e',
+      tempUri: 'file:///cache/x.jpg',
+      capturedAt: '2026-07-05T10:00:00Z',
+    });
+
+    saveScanEdits(scan.id, { weight: '5 kg', allergens: 'Poisson' });
+    expect(getSnapshot().scans[0].edits).toEqual({ weight: '5 kg', allergens: 'Poisson' });
+
+    await flush();
+    const raw = await AsyncStorage.getItem('@labelscan:scanQueue');
+    expect(JSON.parse(raw as string)[0].edits).toEqual({ weight: '5 kg', allergens: 'Poisson' });
+
+    // Restart: reset the singleton and re-hydrate from storage → the draft is restored.
+    _resetScanQueueForTests();
+    await initScanQueue();
+    expect(getSnapshot().scans[0].edits).toEqual({ weight: '5 kg', allergens: 'Poisson' });
+  });
+
+  it('saveScanEdits is a no-op for an unknown scan id', () => {
+    saveScanEdits('does-not-exist', { weight: '1 kg' });
+    expect(getSnapshot().scans).toHaveLength(0);
   });
 
   it('submit succeeded → status becomes extracting and a poll starts', async () => {

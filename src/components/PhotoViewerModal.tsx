@@ -95,6 +95,8 @@ export function PhotoViewerModal({ visible, photoUri, onClose }: PhotoViewerModa
   const composed = Gesture.Simultaneous(pinch, pan);
   const gesture = Gesture.Race(doubleTap, composed);
 
+  // The stored file is already rotated upright (baked client-side at capture, workflow
+  // v2), so no base rotation here — just pan/zoom on the landscape image (`contain`).
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: translateX.value },

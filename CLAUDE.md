@@ -492,3 +492,51 @@ extraction → relance → cartes restaurées ; mode avion → drain au retour r
 + l'action d'audit `gs1_field_overridden` côté serveur ; visionneuse pinch/pan/double-tap iOS
 ET Android (reanimated 4, point de vigilance) ; carte cover arrondie jugée à l'œil ; clavier
 température Android (reliquat passe santé, inchangé).
+
+---
+
+## 🔁 Refonte workflow v2 — verrou 17/17 + brouillon persistant + photo cuite (5 juillet 2026)
+
+Suite de la v1. Décisions produit actées avec l'utilisateur : ① on **garde l'empilement** de
+plusieurs arrivages « en cours » (file `scanQueue` inchangée), mais **un scan reste « en cours »
+tant qu'il n'est pas validé à 17/17** — il n'est **jamais** un article avant ça. ② L'enregistrement
+n'est **possible qu'à 17/17** ; en dessous, les modifications sont **sauvegardées** (brouillon
+persistant = « session ») mais l'arrivage n'est pas compté. ③ La **rotation photo est cuite dans le
+fichier** à la capture (fini la rotation d'affichage). ④ Le déclencheur **touches volume +/-** est
+fiabilisé. ⑤ Revue nettoyée : plus d'**icône agrandir** ni de **retour flottant en haut**.
+
+**Mobile (aucun changement backend).**
+1. **Verrou 17/17 + session** : `PendingScan.edits` + `saveScanEdits(id, edits)` (`scanQueue.ts`,
+   persisté/ré-hydraté) ; `ReviewScreen` seede le brouillon depuis `scan.edits`, le ré-écrit une fois
+   au départ (effet unmount), et **verrouille « Enregistrer l'arrivage » sur `filledCount === 17`**
+   (label « Compléter (n/17) » sinon). Compteur sur **valeurs effectives** via nouveau
+   `filledCountFromValues` (`fieldCompleteness.ts`). `PendingScanCard` : « À compléter » (bleu) vs
+   « À valider » (vert) selon 17/17.
+2. **Photo cuite** : action `rotate: -90` en fin de pipeline `ImageManipulator` (`CameraScreen`) ;
+   `RotatedPhoto` **supprimé** ; Revue/Détail/visionneuse en `Image`/`contain` standard (retrait du
+   `rotate` de base dans `PhotoViewerModal`). Caveat legacy : photos pré-v2 non pivotées → portrait.
+3. **Volume shutter fiabilisé** (`volumeShutter.ts`) : détection de l'**écho du reseat par la valeur**
+   de volume (kill de la boucle), **debounce** d'un appui multi-pas, garde temporelle en repli,
+   symétrie +/−. Module natif présent → OK après **dev-client rebuild** (non testable en jest).
+4. **Nettoyage Revue** : retrait de l'icône `arrow-expand` + du back flottant haut (le tap photo
+   ouvre toujours la visionneuse ; retour = bouton bas). `ArticleDetail` inchangé.
+
+**Passe audit prod capture (même jour, suite v2).** 4 correctifs :
+① **Zéro cliché perdu** : échec du pipeline d'arrière-plan (copie durable impossible) → repli
+`enqueueScan` avec l'uri de capture d'origine (dégradé mais visible à l'accueil, jamais silencieux) ;
+log `fallback=raw_cache`. ② **Double goBack au save** : `completeScan` retirait le scan pendant
+l'`await` → le garde-fou `!scan → goBack` tirait EN PLUS du goBack du save ; `closingRef` armé avant
+`completeScan` (ré-armé au catch). ③ **Jauge accueil vivante** : les fonctions de
+`fieldCompleteness.ts` prennent un `edits` optionnel (overlay du brouillon, dans les deux sens) —
+la carte `n/17` avance au fil de la session de saisie, `nameKnown` suit aussi. ④ **Suppression
+d'une carte non-erreur** : corbeille discrète sur les cartes extracting/ready (« à compléter » ou
+« à valider ») avec confirmation (mention du brouillon perdu s'il existe).
+
+**Vérifié** : typecheck 0 erreur, **187 jest verts** (+17 vs v1 : `filledCountFromValues`,
+`saveScanEdits` persistance/ré-hydratation, overlay `edits` run/interim/nameKnown). Backend inchangé.
+
+**Reste (checklist device, app lancée) :** photo à l'endroit partout (revue/détail/vignette/
+visionneuse) + photos legacy en portrait tolérées ; brouillon partiel restauré après aller-retour ;
+bouton « Compléter (n/17) » désactivé jusqu'à 17/17 puis « Enregistrer l'arrivage » → article compté ;
+**Volume+ ET Volume−** prennent une photo de façon fiable (un appui = un tir, pas de boucle, HUD
+masqué) après rebuild natif.
