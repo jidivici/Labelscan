@@ -1,17 +1,19 @@
 /**
- * ArticleDetailScreen — the immutable record (the "lot") for one saved article.
+ * ArticleDetailScreen — the saved record (the "lot") for one article.
  *
- * Read-only display: lot number, save date, author in the headline, then a clean
- * per-field list (name + value). No "à vérifier" flag here — uncertainty is surfaced
- * only at REVIEW time (enregistrement), not on the face of the saved record. No source
- * captions, OCR evidence, warnings, or validation status tags either. No red anywhere.
+ * Reads in the SAME field order as the registration screen (services/fieldOrder.ts) so the
+ * app is consistent end-to-end. Sober identity header (lot + when/who), then a modern card
+ * list of every field. Fields are editable IN PLACE (pencil → edit state): free-text/LLM
+ * fields become inputs; GS1-exact fields (lot/DLC/weight/GTIN/packaging) stay locked — they
+ * come from the barcode and the backend rejects human overrides on them. Saving an edit
+ * RE-RECORDS the article with the current user (saved_by/saved_at) and pushes the human
+ * override to the authoritative backend, best-effort (submitFieldOverrides, source='human').
  *
- * Immutability (ADR-0003/0004): this record is append-only. A re-extraction is a NEW
- * run, never an overwrite. Human corrections made at Review time are preserved via
- * the `edited` flag; the original machine output stays on raw_extraction_run.
+ * Clean UI (CLAUDE.md): no "Édité"/"Modifié" tag, no confidence score, no red. Who/when an
+ * edit happened lives only in the header meta, not as per-field badges.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -20,75 +22,212 @@ import {
   ScrollView,
   Pressable,
   ActivityIndicator,
+  TextInput,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { getArticleById } from '../services/storage';
+import { getArticleById, updateBackendArticle } from '../services/storage';
 import { Article, ArticleField } from '../types/Article';
 import { formatDateShort } from '../services/dates';
 import { fieldLabelFr, displayFieldValue } from '../services/fieldLabels';
 import { formatFaoDisplay } from '../services/faoDisplay';
+import { FIELD_ORDER } from '../services/fieldOrder';
+import {
+  parseTemp,
+  formatTemp,
+  validateTempRange,
+  parsePrice,
+  formatPrice,
+} from '../services/inputMasks';
+import { isHumanEditableField, submitFieldOverrides } from '../services/fieldOverrideSubmit';
+import { useAuth } from '../context/AuthContext';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 
 type DetailRoute = RouteProp<ArticlesStackParamList, 'ArticleDetail'>;
 type DetailNav = StackNavigationProp<ArticlesStackParamList, 'ArticleDetail'>;
+type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
-// Single placeholder for an absent value. Literal em dash on purpose — JSX text
-// must never carry \uXXXX escapes (they render literally), see fieldLabels notes.
-const EM_DASH = "—";
+// A quiet leading icon per field — gives each row a modern, anchored look (and fills the
+// otherwise-bare list). Purely decorative; unknown fields fall back to a generic tag.
+const FIELD_ICON: Record<string, IconName> = {
+  commercial_designation: 'fish',
+  scientific_name: 'flask-outline',
+  producer_name: 'factory',
+  reseller_brand: 'store-outline',
+  production_method: 'waves',
+  fishing_gear_or_farming_method: 'anchor',
+  FAO_area: 'map-marker-outline',
+  origin_country: 'flag-outline',
+  health_mark: 'shield-check-outline',
+  batch_number: 'identifier',
+  expiry_date: 'calendar-alert',
+  packaging_date: 'calendar-outline',
+  storage_temperature: 'thermometer',
+  weight: 'scale-balance',
+  allergens: 'alert-circle-outline',
+  price: 'currency-eur',
+  gtin: 'barcode',
+};
 
-function HeadlineItem({
-  label,
-  value,
-  subtitle,
-  emphasis,
-}: {
-  label: string;
-  value: string | null | undefined;
-  /** Decorative secondary line (e.g. the FAO area name). Never the canonical value. */
-  subtitle?: string | null;
-  emphasis?: boolean;
-}) {
-  const hasValue = !!value && value.length > 0;
+function fieldIcon(name: string): IconName {
+  return FIELD_ICON[name] ?? 'tag-outline';
+}
+
+/** Order the saved fields by the shared FIELD_ORDER; any extra field is appended after. */
+function orderFields(fields: ArticleField[]): ArticleField[] {
+  const byName = new Map(fields.map((f) => [f.field_name, f]));
+  const ordered: ArticleField[] = [];
+  for (const name of FIELD_ORDER) {
+    const f = byName.get(name);
+    if (f) {
+      ordered.push(f);
+      byName.delete(name);
+    }
+  }
+  for (const f of byName.values()) ordered.push(f);
+  return ordered;
+}
+
+// ── In-place editors (detail screen) — reuse the shared masks/validation ───────────
+
+function TempRangeEditor({ draft, onChange }: { draft: string; onChange: (t: string) => void }) {
+  const seed = parseTemp(draft);
+  const [min, setMin] = useState(seed.min);
+  const [max, setMax] = useState(seed.max);
+  const hint = validateTempRange(min, max);
   return (
-    <View style={styles.headlineItem}>
-      <Text style={[typography.labelSmall, styles.overline]}>{label}</Text>
-      <Text
-        selectable
-        style={[
-          emphasis ? typography.titleMedium : typography.bodyLarge,
-          styles.headlineValue,
-          !hasValue && styles.placeholderValue,
-        ]}
-      >
-        {hasValue ? value : EM_DASH}
-      </Text>
-      {hasValue && subtitle ? (
-        <Text style={[typography.bodySmall, styles.headlineSubtitle]}>{subtitle}</Text>
-      ) : null}
+    <View>
+      <View style={styles.affixRow}>
+        <TextInput
+          value={min}
+          onChangeText={(t) => {
+            setMin(t);
+            onChange(formatTemp(t, max));
+          }}
+          keyboardType="numbers-and-punctuation"
+          placeholder="min"
+          placeholderTextColor={colors.onSurfaceVariant}
+          style={[typography.bodyLarge, styles.editInput, styles.affixInput]}
+          accessibilityLabel="Température minimale"
+        />
+        <Text style={[typography.bodyLarge, styles.affixDash]}>–</Text>
+        <TextInput
+          value={max}
+          onChangeText={(t) => {
+            setMax(t);
+            onChange(formatTemp(min, t));
+          }}
+          keyboardType="numbers-and-punctuation"
+          placeholder="max"
+          placeholderTextColor={colors.onSurfaceVariant}
+          style={[typography.bodyLarge, styles.editInput, styles.affixInput]}
+          accessibilityLabel="Température maximale"
+        />
+        <Text style={[typography.labelLarge, styles.affixUnit]}>°C</Text>
+      </View>
+      {hint ? <Text style={[typography.labelSmall, styles.editHint]}>{hint}</Text> : null}
     </View>
   );
 }
 
-function DetailField({ field }: { field: ArticleField }) {
-  const value = displayFieldValue(field.field_name, field.value);
-  const isEmpty = value == null || value.length === 0;
+function PriceEditor({ draft, onChange }: { draft: string; onChange: (t: string) => void }) {
+  const seed = parsePrice(draft);
+  const [amount, setAmount] = useState(seed.amount);
+  const currency = seed.currency;
+  return (
+    <View style={styles.affixRow}>
+      <TextInput
+        value={amount}
+        onChangeText={(t) => {
+          const v = t.replace(/[^0-9.,]/g, '');
+          setAmount(v);
+          onChange(formatPrice(v, currency));
+        }}
+        keyboardType="decimal-pad"
+        placeholder="0.00"
+        placeholderTextColor={colors.onSurfaceVariant}
+        style={[typography.bodyLarge, styles.editInput, styles.affixInput]}
+        accessibilityLabel="Prix"
+      />
+      <Text style={[typography.labelLarge, styles.affixUnit]}>{currency === 'EUR' ? '€' : currency}</Text>
+    </View>
+  );
+}
+
+function FieldCard({
+  field,
+  editing,
+  draft,
+  onChange,
+  last,
+}: {
+  field: ArticleField;
+  editing: boolean;
+  draft: string;
+  onChange: (name: string, text: string) => void;
+  last: boolean;
+}) {
+  const name = field.field_name;
+  const locked = !isHumanEditableField(name);
+  const display = displayFieldValue(name, field.value);
+  const isEmpty = display == null || display.length === 0;
+  // FAO: show the exact value, with the human "mer + sous-zone" summary as a quiet subtitle.
+  const subtitle = name === 'FAO_area' && field.value ? formatFaoDisplay(field.value) : null;
+  const showSubtitle = !!subtitle && subtitle !== field.value;
+  const editable = editing && !locked;
+  const emit = useCallback((t: string) => onChange(name, t), [onChange, name]);
 
   return (
-    <View style={styles.field}>
-      <Text style={[typography.labelSmall, styles.overline, styles.fieldName]}>
-        {fieldLabelFr(field.field_name)}
-      </Text>
-      <Text
-        selectable
-        style={[typography.bodyMedium, styles.fieldValue, isEmpty && styles.placeholderValue]}
-      >
-        {isEmpty ? EM_DASH : value}
-      </Text>
+    <View style={[styles.card, !last && styles.cardDivider]}>
+      <View style={styles.cardIcon}>
+        <MaterialCommunityIcons name={fieldIcon(name)} size={18} color={colors.onSurfaceVariant} />
+      </View>
+      <View style={styles.cardBody}>
+        <Text style={[typography.labelSmall, styles.cardLabel]}>{fieldLabelFr(name)}</Text>
+        {editable ? (
+          name === 'storage_temperature' ? (
+            <TempRangeEditor draft={draft} onChange={emit} />
+          ) : name === 'price' ? (
+            <PriceEditor draft={draft} onChange={emit} />
+          ) : (
+            <TextInput
+              value={draft}
+              onChangeText={emit}
+              placeholder="Saisir une valeur"
+              placeholderTextColor={colors.onSurfaceVariant}
+              style={[typography.bodyLarge, styles.editInput, styles.editInputText]}
+              autoCapitalize="words"
+              autoCorrect={false}
+              returnKeyType="done"
+              accessibilityLabel={`Champ ${fieldLabelFr(name)}`}
+            />
+          )
+        ) : (
+          <>
+            <Text
+              selectable
+              style={[typography.bodyLarge, styles.cardValue, isEmpty && styles.cardEmpty]}
+            >
+              {isEmpty ? 'Non renseigné' : display}
+            </Text>
+            {showSubtitle ? (
+              <Text style={[typography.bodySmall, styles.cardSubtitle]}>{subtitle}</Text>
+            ) : null}
+          </>
+        )}
+      </View>
+      {editing && locked ? (
+        <MaterialCommunityIcons
+          name="lock-outline"
+          size={15}
+          color={colors.outline}
+          style={styles.cardLock}
+        />
+      ) : null}
     </View>
   );
 }
@@ -98,9 +237,14 @@ export function ArticleDetailScreen() {
   const navigation = useNavigation<DetailNav>();
   const route = useRoute<DetailRoute>();
   const { articleId } = route.params;
+  const { user } = useAuth();
 
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
+  const [editing, setEditing] = useState(false);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+  const [justSaved, setJustSaved] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -116,7 +260,59 @@ export function ArticleDetailScreen() {
     };
   }, [articleId]);
 
+  const orderedFields = useMemo(() => orderFields(article?.fields ?? []), [article]);
+
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+
+  const enterEdit = useCallback(() => {
+    const seed: Record<string, string> = {};
+    for (const f of article?.fields ?? []) {
+      if (isHumanEditableField(f.field_name)) seed[f.field_name] = f.value ?? '';
+    }
+    setDrafts(seed);
+    setJustSaved(false);
+    setEditing(true);
+  }, [article]);
+
+  const cancelEdit = useCallback(() => {
+    setEditing(false);
+    setDrafts({});
+  }, []);
+
+  const handleFieldChange = useCallback((name: string, text: string) => {
+    setDrafts((d) => ({ ...d, [name]: text }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    if (!article || saving) return;
+    setSaving(true);
+
+    const changed: { field_name: string; value: string | null }[] = [];
+    const nextFields = article.fields.map((f) => {
+      if (!isHumanEditableField(f.field_name) || !(f.field_name in drafts)) return f;
+      const raw = drafts[f.field_name].trim();
+      const value = raw === '' ? null : raw;
+      if (value === (f.value ?? null)) return f; // unchanged
+      changed.push({ field_name: f.field_name, value });
+      return { ...f, value, edited: true };
+    });
+
+    if (changed.length === 0) {
+      setEditing(false);
+      setSaving(false);
+      return;
+    }
+
+    // Re-record locally (new saved_at + saved_by = the editor), then push the override.
+    const updated = await updateBackendArticle(article.id, { fields: nextFields, saved_by: user });
+    if (updated) setArticle(updated);
+    void submitFieldOverrides({ ingestionId: article.ingestion_id, fields: changed });
+
+    setEditing(false);
+    setSaving(false);
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 2600);
+  }, [article, drafts, saving, user]);
 
   if (loading) {
     return (
@@ -141,16 +337,9 @@ export function ArticleDetailScreen() {
   }
 
   const lot = article.fields.find((f) => f.field_name === 'batch_number');
-  // Precise catch zone — surfaced prominently when extracted. Shown VERBATIM (full
-  // precision, e.g. "27.8.b.1") so the headline equals the stored/exported value; the
-  // official area name is a decorative subtitle, and only when it adds something beyond
-  // the stored designation (audit §4.1).
-  const fao = article.fields.find((f) => f.field_name === 'FAO_area');
-  const faoFriendly = fao?.value ? formatFaoDisplay(fao.value) : null;
-  const faoSubtitle = faoFriendly && faoFriendly !== fao?.value ? faoFriendly : null;
 
   return (
-    <View style={[styles.root, { paddingBottom: insets.bottom }]}>
+    <View style={[styles.root, { paddingBottom: editing ? 0 : insets.bottom }]}>
       <View style={styles.photoContainer}>
         {article.photo_uri ? (
           <Image source={{ uri: article.photo_uri }} style={styles.photo} resizeMode="contain" />
@@ -178,34 +367,100 @@ export function ArticleDetailScreen() {
         style={styles.contentCard}
         contentContainerStyle={styles.contentInner}
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.headlineCard}>
-          <View style={styles.headlineGroup}>
-            <HeadlineItem label="Numéro de lot" value={lot?.value} emphasis />
-            {fao?.value ? (
-              <HeadlineItem label="Zone de pêche (FAO)" value={fao.value} subtitle={faoSubtitle} />
-            ) : null}
+        {/* Sober identity header: the lot, when/who, and the edit toggle. */}
+        <View style={styles.identityCard}>
+          <View style={styles.identityMain}>
+            <Text style={[typography.labelSmall, styles.overline]}>Numéro de lot</Text>
+            <Text selectable style={[typography.titleLarge, styles.lotValue]}>
+              {lot?.value && lot.value.length > 0 ? lot.value : '—'}
+            </Text>
+            <Text style={[typography.bodySmall, styles.metaCaption]}>
+              {formatDateShort(article.saved_at)}
+              {user ? `  ·  ${user}` : ''}
+            </Text>
           </View>
-          <View style={styles.headlineDivider} />
-          <View style={styles.headlineGroup}>
-            <HeadlineItem label="Date d'enregistrement" value={formatDateShort(article.saved_at)} />
-            <HeadlineItem label="Utilisateur" value={article.saved_by} />
-          </View>
+          {!editing ? (
+            <Pressable
+              onPress={enterEdit}
+              hitSlop={8}
+              style={styles.editToggle}
+              android_ripple={{ color: colors.primaryContainer, borderless: true }}
+              accessibilityRole="button"
+              accessibilityLabel="Modifier la fiche"
+            >
+              <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.primary} />
+            </Pressable>
+          ) : null}
         </View>
 
+        {justSaved ? (
+          <View style={styles.savedBanner}>
+            <MaterialCommunityIcons name="check-circle-outline" size={16} color={colors.success} />
+            <Text style={[typography.labelSmall, styles.savedText]}>Modifications enregistrées</Text>
+          </View>
+        ) : null}
+
         <Text style={[typography.labelSmall, styles.overline, styles.sectionLabel]}>
-          Champs ({article.fields.length})
+          {editing ? 'Modifier les champs' : `Champs (${orderedFields.length})`}
         </Text>
-        {article.fields.length === 0 ? (
+
+        {orderedFields.length === 0 ? (
           <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
             Aucun champ extrait.
           </Text>
         ) : (
-          article.fields.map((f) => (
-            <DetailField key={f.field_name} field={f} />
-          ))
+          <View style={styles.fieldsCard}>
+            {orderedFields.map((f, i) => (
+              <FieldCard
+                key={f.field_name}
+                field={f}
+                editing={editing}
+                draft={drafts[f.field_name] ?? ''}
+                onChange={handleFieldChange}
+                last={i === orderedFields.length - 1}
+              />
+            ))}
+          </View>
         )}
+
+        {editing ? (
+          <Text style={[typography.bodySmall, styles.editFootnote]}>
+            Les champs issus du code-barres (lot, dates, poids, GTIN) ne sont pas modifiables.
+          </Text>
+        ) : null}
       </ScrollView>
+
+      {editing ? (
+        <View style={[styles.editBar, { paddingBottom: insets.bottom + spacing.sm }]}>
+          <Pressable
+            onPress={cancelEdit}
+            disabled={saving}
+            style={styles.cancelBtn}
+            accessibilityRole="button"
+            accessibilityLabel="Annuler"
+          >
+            <Text style={[typography.labelLarge, styles.cancelText]}>Annuler</Text>
+          </Pressable>
+          <Pressable
+            onPress={handleSave}
+            disabled={saving}
+            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+            accessibilityRole="button"
+            accessibilityLabel="Enregistrer les modifications"
+          >
+            {saving ? (
+              <ActivityIndicator size="small" color={colors.onPrimary} />
+            ) : (
+              <>
+                <MaterialCommunityIcons name="check" size={18} color={colors.onPrimary} />
+                <Text style={[typography.labelLarge, styles.saveText]}>Enregistrer</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -257,43 +512,51 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     marginTop: -radius.lg,
-    ...elevation[2],
   },
   contentInner: {
     padding: spacing.lg,
     paddingBottom: spacing['2xl'],
   },
-  headlineCard: {
-    backgroundColor: colors.surfaceContainer,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
+  // ── Sober identity header ──────────────────────────────────────────────────
+  identityCard: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: spacing.md,
     marginBottom: spacing.lg,
   },
-  // One stacked group (lot + FAO, or date + user) with an even rhythm between items.
-  headlineGroup: {
-    gap: spacing.sm,
-  },
-  headlineDivider: {
-    height: 1,
-    backgroundColor: colors.outlineVariant,
-    marginVertical: spacing.md,
-  },
-  headlineItem: {
+  identityMain: {
     flexShrink: 1,
   },
-  headlineValue: {
+  lotValue: {
     color: colors.onSurface,
-  },
-  // Decorative second line under a headline value (e.g. the FAO area name). Quiet, so
-  // the canonical value above it stays the focus.
-  headlineSubtitle: {
-    color: colors.onSurfaceVariant,
     marginTop: 2,
   },
-  // Shared treatment for every uppercase label (headline, section header, field name)
-  // so the whole screen reads on one typographic system, aligned to a single left edge.
+  metaCaption: {
+    color: colors.onSurfaceVariant,
+    marginTop: spacing.xs,
+  },
+  editToggle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.primaryContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  savedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.successContainer,
+    borderRadius: radius.sm,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.md,
+  },
+  savedText: {
+    color: colors.success,
+  },
   overline: {
     color: colors.onSurfaceVariant,
     textTransform: 'uppercase',
@@ -301,23 +564,129 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   sectionLabel: {
-    marginBottom: spacing.xs,
+    marginBottom: spacing.sm,
   },
-  field: {
+  // ── Modern field list (one card, dividers between rows) ─────────────────────
+  fieldsCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    overflow: 'hidden',
+    ...elevation[1],
+  },
+  card: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.md,
     paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  cardDivider: {
     borderBottomWidth: 1,
     borderBottomColor: colors.outlineVariant,
   },
-  fieldName: {
-    flexShrink: 1,
+  cardIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: colors.surfaceContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 2,
   },
-  // Label and value intentionally share the same left edge (no indent) — vertical alignment.
-  fieldValue: {
+  cardBody: {
+    flex: 1,
+    minWidth: 0,
+  },
+  cardLabel: {
+    color: colors.onSurfaceVariant,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+    marginBottom: 3,
+  },
+  cardValue: {
     color: colors.onSurface,
   },
-  // Absent value ("—"): kept in place to document what the label lacked, but visually quiet
-  // so present information stands out.
-  placeholderValue: {
+  cardEmpty: {
     color: colors.outline,
+    fontStyle: 'italic',
+  },
+  cardSubtitle: {
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  cardLock: {
+    marginTop: 4,
+  },
+  // ── Edit inputs ─────────────────────────────────────────────────────────────
+  editInput: {
+    color: colors.onSurface,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    borderRadius: radius.sm,
+    backgroundColor: colors.background,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.sm,
+  },
+  editInputText: {
+    minHeight: 40,
+  },
+  affixRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  affixInput: {
+    flex: 1,
+    minWidth: 0,
+  },
+  affixDash: {
+    color: colors.onSurfaceVariant,
+  },
+  affixUnit: {
+    color: colors.onSurfaceVariant,
+  },
+  editHint: {
+    color: colors.onSurfaceVariant,
+    marginTop: spacing.xs,
+  },
+  editFootnote: {
+    color: colors.onSurfaceVariant,
+    marginTop: spacing.md,
+  },
+  // ── Edit action bar ──────────────────────────────────────────────────────────
+  editBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    backgroundColor: colors.surface,
+    borderTopWidth: 1,
+    borderTopColor: colors.outlineVariant,
+  },
+  cancelBtn: {
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+  },
+  cancelText: {
+    color: colors.onSurfaceVariant,
+  },
+  saveBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+  },
+  saveBtnDisabled: {
+    opacity: 0.6,
+  },
+  saveText: {
+    color: colors.onPrimary,
   },
 });

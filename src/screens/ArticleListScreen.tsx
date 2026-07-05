@@ -1,8 +1,13 @@
 /**
- * ArticleListScreen — Browse all saved articles, export, delete
+ * ArticleListScreen — the app's home: browse every saved lot, search, export, capture.
+ *
+ * Branded header (LabelScan / Articles) with a compact action cluster: the omni-search
+ * lives in the header as an icon button that SLIDES a search bar open (homogeneous with
+ * export + sign-out), rather than taking a permanent row. The list is sorted by product
+ * name; capture is the bottom-right FAB.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +16,7 @@ import {
   Pressable,
   Alert,
   TextInput,
+  Animated,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -38,6 +44,9 @@ const getItemLayout = (_data: ArrayLike<Article> | null | undefined, index: numb
   index,
 });
 
+// Height the search bar expands to when it slides open (box + vertical padding).
+const SEARCH_OPEN_HEIGHT = 44 + spacing.sm * 2;
+
 export function ArticleListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
@@ -48,6 +57,36 @@ export function ArticleListScreen() {
   const { query, setQuery, results } = useArticleSearch(articles);
   // Accueil : arrivages triés par nom de produit (A→Z).
   const ordered = useMemo(() => sortArticlesByName(results), [results]);
+
+  // Search slides open from the header (homogeneous with the other actions).
+  const [searchOpen, setSearchOpen] = useState(false);
+  const searchAnim = useRef(new Animated.Value(0)).current;
+  const searchInputRef = useRef<TextInput>(null);
+
+  const openSearch = useCallback(() => {
+    setSearchOpen(true);
+    Animated.timing(searchAnim, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [searchAnim]);
+
+  const closeSearch = useCallback(() => {
+    searchInputRef.current?.blur();
+    setQuery('');
+    Animated.timing(searchAnim, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start(() => setSearchOpen(false));
+  }, [searchAnim, setQuery]);
+
+  const toggleSearch = useCallback(() => {
+    if (searchOpen) closeSearch();
+    else openSearch();
+  }, [searchOpen, openSearch, closeSearch]);
 
   // Reload whenever screen comes into focus (after a save)
   useFocusEffect(
@@ -137,15 +176,40 @@ export function ArticleListScreen() {
     ]);
   }, [signOut]);
 
+  const hasArticles = articles.length > 0;
+
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
-      {/* App bar */}
+      {/* Branded app bar */}
       <View style={styles.appBar}>
-        <Text style={[typography.titleLarge, { color: colors.onSurface }]}>
-          Articles
-        </Text>
+        <View style={styles.brand}>
+          <View style={styles.brandMark}>
+            <MaterialCommunityIcons name="barcode-scan" size={20} color={colors.onPrimary} />
+          </View>
+          <View style={styles.brandText}>
+            <Text style={[typography.titleLarge, styles.brandTitle]}>LabelScan</Text>
+            <Text style={[typography.labelSmall, styles.brandSubtitle]}>Articles</Text>
+          </View>
+        </View>
+
         <View style={styles.appBarActions}>
-          {articles.length > 0 && (
+          {hasArticles && (
+            <Pressable
+              onPress={toggleSearch}
+              style={[styles.iconButton, searchOpen && styles.iconButtonActive]}
+              android_ripple={{ color: colors.primaryContainer, borderless: true }}
+              accessibilityRole="button"
+              accessibilityLabel={searchOpen ? 'Fermer la recherche' : 'Rechercher'}
+              accessibilityState={{ expanded: searchOpen }}
+            >
+              <MaterialCommunityIcons
+                name={searchOpen ? 'close' : 'magnify'}
+                size={22}
+                color={searchOpen ? colors.primary : colors.onSurfaceVariant}
+              />
+            </Pressable>
+          )}
+          {hasArticles && (
             <Pressable
               onPress={showExportOptions}
               disabled={exporting}
@@ -174,34 +238,45 @@ export function ArticleListScreen() {
         </View>
       </View>
 
-      {/* Recherche par lot */}
-      {articles.length > 0 && (
-        <View style={styles.searchRow}>
-          <View style={styles.searchBox}>
-            <MaterialCommunityIcons name="magnify" size={20} color={colors.onSurfaceVariant} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              placeholder="Rechercher : lot, espèce, zone FAO…"
-              placeholderTextColor={colors.onSurfaceVariant}
-              style={[typography.bodyMedium, styles.searchInput]}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="search"
-              accessibilityLabel="Rechercher un produit"
-            />
-            {query.length > 0 ? (
-              <Pressable
-                onPress={() => setQuery('')}
-                hitSlop={8}
-                accessibilityRole="button"
-                accessibilityLabel="Effacer la recherche"
-              >
-                <MaterialCommunityIcons name="close-circle" size={18} color={colors.onSurfaceVariant} />
-              </Pressable>
-            ) : null}
+      {/* Slide-open search (driven by the header search button) */}
+      {hasArticles && (
+        <Animated.View
+          style={[
+            styles.searchSlide,
+            {
+              height: searchAnim.interpolate({ inputRange: [0, 1], outputRange: [0, SEARCH_OPEN_HEIGHT] }),
+              opacity: searchAnim,
+            },
+          ]}
+        >
+          <View style={styles.searchRow}>
+            <View style={styles.searchBox}>
+              <MaterialCommunityIcons name="magnify" size={20} color={colors.onSurfaceVariant} />
+              <TextInput
+                ref={searchInputRef}
+                value={query}
+                onChangeText={setQuery}
+                placeholder="Rechercher : lot, espèce, zone FAO…"
+                placeholderTextColor={colors.onSurfaceVariant}
+                style={[typography.bodyMedium, styles.searchInput]}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="search"
+                accessibilityLabel="Rechercher un produit"
+              />
+              {query.length > 0 ? (
+                <Pressable
+                  onPress={() => setQuery('')}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Effacer la recherche"
+                >
+                  <MaterialCommunityIcons name="close-circle" size={18} color={colors.onSurfaceVariant} />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
-        </View>
+        </Animated.View>
       )}
 
       {/* List — sorted by product name */}
@@ -246,13 +321,43 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   appBar: {
-    height: 64,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.sm,
     backgroundColor: colors.surface,
     ...elevation[2],
+  },
+  // ── Brand ────────────────────────────────────────────────────────────────────
+  brand: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    flexShrink: 1,
+  },
+  brandMark: {
+    width: 38,
+    height: 38,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  brandText: {
+    flexShrink: 1,
+  },
+  brandTitle: {
+    color: colors.onSurface,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  brandSubtitle: {
+    color: colors.onSurfaceVariant,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginTop: 1,
   },
   appBarActions: {
     flexDirection: 'row',
@@ -266,12 +371,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  listContent: {
-    paddingTop: spacing.sm,
+  iconButtonActive: {
+    backgroundColor: colors.primaryContainer,
+  },
+  // ── Slide-open search ──────────────────────────────────────────────────────────
+  searchSlide: {
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
   },
   searchRow: {
     paddingHorizontal: spacing.lg,
-    paddingTop: spacing.sm,
+    paddingVertical: spacing.sm,
   },
   searchBox: {
     flexDirection: 'row',
@@ -288,6 +398,9 @@ const styles = StyleSheet.create({
     flex: 1,
     color: colors.onSurface,
     paddingVertical: 0,
+  },
+  listContent: {
+    paddingTop: spacing.sm,
   },
   noResults: {
     alignItems: 'center',

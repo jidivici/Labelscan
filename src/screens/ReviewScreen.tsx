@@ -17,8 +17,6 @@ import {
   Pressable,
   Alert,
   TextInput,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -27,8 +25,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
 import { saveBackendArticle } from '../services/storage';
+import { FIELD_ORDER } from '../services/fieldOrder';
 import { suggestAllergen } from '../services/allergenSuggestions';
 import { submitFieldOverrides, isHumanEditableField } from '../services/fieldOverrideSubmit';
+import { enqueueConfirmIngestion } from '../services/outbox';
+import { drainOutbox } from '../services/outboxDrain';
 import {
   maskDate,
   isDateField,
@@ -49,6 +50,8 @@ import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
 import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
 import { useIngestionResult } from '../hooks/useIngestionResult';
 import { SkeletonValue } from '../components/SkeletonFieldList';
+import { CascadeReveal, cascadeDelay } from '../components/CascadeReveal';
+import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
 import { useAuth } from '../context/AuthContext';
@@ -196,41 +199,37 @@ function needsReview(field: ExtractionField): boolean {
 // Canonical display order for the 16 fields. The SAME order drives the loading skeleton
 // list AND the ready list, so rows never reshuffle when the run lands (audit §2.2 — zero
 // layout shift). Readable HACCP order: identity → method/origin → lot/dates → conservation.
-const FIELD_ORDER = [
-  'product_name',
-  'commercial_designation',
-  'scientific_name',
-  'production_method',
-  'fishing_gear_or_farming_method',
-  'FAO_area',
-  'origin_country',
-  'batch_number',
-  'expiry_date',
-  'packaging_date',
-  'storage_temperature',
-  'weight',
-  'allergens',
-  'price',
-  'supplier_name',
-  'gtin',
-] as const;
+// FIELD_ORDER now lives in services/fieldOrder.ts — SHARED with ArticleDetailScreen so the
+// app reads fields in ONE consistent order (registration ⇄ detail).
 
 /**
  * One placeholder row in the stable list while the LLM run is still loading: the real
- * field LABEL is shown, and the VALUE is either the GS1-decoded value (known at T+0) or a
- * pulsing skeleton. Same geometry as EditableFieldRow → swapping it in at ready does not
- * move anything (audit §2.1/2.2).
+ * field LABEL is shown, and the VALUE is the GS1-decoded value (T+0), the Tier 3 wave-2
+ * deterministic preview (~OCR done), or a pulsing skeleton. Same geometry as
+ * EditableFieldRow → swapping it in at ready does not move anything (audit §2.1/2.2).
+ * A value that ARRIVES (skeleton → GS1/preview) reveals through CascadeReveal, keyed on
+ * the value so the animation runs exactly once per reveal, staggered by row position.
  */
-function PendingFieldRow({ fieldName, gs1Value }: { fieldName: string; gs1Value?: string }) {
+function PendingFieldRow({
+  fieldName,
+  gs1Value,
+  revealDelay = 0,
+}: {
+  fieldName: string;
+  gs1Value?: string;
+  revealDelay?: number;
+}) {
   return (
     <View style={styles.fieldRow}>
       <View style={styles.fieldHeader}>
         <Text style={[typography.labelSmall, styles.fieldName]}>{fieldLabelFr(fieldName)}</Text>
       </View>
       {gs1Value != null ? (
-        <View style={styles.input}>
-          <Text style={[typography.bodyMedium, { color: colors.onSurface }]}>{gs1Value}</Text>
-        </View>
+        <CascadeReveal key={gs1Value} delay={revealDelay}>
+          <View style={styles.input}>
+            <Text style={[typography.bodyMedium, { color: colors.onSurface }]}>{gs1Value}</Text>
+          </View>
+        </CascadeReveal>
       ) : (
         <SkeletonValue />
       )}
@@ -437,7 +436,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
             styles.input,
             highlighted ? styles.inputHighlighted : null,
           ]}
-          autoCapitalize="none"
+          autoCapitalize="words"
           autoCorrect={false}
           returnKeyType="done"
           accessibilityLabel={`Champ ${fieldLabelFr(field.field_name)}`}
@@ -470,14 +469,19 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
 
   const [saving, setSaving] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
+  // Tier 5 — start the staged-progress clock at mount (≈ the Valider tap) so the banner
+  // advances Lecture → Analyse while the run is polled (docs/LATENCY-REVIEW.md §5).
+  const [mountedAt] = useState(() => Date.now());
 
   // T+0 — decode the scanned GS1 barcode locally. This data is exact (it comes from the
   // barcode symbology, not OCR), so lot / DLC / weight appear the instant this screen
   // mounts, before the server extraction returns.
   const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
   // The slow half — poll the server extraction (OCR + LLM + reconciliation) in the
-  // background and reveal the editable field list once it's ready.
-  const { phase, ingestion, run } = useIngestionResult(ingestionId);
+  // background and reveal the editable field list once it's ready. Wave 2 (Tier 3):
+  // interimValues carries deterministic previews the moment the OCR finishes, and
+  // ocrDone flips the progress banner to its REAL 'llm' stage.
+  const { phase, ingestion, run, interimValues, ocrDone } = useIngestionResult(ingestionId);
 
   const fields = run?.fields ?? [];
 
@@ -507,6 +511,17 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
   // GS1-decoded values keyed by field name — shown IN the field list at T+0 (before the
   // LLM run lands) so those rows are filled immediately rather than skeletoned (§2.1).
   const gs1Values = useMemo(() => gs1FieldValues(gs1), [gs1]);
+
+  // Wave-2 previews, display-formatted (dates arrive canonical ISO → DD/MM/YYYY like
+  // every other date on screen). GS1 stays first: a barcode-exact value is never
+  // replaced by a regex preview (the backend already skips the overlap; belt+braces).
+  const pendingValues = useMemo(() => {
+    const out: Record<string, string> = {};
+    for (const [name, value] of Object.entries(interimValues)) {
+      out[name] = isDateField(name) ? displayDate(value) : value;
+    }
+    return { ...out, ...gs1Values };
+  }, [interimValues, gs1Values]);
 
   // GS1 wins on lot/DLC at T+0; the backend reconciles the same way, so the values stay
   // stable once the run lands.
@@ -571,9 +586,18 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
       const corrections = savedFields
         .filter((f) => f.edited && isHumanEditableField(f.field_name))
         .map((f) => ({ field_name: f.field_name, value: f.value }));
-      if (corrections.length > 0) {
-        void submitFieldOverrides({ ingestionId, fields: corrections });
-      }
+      // Best-effort backend sync, SEQUENCED: corrections first, THEN the confirm
+      // (the confirmed status asserts "review done" — it must never race ahead of
+      // the corrections it validates), then a drain to replay any stragglers from
+      // previous saves. Fire-and-forget as a whole: the local save is already done,
+      // so a sync hiccup never stalls the continuous-capture loop.
+      void (async () => {
+        if (corrections.length > 0) {
+          await submitFieldOverrides({ ingestionId, fields: corrections });
+        }
+        await enqueueConfirmIngestion({ ingestion_id: ingestionId });
+        await drainOutbox();
+      })();
 
       // Satisfying confirmation the arrivage was saved (light success haptic, non-blocking).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -603,12 +627,8 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
   const canSave = phase === 'ready' && run != null && ingestion != null;
 
   return (
-    <KeyboardAvoidingView
-      style={styles.root}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={[styles.root, { paddingBottom: insets.bottom }]}>
-        {photoUri ? (
+    <View style={styles.root}>
+      {photoUri ? (
           <View style={styles.photoContainer}>
             <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="contain" />
             <View style={[styles.photoAppBar, { paddingTop: insets.top + 8 }]}>
@@ -630,6 +650,7 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
           contentContainerStyle={styles.contentInner}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets
         >
           <View style={styles.metaRow}>
             <MaterialCommunityIcons name="identifier" size={14} color={colors.onSurfaceVariant} />
@@ -708,13 +729,17 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
             // filled at T+0, the rest skeleton IN PLACE, then swap to editable when the run
             // lands — same rows, order and heights → zero layout shift (audit §2.1/2.2).
             <>
-              <Text style={[typography.labelMedium, styles.sectionLabel]}>
-                {phase === 'ready' ? `Champs (${fields.length})` : 'Analyse de l’étiquette…'}
-              </Text>
-              {FIELD_ORDER.map((name) => {
+              {phase === 'ready' ? (
+                <Text style={[typography.labelMedium, styles.sectionLabel]}>
+                  {`Champs (${fields.length})`}
+                </Text>
+              ) : (
+                <ExtractionProgress startedAt={mountedAt} ready={false} ocrDone={ocrDone} />
+              )}
+              {FIELD_ORDER.map((name, rowIndex) => {
                 const field = fields.find((f) => f.field_name === name);
                 if (field) {
-                  return (
+                  const row = (
                     <EditableFieldRow
                       key={name}
                       field={field}
@@ -727,8 +752,24 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
                       suggestion={name === 'allergens' ? allergenSuggestion : undefined}
                     />
                   );
+                  // Wave 3 sweep: only rows that were STILL skeletons animate in — a value
+                  // already visible (GS1 / wave-2 preview) swaps silently, never re-flashes.
+                  return pendingValues[name] == null ? (
+                    <CascadeReveal key={name} delay={cascadeDelay(rowIndex)}>
+                      {row}
+                    </CascadeReveal>
+                  ) : (
+                    <View key={name}>{row}</View>
+                  );
                 }
-                return <PendingFieldRow key={name} fieldName={name} gs1Value={gs1Values[name]} />;
+                return (
+                  <PendingFieldRow
+                    key={name}
+                    fieldName={name}
+                    gs1Value={pendingValues[name]}
+                    revealDelay={cascadeDelay(rowIndex)}
+                  />
+                );
               })}
             </>
           )}
@@ -764,8 +805,7 @@ function BackendReview({ params }: { params: BackendReviewParams }) {
             </Text>
           </Pressable>
         </View>
-      </View>
-    </KeyboardAvoidingView>
+    </View>
   );
 }
 

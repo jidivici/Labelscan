@@ -219,12 +219,49 @@ export function createIngestion(
   return apiUpload<CreateIngestionResponse>('/v1/ingestions', { file, fields: formFields }, options);
 }
 
-/** GET /v1/ingestions/{id} — current ingestion status + extraction runs. */
+/**
+ * GET /v1/ingestions/{id} — current ingestion status + extraction runs.
+ *
+ * Long-poll (Tier 4): pass BOTH `waitSeconds` and `lastStatus` to let the server
+ * hold the request (bounded, ≤25 s server-side) until the status differs from
+ * `lastStatus` — the caller must size `timeoutMs` above the wait. Omitted = the
+ * classic immediate GET.
+ */
 export function getIngestionStatus(
   ingestionId: string,
-  options: RequestOptions = {},
+  options: RequestOptions & { waitSeconds?: number; lastStatus?: string } = {},
 ): Promise<IngestionStatusResponse> {
-  return apiRequest<IngestionStatusResponse>(`/v1/ingestions/${encodeURIComponent(ingestionId)}`, options);
+  const { waitSeconds, lastStatus, ...opts } = options;
+  let path = `/v1/ingestions/${encodeURIComponent(ingestionId)}`;
+  if (waitSeconds && waitSeconds > 0 && lastStatus) {
+    // Manual query build — React Native's URL polyfill does NOT implement
+    // URLSearchParams.toString() (it throws at runtime; Node's does, so Jest
+    // would never catch it). encodeURIComponent is universally available.
+    path += `?wait=${encodeURIComponent(String(waitSeconds))}&last_status=${encodeURIComponent(lastStatus)}`;
+  }
+  return apiRequest<IngestionStatusResponse>(path, opts);
+}
+
+/** Response of POST /v1/ingestions/{id}/confirm (the finalized review state). */
+export interface ConfirmIngestionResponse {
+  ingestion_id: string;
+  status: string; // 'confirmed'
+  replayed: boolean; // true => it was already confirmed (idempotent repeat)
+}
+
+/**
+ * POST /v1/ingestions/{id}/confirm — the reviewer finalizes the arrivage (P3).
+ * Idempotent server-side; 409 INGESTION_NOT_CONFIRMABLE if the extraction is not
+ * review-ready (a state error, not worth a blind retry).
+ */
+export function confirmIngestion(
+  ingestionId: string,
+  options: RequestOptions = {},
+): Promise<ConfirmIngestionResponse> {
+  return apiRequest<ConfirmIngestionResponse>(
+    `/v1/ingestions/${encodeURIComponent(ingestionId)}/confirm`,
+    { ...options, method: 'POST' },
+  );
 }
 
 /** GET /v1/extraction-runs/{id} — a single run with its extracted fields. */

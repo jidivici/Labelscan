@@ -8,11 +8,11 @@
 import { displayDate, isDateField } from './inputMasks';
 
 export const FIELD_LABELS_FR: Record<string, string> = {
-  product_name: 'Nom du produit',
   commercial_designation: 'Dénomination commerciale',
   scientific_name: 'Nom scientifique',
+  producer_name: 'Producteur',
+  reseller_brand: 'Marque de revente',
   batch_number: 'N° de lot',
-  supplier_name: 'Fournisseur',
   origin_country: "Pays d'origine",
   FAO_area: 'Zone de pêche (FAO)',
   production_method: 'Méthode de production',
@@ -21,10 +21,14 @@ export const FIELD_LABELS_FR: Record<string, string> = {
   packaging_date: "Date d'emballage",
   storage_temperature: 'Température de conservation',
   allergens: 'Allergènes',
+  health_mark: 'Estampille sanitaire',
   weight: 'Poids',
   price: 'Prix',
   gtin: 'Code-barres (GTIN)',
   raw_warnings: 'Observations',
+  // legacy v1 keys, kept so historical records still render a French label
+  product_name: 'Nom du produit',
+  supplier_name: 'Fournisseur',
 };
 
 /** French label for a field key (falls back to the raw key if unmapped). */
@@ -46,13 +50,21 @@ export function validationStatusFr(status: string): string {
   return VALIDATION_STATUS_FR[status] ?? status;
 }
 
-/** Ingestion lifecycle status → short professional French (no technical code shown). */
+/** Ingestion lifecycle status → short professional French (no technical code shown).
+ * Covers the full 12-state machine so no raw status code ever reaches the operator. */
 export const INGESTION_STATUS_FR: Record<string, string> = {
   raw_stored: 'Reçu',
-  extracted: 'Extrait',
-  needs_review: 'À vérifier',
+  ocr_running: 'Lecture en cours',
+  ocr_done: 'Analyse en cours',
+  ocr_failed: 'Échec de lecture',
   ocr_skipped_garbage: 'Illisible',
+  extraction_running: 'Analyse en cours',
+  extracted: 'Extrait',
   extraction_failed: 'Échec',
+  needs_review: 'À vérifier',
+  confirmed: 'Validé',
+  rejected: 'Rejeté',
+  halted_missing_context: 'Interrompu',
 };
 
 export function ingestionStatusFr(status: string): string {
