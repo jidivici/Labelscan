@@ -22,7 +22,9 @@ export const radius = {
   sm: 8,
   md: 12,
   lg: 16,
-  xl: 24,
+  // Primary buttons use `xl`. Dropped 24 → 14 so buttons read as crisp, slightly
+  // rounded rectangles (Vercel/Stripe) instead of fully-rounded "pills".
+  xl: 14,
   full: 9999,
 } as const;
 

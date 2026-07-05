@@ -25,7 +25,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Article } from '../types/Article';
 import { formatDateShort } from '../services/dates';
 import { commonName } from '../services/articleGrouping';
-import { colors, spacing, radius, typography, elevation } from '../theme';
+import { colors, spacing, radius, typography } from '../theme';
 
 interface ArticleCardProps {
   article: Article;
@@ -192,29 +192,36 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: DELETE_WIDTH,
     backgroundColor: colors.error,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  // Hairline-bordered card, identical treatment to PendingScanCard so the whole
+  // home list reads as one homogeneous column (no mixed radii / shadows).
   card: {
     height: CARD_HEIGHT,
     backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    ...elevation[1],
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
   },
   pressable: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
+    borderRadius: radius.lg,
     overflow: 'hidden',
   },
+  // Uniform 56×56 thumbnail (same as PendingScanCard): same size, radius and border
+  // everywhere an image appears in a list.
   thumbnail: {
-    width: 72,
-    height: 72,
-    borderRadius: radius.sm,
+    width: 56,
+    height: 56,
+    borderRadius: radius.md,
     backgroundColor: colors.surfaceVariant,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
