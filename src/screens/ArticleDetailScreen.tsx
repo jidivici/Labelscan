@@ -3,11 +3,12 @@
  *
  * Reads in the SAME field order as the registration screen (services/fieldOrder.ts) so the
  * app is consistent end-to-end. Sober identity header (lot + when/who), then a modern card
- * list of every field. Fields are editable IN PLACE (pencil → edit state): free-text/LLM
- * fields become inputs; GS1-exact fields (lot/DLC/weight/GTIN/packaging) stay locked — they
- * come from the barcode and the backend rejects human overrides on them. Saving an edit
- * RE-RECORDS the article with the current user (saved_by/saved_at) and pushes the human
- * override to the authoritative backend, best-effort (submitFieldOverrides, source='human').
+ * list of every field. Fields are editable IN PLACE (pencil → edit state) — workflow v1:
+ * ALL 17 fields, including GS1-exact ones (lot/DLC/weight/GTIN/packaging); the operator
+ * stays in charge. Saving an edit RE-RECORDS the article with the current user
+ * (saved_by/saved_at) and pushes the human override to the authoritative backend,
+ * best-effort (submitFieldOverrides, source='human', force_gs1 tagged automatically for
+ * barcode-derived fields).
  *
  * Clean UI (CLAUDE.md): no "Édité"/"Modifié" tag, no confidence score, no red. Who/when an
  * edit happened lives only in the header meta, not as per-field badges.
@@ -42,7 +43,8 @@ import {
   parsePrice,
   formatPrice,
 } from '../services/inputMasks';
-import { isHumanEditableField, submitFieldOverrides } from '../services/fieldOverrideSubmit';
+import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
+import { PhotoViewerModal } from '../components/PhotoViewerModal';
 import { useAuth } from '../context/AuthContext';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
@@ -172,13 +174,12 @@ function FieldCard({
   last: boolean;
 }) {
   const name = field.field_name;
-  const locked = !isHumanEditableField(name);
   const display = displayFieldValue(name, field.value);
   const isEmpty = display == null || display.length === 0;
   // FAO: show the exact value, with the human "mer + sous-zone" summary as a quiet subtitle.
   const subtitle = name === 'FAO_area' && field.value ? formatFaoDisplay(field.value) : null;
   const showSubtitle = !!subtitle && subtitle !== field.value;
-  const editable = editing && !locked;
+  const editable = editing;
   const emit = useCallback((t: string) => onChange(name, t), [onChange, name]);
 
   return (
@@ -220,14 +221,6 @@ function FieldCard({
           </>
         )}
       </View>
-      {editing && locked ? (
-        <MaterialCommunityIcons
-          name="lock-outline"
-          size={15}
-          color={colors.outline}
-          style={styles.cardLock}
-        />
-      ) : null}
     </View>
   );
 }
@@ -245,6 +238,7 @@ export function ArticleDetailScreen() {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -267,7 +261,7 @@ export function ArticleDetailScreen() {
   const enterEdit = useCallback(() => {
     const seed: Record<string, string> = {};
     for (const f of article?.fields ?? []) {
-      if (isHumanEditableField(f.field_name)) seed[f.field_name] = f.value ?? '';
+      seed[f.field_name] = f.value ?? '';
     }
     setDrafts(seed);
     setJustSaved(false);
@@ -289,7 +283,7 @@ export function ArticleDetailScreen() {
 
     const changed: { field_name: string; value: string | null }[] = [];
     const nextFields = article.fields.map((f) => {
-      if (!isHumanEditableField(f.field_name) || !(f.field_name in drafts)) return f;
+      if (!(f.field_name in drafts)) return f;
       const raw = drafts[f.field_name].trim();
       const value = raw === '' ? null : raw;
       if (value === (f.value ?? null)) return f; // unchanged
@@ -342,9 +336,19 @@ export function ArticleDetailScreen() {
     <View style={[styles.root, { paddingBottom: editing ? 0 : insets.bottom }]}>
       <View style={styles.photoContainer}>
         {article.photo_uri ? (
-          <Image source={{ uri: article.photo_uri }} style={styles.photo} resizeMode="contain" />
+          <Pressable
+            onPress={() => setViewerOpen(true)}
+            style={styles.photoCard}
+            accessibilityRole="button"
+            accessibilityLabel="Voir la photo en plein écran"
+          >
+            <Image source={{ uri: article.photo_uri }} style={styles.photo} resizeMode="cover" />
+            <View style={styles.expandHint}>
+              <MaterialCommunityIcons name="arrow-expand" size={16} color={colors.onPrimary} />
+            </View>
+          </Pressable>
         ) : (
-          <View style={[styles.photo, styles.photoPlaceholder]}>
+          <View style={[styles.photoCard, styles.photoPlaceholder]}>
             <MaterialCommunityIcons name="file-document-outline" size={48} color={colors.onSurfaceVariant} />
           </View>
         )}
@@ -362,6 +366,11 @@ export function ArticleDetailScreen() {
           <View style={{ width: 24 }} />
         </View>
       </View>
+      <PhotoViewerModal
+        visible={viewerOpen}
+        photoUri={article.photo_uri}
+        onClose={() => setViewerOpen(false)}
+      />
 
       <ScrollView
         style={styles.contentCard}
@@ -424,12 +433,6 @@ export function ArticleDetailScreen() {
             ))}
           </View>
         )}
-
-        {editing ? (
-          <Text style={[typography.bodySmall, styles.editFootnote]}>
-            Les champs issus du code-barres (lot, dates, poids, GTIN) ne sont pas modifiables.
-          </Text>
-        ) : null}
       </ScrollView>
 
       {editing ? (
@@ -486,11 +489,30 @@ const styles = StyleSheet.create({
     position: 'relative',
     backgroundColor: colors.onSurface,
   },
+  // §6.3 — rounded cover card, same treatment as ReviewScreen; a tap opens
+  // PhotoViewerModal at full resolution, so the cover crop never loses content.
+  photoCard: {
+    ...StyleSheet.absoluteFillObject,
+    margin: spacing.md,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
+  },
   photo: {
     width: '100%',
     height: '100%',
   },
   photoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  expandHint: {
+    position: 'absolute',
+    right: spacing.sm,
+    bottom: spacing.sm,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -616,9 +638,6 @@ const styles = StyleSheet.create({
     color: colors.onSurfaceVariant,
     marginTop: 2,
   },
-  cardLock: {
-    marginTop: 4,
-  },
   // ── Edit inputs ─────────────────────────────────────────────────────────────
   editInput: {
     color: colors.onSurface,
@@ -650,10 +669,6 @@ const styles = StyleSheet.create({
   editHint: {
     color: colors.onSurfaceVariant,
     marginTop: spacing.xs,
-  },
-  editFootnote: {
-    color: colors.onSurfaceVariant,
-    marginTop: spacing.md,
   },
   // ── Edit action bar ──────────────────────────────────────────────────────────
   editBar: {

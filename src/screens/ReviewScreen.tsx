@@ -29,7 +29,7 @@ import * as Haptics from 'expo-haptics';
 import { saveBackendArticle } from '../services/storage';
 import { FIELD_ORDER } from '../services/fieldOrder';
 import { suggestAllergen } from '../services/allergenSuggestions';
-import { submitFieldOverrides, isHumanEditableField } from '../services/fieldOverrideSubmit';
+import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
 import { enqueueConfirmIngestion } from '../services/outbox';
 import { drainOutbox } from '../services/outboxDrain';
 import {
@@ -53,6 +53,7 @@ import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
 import { useScan } from '../hooks/useScanQueue';
 import { completeScan } from '../services/scanQueue';
 import { SkeletonValue } from '../components/SkeletonFieldList';
+import { PhotoViewerModal } from '../components/PhotoViewerModal';
 import { CascadeReveal, cascadeDelay } from '../components/CascadeReveal';
 import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
@@ -362,6 +363,7 @@ export function ReviewScreen() {
   const barcodeRaw = scan?.barcodeRaw;
 
   const [saving, setSaving] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
   const [edits, setEdits] = useState<Record<string, string>>({});
   // Tier 5 — start the staged-progress clock at mount so the banner advances
   // Lecture → Analyse while the run is polled (docs/LATENCY-REVIEW.md §5). A scan
@@ -477,10 +479,11 @@ export function ReviewScreen() {
       // Cohérence HACCP (audit §4.2): push each human correction to the AUTHORITATIVE
       // backend store (append-only, source='human') so the server holds the validated
       // value, not just this device. Best-effort + non-blocking: the local save is done,
-      // so a sync hiccup never stalls the continuous-capture loop. GS1-owned fields are
-      // skipped (the backend rejects them; they're barcode-exact).
+      // so a sync hiccup never stalls the continuous-capture loop. Workflow v1: ALL 17
+      // fields are editable, including GS1-owned ones — submitFieldOverrides tags those
+      // with force_gs1 so the server accepts them under its dedicated audit action.
       const corrections = savedFields
-        .filter((f) => f.edited && isHumanEditableField(f.field_name))
+        .filter((f) => f.edited)
         .map((f) => ({ field_name: f.field_name, value: f.value }));
       // Best-effort backend sync, SEQUENCED: corrections first, THEN the confirm
       // (the confirmed status asserts "review done" — it must never race ahead of
@@ -525,7 +528,17 @@ export function ReviewScreen() {
     <View style={styles.root}>
       {photoUri ? (
           <View style={styles.photoContainer}>
-            <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="contain" />
+            <Pressable
+              onPress={() => setViewerOpen(true)}
+              style={styles.photoCard}
+              accessibilityRole="button"
+              accessibilityLabel="Voir la photo en plein écran"
+            >
+              <Image source={{ uri: photoUri }} style={styles.photo} resizeMode="cover" />
+              <View style={styles.expandHint}>
+                <MaterialCommunityIcons name="arrow-expand" size={16} color={colors.onPrimary} />
+              </View>
+            </Pressable>
             <View style={[styles.photoAppBar, { paddingTop: insets.top + 8 }]}>
               <Pressable
                 onPress={handleBack}
@@ -539,6 +552,7 @@ export function ReviewScreen() {
             </View>
           </View>
         ) : null}
+      <PhotoViewerModal visible={viewerOpen} photoUri={photoUri} onClose={() => setViewerOpen(false)} />
 
         <ScrollView
           style={styles.contentCard}
@@ -712,13 +726,31 @@ const styles = StyleSheet.create({
   photoContainer: {
     height: 260,
     position: 'relative',
-    // Dark, neutral backdrop: with resizeMode="contain" the letterboxing around the
-    // frame-only crop reads as a deliberate frame rather than a rendering gap.
     backgroundColor: colors.onSurface,
+  },
+  // §6.3 — rounded cover card. The rognage this implies is safe now: a tap always
+  // opens PhotoViewerModal at full resolution (`contain`), so nothing is ever lost,
+  // only initially cropped for a tidy thumbnail.
+  photoCard: {
+    ...StyleSheet.absoluteFillObject,
+    margin: spacing.md,
+    borderRadius: radius.lg,
+    overflow: 'hidden',
   },
   photo: {
     width: '100%',
     height: '100%',
+  },
+  expandHint: {
+    position: 'absolute',
+    right: spacing.sm,
+    bottom: spacing.sm,
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   photoAppBar: {
     position: 'absolute',
