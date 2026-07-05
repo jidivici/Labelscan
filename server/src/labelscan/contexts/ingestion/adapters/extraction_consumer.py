@@ -47,6 +47,7 @@ from labelscan.contexts.ingestion.domain.extraction import (
     is_ocr_garbage,
 )
 from labelscan.contexts.ingestion.domain.gs1 import parse_gs1
+from labelscan.contexts.ingestion.domain.interim_fields import extract_interim_fields
 from labelscan.contexts.ingestion.domain.reconciliation import (
     adjusted_outcome,
     gs1_resolved_field_names,
@@ -283,6 +284,25 @@ class ExtractionConsumer:
             )
             return
 
+        # ── Tier 3 wave 2: interim commit BETWEEN OCR and LLM ──────────────────
+        # A separate, immediately-committed transaction (NOT worker_conn) writes the
+        # conservative regex preview fields + bumps raw_stored -> ocr_done, so the
+        # polling client renders wave 2 while the LLM below is still running. Best
+        # effort by design: the preview is non-authoritative (the reconciled run
+        # supersedes it), so a failure here must never fail the extraction.
+        try:
+            self._persist_interim(ingestion_id, ocr, known, corr, trace)
+        except Exception as e:  # noqa: BLE001 — preview only, never fatal
+            _log.warning(
+                "interim_persist_failed",
+                extra={
+                    "ingestion_id": ingestion_id,
+                    "error": str(e),
+                    "correlation_id": corr,
+                    "trace_id": trace,
+                },
+            )
+
         _llm_t0 = time.monotonic()
         try:
             llm = self._with_provider_retry(
@@ -309,6 +329,9 @@ class ExtractionConsumer:
                 "ingestion_id": ingestion_id,
                 "ocr_ms": round(ocr_ms, 1),
                 "llm_ms": round(llm_ms, 1),
+                # Image size actually sent to Vision — correlates OCR time with payload
+                # (Tier 7: a smaller image should shrink ocr_ms on a slow egress).
+                "image_bytes": len(image_bytes),
                 "correlation_id": corr,
                 "trace_id": trace,
             },
@@ -598,6 +621,64 @@ class ExtractionConsumer:
                 },
             )
             return _llm_from_json(normalized)
+
+    def _persist_interim(self, ingestion_id, ocr, gs1_known, corr, trace) -> None:
+        """Tier 3 wave 2: commit the deterministic preview + the ocr_done transit.
+
+        Own transaction on a clean connection (the final persist on worker_conn is
+        untouched). Idempotent on redelivery: inserts are ON CONFLICT DO NOTHING and
+        the status bump is guarded to the pre-LLM states, so a retry after a crash
+        (or a replayed event) never regresses a terminal status or churns values.
+        Fields the barcode ACTUALLY resolved (gs1_known) are skipped — the client
+        already shows them at T+0 and the barcode (exact) must never be contradicted
+        by a regex preview. On a no-barcode scan gs1_known is empty, so lot/dates DO
+        get a preview — precisely the scans wave 2 exists for.
+        """
+        interim = tuple(
+            f for f in extract_interim_fields(ocr.full_text) if f.name not in gs1_known
+        )
+        with self._engine.begin() as c:
+            set_audit_context(
+                c,
+                actor_id=SYSTEM_ACTOR,
+                action="ingestion.ocr_done",
+                correlation_id=corr,
+                trace_id=trace,
+            )
+            for f in interim:
+                c.execute(
+                    text(
+                        "INSERT INTO ingestion.interim_field "
+                        "(ingestion_id, field_name, value, correlation_id, trace_id) "
+                        "VALUES (:iid, :name, CAST(:val AS jsonb), :corr, :trace) "
+                        "ON CONFLICT (ingestion_id, field_name) DO NOTHING"
+                    ),
+                    {
+                        "iid": ingestion_id,
+                        "name": f.name,
+                        "val": json.dumps(f.value),
+                        "corr": corr,
+                        "trace": trace,
+                    },
+                )
+            # Even with zero matched fields the transit itself is the signal the
+            # progress banner binds to (Lecture du texte -> Analyse, for real).
+            c.execute(
+                text(
+                    "UPDATE ingestion.ingestion SET status = 'ocr_done' "
+                    "WHERE id = :id AND status IN ('raw_stored', 'ocr_running')"
+                ),
+                {"id": ingestion_id},
+            )
+        _log.info(
+            "interim_persisted",
+            extra={
+                "ingestion_id": ingestion_id,
+                "interim_field_count": len(interim),
+                "correlation_id": corr,
+                "trace_id": trace,
+            },
+        )
 
     def _persist(
         self,

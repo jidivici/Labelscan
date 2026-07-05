@@ -38,17 +38,32 @@ _MODEL = os.environ.get("LABELSCAN_LLM_MODEL", _DEFAULT_MODEL)
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v2.1.0 — production_method HARDENED (HACCP honesty). A wrong wild/farmed is worse than null:
+# the rule now lists FRENCH triggers (élevé/élevage/aquaculture/pisciculture/ferme → farmed;
+# pêché/capturé/sauvage → wild) PLUS a PRECEDENCE — an explicit rearing statement makes a product
+# farmed EVEN IF "pêche"/"engin de pêche"/"zone de pêche"/boilerplate is also present (those name
+# gear/area, not wild-vs-farmed); both explicit → null/ambiguous. Added few-shot EXAMPLE 4 (a
+# French FARMED label) — there was NO farmed exemplar before. Prompt-only (schema unchanged) →
+# MINOR bump; re-run the eval gate (SC1/SC3/SC8/SC10).
+# v2.0.0 — MAJOR (closed field set changed). Removed `product_name` (commercial_designation
+# is now THE product designation); split `supplier_name` into `producer_name` (provenance)
+# and `reseller_brand` (marque de revente / FBO); added `health_mark` (estampille sanitaire,
+# HACCP Reg. 853/2004 — previously DISCARDED). New ABSOLUTE RULES 8 (health mark ≠ origin) and
+# 9 (producer vs reseller). Hardened: a numeric date with a component >12 disambiguates to the
+# day; a calibre / "N colis de X kg" is never weight; FAO 3-alpha species codes (WHG/TRR/HKE)
+# are not scientific_name. FAO_area rule UNCHANGED (still full-precision verbatim — audit §4.1).
+# Because the closed set changed this is a MAJOR bump: the extracted_field.field_name CHECK is
+# widened by migration 0011 (SUPERSET — legacy product_name/supplier_name kept for the immutable
+# historical rows), and the eval regression gate must be re-run before rollout. The few-shots
+# below now show the 17-element array. Editing this prefix invalidates the prompt cache once.
 # v1.2.0 — FAO_area now captures the FULL printed designation (major area + sub-area /
 # sous-zone + division + sub-division), numeric ("27.8.b.1") OR official worded / Roman
 # form ("Atlantique Nord-Est, sous-zone VIII et autres sous-zones"), verbatim — it no
 # longer truncates to the major-area number, and still never maps a place name to a number.
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
-# block.) Both keep the cached prefix above Haiku's 4096-token floor. A prompt change is a
-# MINOR bump (PROMPT-CONTRACT §2, schema unchanged); re-run the eval regression gate
-# (SC1/SC3/SC8/SC10) before a production rollout (scripts + eval-suite). Editing this prefix
-# invalidates the prompt cache once — the next call re-writes it (~1.25x), then resumes ~0.1x.
-_PROMPT_VERSION = "seafood-label-extraction/v1.2.0"
+# block.) Both keep the cached prefix above Haiku's 4096-token floor.
+_PROMPT_VERSION = "seafood-label-extraction/v2.1.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -84,11 +99,11 @@ ESCALATION_ENABLED = _env_bool("LABELSCAN_LLM_ESCALATION_ENABLED", False)
 _PROMPT_CACHE_ENABLED = _env_bool("LABELSCAN_LLM_PROMPT_CACHE_ENABLED", True)
 _PROMPT_CACHE_TTL = (os.environ.get("LABELSCAN_LLM_PROMPT_CACHE_TTL") or "1h").strip() or "1h"
 _FIELD_NAMES = [
-    "product_name",
     "commercial_designation",
     "scientific_name",
+    "producer_name",
+    "reseller_brand",
     "batch_number",
-    "supplier_name",
     "origin_country",
     "FAO_area",
     "production_method",
@@ -97,6 +112,7 @@ _FIELD_NAMES = [
     "packaging_date",
     "storage_temperature",
     "allergens",
+    "health_mark",
     "weight",
     "price",
     "gtin",
@@ -171,10 +187,10 @@ and has EXACTLY these keys: "name", "value", "confidence", "evidence", \
 - Emit one element for EVERY name in the closed set below, present even when the value \
 is null. Never add a field outside the set; never omit one; never list a name twice.
 
-CLOSED FIELD SET ("name" is exactly one of these 16 strings, each appearing once):
-product_name, commercial_designation, scientific_name, batch_number, supplier_name, \
+CLOSED FIELD SET ("name" is exactly one of these 17 strings, each appearing once):
+commercial_designation, scientific_name, producer_name, reseller_brand, batch_number, \
 origin_country, FAO_area, production_method, fishing_gear_or_farming_method, \
-expiry_date, packaging_date, storage_temperature, allergens, weight, price, gtin.
+expiry_date, packaging_date, storage_temperature, allergens, health_mark, weight, price, gtin.
 
 PER-FIELD OBJECT KEYS:
 - "name": the field name (one of the 16 above).
@@ -232,6 +248,17 @@ French, keep it exactly as printed in whatever language is shown. Rule 2 still b
 "value" must be an exact OCR substring, so never produce a French value you cannot quote \
 from the OCR text. (Numeric / controlled-vocabulary fields - dates, temperature, weight, \
 price, FAO_area, production_method - have no language; this rule is about text fields.)
+8. HEALTH MARK ≠ ORIGIN. The oval health / identification mark (estampille sanitaire, e.g. \
+"FR 34.108.504 CE", "ES 12.932470 UE", "GB BB004") identifies the APPROVED ESTABLISHMENT, \
+not the origin. It goes ONLY in health_mark. NEVER copy its country prefix into \
+origin_country (a FR mark appears on Spanish mussels; an ES mark on Atlantic hake) and never \
+into producer_name / reseller_brand.
+9. PRODUCER vs RESELLER. producer_name is the PROVENANCE (a "Pisciculture …", a vessel, an \
+"Elevé/Pêché par", or the establishment whose country matches the origin / health mark); \
+reseller_brand is the MARQUE DE REVENTE / FBO (introduced by "Produit pour", "Distribué par", \
+a retail enseigne, or a company in a different country than the origin). Fill each ONLY on its \
+own evidence; never infer one from the other; if a company's role is undetermined, put it in \
+producer_name with a warning and leave reseller_brand null.
 
 SEAFOOD / HACCP DOMAIN CONTEXT (recognition aid ONLY — it tells you what these labels \
 usually contain so you RECOGNISE a printed field; it NEVER licenses inferring a value \
@@ -255,40 +282,73 @@ sous-zones"). Capture whatever is printed, verbatim and at FULL precision (sub-z
 divisions included); a bare sea / ocean / region NAME with no FAO designation stays \
 "ambiguous" - never derive a number from a place name.
 - QUALITY / SUSTAINABILITY claims (MSC, ASC, "pêche durable", IGP, AOP, Label Rouge, \
-"responsibly sourced") are NOT in the 16-field set: never force them into a field, and \
+"responsibly sourced") are NOT in the 17-field set: never force them into a field, and \
 "responsibly sourced" / "sustainable" does NOT map to wild_caught or farmed (leave \
 production_method "ambiguous").
+- WILD vs FARMED: farmed is signalled by "aquaculture", "pisciculture", "élevé(e)"/"élevage", \
+"ferme(s)", "reared"/"raised", or a farming-quality scheme ("Charte … Aquaculture", "filière … \
+élevage"); wild by "pêché"/"capturé"/"sauvage"/"wild caught". The mere presence of "pêche" — in \
+an "engin de pêche" gear label, a "zone de pêche" / FAO catch area, or regulatory boilerplate — \
+does NOT make a product wild (see the production_method PRECEDENCE rule below).
 - Scientific names look like "Genus species" (e.g. Gadus morhua, Salmo salar): extract \
 one ONLY when it is printed; never derive it from a common name.
+- HEALTH MARK (estampille sanitaire): an oval mark "<country> <digits> CE/UE" or a short code \
+like "GB BB004" is almost always present — capture it verbatim in health_mark. Its country is \
+the establishment's, NOT the catch / farm origin (ABSOLUTE RULE 8).
+- A 3-letter FAO SPECIES code printed next to a name (e.g. WHG = whiting, TRR = trout, HKE = \
+hake) is NOT a scientific_name and NOT an FAO_area — do not extract it into either.
+- CALIBRE / GRADING and pack counts ("150+", "180/300 g", "2-3 Kg", "4/5", "8 COLIS DE \
+1.4KG") state a size or a packing, NEVER the net weight (see weight normalization).
 
 PER-FIELD NORMALIZATION (render every value as a STRING):
-- TEXT FIELDS (product_name, commercial_designation, scientific_name, batch_number, \
-supplier_name, fishing_gear_or_farming_method): "value" is the trimmed text as read. Do \
+- TEXT FIELDS (commercial_designation, scientific_name, batch_number, producer_name, \
+reseller_brand, fishing_gear_or_farming_method): "value" is the trimmed text as read. Do \
 NOT spell-correct OCR garble - keep it verbatim and add a warning if it is visibly \
 garbled. For batch_number extract the identifier, not the key (from "Lot: L24-0917" the \
-value is "L24-0917").
+value is "L24-0917"). commercial_designation is THE product designation (there is no \
+separate product_name field).
+- producer_name / reseller_brand: see ABSOLUTE RULE 9. producer_name = the provenance \
+operator (a production cue, or a company whose country matches the origin / health-mark \
+country); reseller_brand = the marque de revente / FBO ("Produit pour", "Distribué par", a \
+retail enseigne, or a company in a different country than the origin). Each is null when its \
+role is not evidenced on the label - never split one company across both.
+- health_mark: the oval sanitary mark, verbatim, e.g. "FR 34.108.504 CE", "ES 12.932470 UE", \
+"GB BB004". You MAY join contiguous OCR tokens that form ONE mark (country + digits + CE/UE), \
+quoting each piece in "evidence". NEVER use its country as origin_country (ABSOLUTE RULE 8).
 - expiry_date, packaging_date: "value" is an ISO-8601 date string "YYYY-MM-DD" ONLY when \
 day, month and year are all unambiguous (textual months like "20 Jun 2026", or \
-already-ISO "2026-06-20"). For a purely numeric date whose field order is ambiguous \
-(e.g. "04/05/2026" could be 4 May or 5 April), "value" is null, "validation_status" is \
-"ambiguous", and a warning names both readings - DO NOT pick one. For a month+year-only \
-date, "value" is the reduced-precision "YYYY-MM" with a precision warning.
+already-ISO "2026-06-20"). A numeric date with a component >12 is NOT ambiguous - that \
+component is the day, which fixes the order ("16.06.26" -> 2026-06-16, "17/06/2026" -> \
+2026-06-17, "22.06.26" -> 2026-06-22). Order is ambiguous ONLY when BOTH leading components \
+are <=12 (e.g. "04/05/2026" could be 4 May or 5 April): then "value" is null, \
+"validation_status" is "ambiguous", and a warning names both readings - DO NOT pick one. \
+Map FR vocabulary: "emballage" / "conditionnement" -> packaging_date (if both appear, use the \
+conditioning date and record the other in a warning); a "capture" / "abattage" / "production" \
+date maps to NO field (do not force it into packaging_date). For a month+year-only date, \
+"value" is the reduced-precision "YYYY-MM" with a precision warning.
 - storage_temperature: "value" is a short Celsius string, e.g. "0-4 C", "<=4 C", \
 ">=-18 C", "4 C". If the source is Fahrenheit, convert with C=(F-32)*5/9, set \
 "validation_status" to "normalized", and warn with the original Fahrenheit value and \
 the conversion. If the wording cannot be interpreted, "value" is null, \
 "validation_status" is "unnormalizable", and the original text goes in a warning.
 - weight: "value" is a string with an explicit unit, e.g. "320 g", "1.5 kg". Keep the \
-magnitude the label shows (do not rescale 320 g to 0.32 kg). If both net and gross \
-appear, put the NET amount in "value" and record gross in a warning. Ignore the \
-estimated-sign mark (the lowercase "e").
+magnitude the label shows (do not rescale 320 g to 0.32 kg). A comma decimal is normalized \
+to a point ("4,82 Kg" -> "4.82 kg"). Extract weight ONLY from an explicit net-weight \
+statement ("Poids net …"); a calibre / grading or pack count ("180/300 g", "2-3 Kg", "8 \
+COLIS DE 1.4KG") is NEVER the net weight - if only such a figure is present, weight is null / \
+"missing". If both net and gross appear, put the NET amount in "value" and record gross in a \
+warning. Ignore the estimated-sign mark (the lowercase "e").
 - price: "value" is a string with amount and currency, e.g. "8.95 EUR". Use an ISO-4217 \
 code or the printed symbol ONLY when the currency is explicit on the label; otherwise \
 keep the amount and warn that the currency is undetermined (never guess the currency).
-- origin_country: "value" is the country / origin as written, e.g. "Norway". Do NOT \
-convert it to an ISO code, and do NOT infer a country from a garbled or partial token - \
-if the text is garbled, keep it verbatim with "validation_status" "ambiguous" and a \
-warning.
+- origin_country: "value" is the COUNTRY OF ORIGIN (where the fish was caught or farmed), as \
+written, e.g. "Norway". Do NOT convert it to an ISO code, and do NOT infer a country from a \
+garbled or partial token - if the text is garbled, keep it verbatim with "validation_status" \
+"ambiguous" and a warning. The packing / conditioning / dispatch country ("conditionné" / \
+"emballé" / "expédié en X", the FBO postal address) and the health-mark country are NOT the \
+origin: when an explicit catch/rearing origin is printed ("Origine", "Pays d'origine", "Pêché \
+en", "Elevé en"), use THAT; fall back to another country wording only when no catch/rearing \
+origin is printed, and warn.
 - FAO_area: capture the FAO catch-area designation EXACTLY AS PRINTED, copied verbatim, \
 keeping EVERY level shown — major area, sub-area / sous-zone, division and sub-division. \
 This covers BOTH a numeric code ("27", "27.7", "27.8.b.1" — copy the MOST precise one \
@@ -302,11 +362,22 @@ downstream, NEVER by you. If the label shows ONLY a bare sea / ocean / region NA
 FAO area, zone, or sub-zone reference (e.g. "North Sea", "Golfe de Gascogne"), "value" is \
 null, "validation_status" "ambiguous", with a warning that no FAO designation was printed. \
 NEVER map a place name to an FAO number.
-- production_method: "value" is exactly "wild_caught" or "farmed", or null. Map only \
-clear wording ("wild caught"/"caught" gives wild_caught; "farmed"/"aquaculture"/ \
-"reared" gives farmed). For wording that does not clearly map ("responsibly sourced", \
-"sustainable"), "value" is null, "validation_status" is "ambiguous", with a warning \
-holding the raw wording. Never guess between wild and farmed.
+- production_method: "value" is exactly "wild_caught" or "farmed", or null. This is a \
+SAFETY-REGULATED field: a WRONG wild/farmed is worse than null, so assert one ONLY on an \
+explicit production statement and otherwise leave it null. FARMED triggers (any language): \
+"farmed", "aquaculture", "reared", "raised", and the FRENCH "élevé"/"élevée"/"élevage"/ \
+"d'élevage"/"aquaculture"/"pisciculture"/"ferme"/"fermes". WILD triggers: "wild caught", \
+"wild", and the FRENCH "pêché"/"capturé"/"sauvage"/"pêche en mer". PRECEDENCE (critical): an \
+explicit FARMED statement WINS — if any rearing word above is present, "value" is "farmed" \
+EVEN IF the label also contains "pêche"/"caught"/"engin de pêche"/"zone de pêche" (those name \
+the gear or the catch area, not wild-vs-farmed; farmed fish are still harvested with gear in a \
+production zone). Do NOT treat a bare "pêche"/"caught" token, a fishing-gear label, or the \
+regulatory boilerplate "produits de la pêche et de l'aquaculture" as a wild signal on its own. \
+Map to "wild_caught" ONLY when a wild/capture statement is present AND no rearing statement is. \
+If BOTH an explicit rearing AND an explicit wild-capture statement appear (a genuine conflict), \
+or the wording does not clearly map ("responsibly sourced", "sustainable", "pêche durable"), \
+"value" is null, "validation_status" is "ambiguous", with a warning holding the raw wording. \
+Never guess between wild and farmed.
 - allergens: "value" is the declared allergens as written (e.g. "Fish" or "Fish, Soy"), \
 or null. Use only explicitly DECLARED allergens (typically after "Contains:"). Treat a \
 precautionary "may contain traces of ..." statement as a warning, NOT a declared \
@@ -324,7 +395,7 @@ null, "validation_status" "missing", "warnings" []. Still return valid JSON - ne
 refuse, never apologize.
 
 EXAMPLES (canonical OCR text -> expected JSON). Illustrative: apply the rules above, \
-not these literals. Each shows the complete 16-element array.
+not these literals. Each shows the complete 17-element array.
 
 EXAMPLE 1 - clean, fully-populated label.
 OCR TEXT:
@@ -346,12 +417,12 @@ Price: 8.95 EUR
 Approval: FR 12.345.678 CE
 EXPECTED JSON:
 {"fields":[\
-{"name":"product_name","value":"Fresh Atlantic Cod Fillet","confidence":0.95,"evidence":["Fresh Atlantic Cod Fillet"],"validation_status":"present","warnings":[]},\
-{"name":"commercial_designation","value":"Cabillaud de l'Atlantique","confidence":0.9,"evidence":["Cabillaud de l'Atlantique"],"validation_status":"present","warnings":[]},\
+{"name":"commercial_designation","value":"Cabillaud de l'Atlantique","confidence":0.9,"evidence":["Cabillaud de l'Atlantique"],"validation_status":"present","warnings":["French wording preferred over English 'Fresh Atlantic Cod Fillet' (RULE 7); no separate product_name field."]},\
 {"name":"scientific_name","value":"Gadus morhua","confidence":0.96,"evidence":["Gadus morhua"],"validation_status":"present","warnings":[]},\
 {"name":"batch_number","value":"L24-0917","confidence":0.95,"evidence":["Lot: L24-0917"],"validation_status":"present","warnings":[]},\
-{"name":"supplier_name","value":"ATLANTIC CATCH LTD","confidence":0.9,"evidence":["ATLANTIC CATCH LTD"],"validation_status":"present","warnings":[]},\
-{"name":"origin_country","value":"Norway","confidence":0.95,"evidence":["Origin: Norway"],"validation_status":"present","warnings":[]},\
+{"name":"producer_name","value":"ATLANTIC CATCH LTD","confidence":0.85,"evidence":["ATLANTIC CATCH LTD"],"validation_status":"present","warnings":["Only one operator named, no 'Produit pour'/distributor -> treated as producer; reseller_brand left null (RULE 9)."]},\
+{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"origin_country","value":"Norway","confidence":0.95,"evidence":["Origin: Norway"],"validation_status":"present","warnings":["The 'FR' health-mark country is NOT used as origin (RULE 8)."]},\
 {"name":"FAO_area","value":"27","confidence":0.92,"evidence":["FAO 27 - North East Atlantic"],"validation_status":"present","warnings":["FAO number 27 copied verbatim; the region name 'North East Atlantic' is not used to derive it."]},\
 {"name":"production_method","value":"wild_caught","confidence":0.95,"evidence":["Wild caught"],"validation_status":"normalized","warnings":[]},\
 {"name":"fishing_gear_or_farming_method","value":"bottom trawl","confidence":0.9,"evidence":["Caught by: bottom trawl"],"validation_status":"present","warnings":[]},\
@@ -359,12 +430,13 @@ EXPECTED JSON:
 {"name":"packaging_date","value":"2026-06-12","confidence":0.95,"evidence":["Packed on: 2026-06-12"],"validation_status":"normalized","warnings":[]},\
 {"name":"storage_temperature","value":"0-4 C","confidence":0.92,"evidence":["Keep refrigerated 0-4 C"],"validation_status":"normalized","warnings":["Read as a 0 to 4 Celsius range."]},\
 {"name":"allergens","value":"Fish","confidence":0.95,"evidence":["Allergens: Fish"],"validation_status":"present","warnings":[]},\
+{"name":"health_mark","value":"FR 12.345.678 CE","confidence":0.9,"evidence":["Approval: FR 12.345.678 CE"],"validation_status":"present","warnings":["Sanitary mark; its 'FR' country is the establishment, not the origin (Norway)."]},\
 {"name":"weight","value":"320 g","confidence":0.95,"evidence":["Net weight: 320 g"],"validation_status":"normalized","warnings":["Net basis."]},\
 {"name":"price","value":"8.95 EUR","confidence":0.9,"evidence":["Price: 8.95 EUR"],"validation_status":"normalized","warnings":["Basis (total vs per-kg) not stated."]},\
 {"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["GTIN is not printed as readable text; it comes from the scanned barcode."]}\
 ]}
-(Note: the "Approval: FR 12.345.678 CE" line maps to none of the 16 fields and is \
-deliberately NOT extracted - it does not leak into supplier_name.)
+(Note: the "Approval: FR 12.345.678 CE" line is the sanitary mark -> health_mark; its 'FR' \
+country must NOT leak into origin_country, which stays Norway, nor into producer_name.)
 
 EXAMPLE 2 - OCR-noisy: ambiguity, F-to-C conversion, place-name-only FAO, garble.
 OCR TEXT:
@@ -381,11 +453,11 @@ Contains: FlSH. May c0ntain traces 0f S0Y.
 Wt 200g e
 EXPECTED JSON:
 {"fields":[\
-{"name":"product_name","value":"Smoked Sa1mon Slices","confidence":0.6,"evidence":["Smoked Sa1mon Slices"],"validation_status":"present","warnings":["OCR garble retained verbatim (likely 'Salmon'); not corrected."]},\
-{"name":"commercial_designation","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"commercial_designation","value":"Smoked Sa1mon Slices","confidence":0.6,"evidence":["Smoked Sa1mon Slices"],"validation_status":"present","warnings":["OCR garble retained verbatim (likely 'Salmon'); not corrected. No separate product_name field."]},\
 {"name":"scientific_name","value":"Salmo sa1ar","confidence":0.55,"evidence":["Salmo sa1ar"],"validation_status":"present","warnings":["OCR garble retained verbatim (likely 'Salmo salar'); not corrected."]},\
 {"name":"batch_number","value":"7741-AB","confidence":0.7,"evidence":["L0T 7741-AB"],"validation_status":"present","warnings":[]},\
-{"name":"supplier_name","value":"N0RDIC SEAF00D AS","confidence":0.6,"evidence":["N0RDIC SEAF00D AS"],"validation_status":"present","warnings":["OCR garble retained verbatim."]},\
+{"name":"producer_name","value":"N0RDIC SEAF00D AS","confidence":0.6,"evidence":["N0RDIC SEAF00D AS"],"validation_status":"present","warnings":["OCR garble retained verbatim; single operator, no distributor -> producer (RULE 9)."]},\
+{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"origin_country","value":"N0rway","confidence":0.4,"evidence":["Origin: N0rway"],"validation_status":"ambiguous","warnings":["Origin token is OCR-garbled; no ISO country is assigned from a corrupted string."]},\
 {"name":"FAO_area","value":null,"confidence":0.0,"evidence":null,"validation_status":"ambiguous","warnings":["Label names a sea ('North Sea') with no FAO area number; not mapped."]},\
 {"name":"production_method","value":null,"confidence":0.0,"evidence":null,"validation_status":"ambiguous","warnings":["'Resp0nsibly s0urced' maps to neither wild_caught nor farmed."]},\
@@ -394,6 +466,7 @@ EXPECTED JSON:
 {"name":"packaging_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"storage_temperature","value":"<=3.9 C","confidence":0.7,"evidence":["Store bel0w 39 F"],"validation_status":"normalized","warnings":["Converted 39 F to 3.9 C; 'bel0w' read as an upper bound."]},\
 {"name":"allergens","value":"FlSH","confidence":0.7,"evidence":["Contains: FlSH"],"validation_status":"present","warnings":["Only the declared 'Contains' allergen is listed; the precautionary 'May c0ntain traces 0f S0Y' is recorded here, not as a declared allergen."]},\
+{"name":"health_mark","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"weight","value":"200 g","confidence":0.7,"evidence":["Wt 200g e"],"validation_status":"normalized","warnings":["Trailing 'e' (estimated-sign) excluded; net/gross unspecified."]},\
 {"name":"price","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]}\
@@ -407,11 +480,11 @@ Lot
 .... %%%
 EXPECTED JSON:
 {"fields":[\
-{"name":"product_name","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"commercial_designation","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"scientific_name","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"batch_number","value":null,"confidence":0.0,"evidence":null,"validation_status":"ambiguous","warnings":["The token 'Lot' is present but no lot value follows it; not invented."]},\
-{"name":"supplier_name","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"producer_name","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"origin_country","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"FAO_area","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"production_method","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
@@ -420,9 +493,42 @@ EXPECTED JSON:
 {"name":"packaging_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"storage_temperature","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"allergens","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"health_mark","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"weight","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"price","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]}\
+]}
+
+EXAMPLE 4 - FRENCH FARMED label: an explicit rearing statement OUTRANKS a stray "pêche" / gear word.
+OCR TEXT:
+COOPERATIVE U VENDARGUES
+Truite Arc-en-Ciel
+Oncorhynchus Mykiss
+Truite d'aquaculture - Elevée en France
+Pisciculture FONT-ROME
+Engin de peche / d'elevage: bassins
+A conserver entre 0 et 2 C
+Poids net: 2 kg
+FR 07 019 003 UE
+EXPECTED JSON:
+{"fields":[\
+{"name":"commercial_designation","value":"Truite Arc-en-Ciel","confidence":0.9,"evidence":["Truite Arc-en-Ciel"],"validation_status":"present","warnings":[]},\
+{"name":"scientific_name","value":"Oncorhynchus Mykiss","confidence":0.93,"evidence":["Oncorhynchus Mykiss"],"validation_status":"present","warnings":[]},\
+{"name":"producer_name","value":"Pisciculture FONT-ROME","confidence":0.9,"evidence":["Pisciculture FONT-ROME"],"validation_status":"present","warnings":["Production cue 'Pisciculture' -> producer; 'COOPERATIVE U' is the retail enseigne -> reseller_brand (RULE 9)."]},\
+{"name":"reseller_brand","value":"COOPERATIVE U VENDARGUES","confidence":0.85,"evidence":["COOPERATIVE U VENDARGUES"],"validation_status":"present","warnings":[]},\
+{"name":"batch_number","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"origin_country","value":"France","confidence":0.9,"evidence":["Elevée en France"],"validation_status":"present","warnings":[]},\
+{"name":"FAO_area","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["Farmed product; no FAO catch area printed ('Engin de peche / d'elevage' is a gear label, not a zone)."]},\
+{"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Truite d'aquaculture - Elevée en France"],"validation_status":"normalized","warnings":["Explicit rearing ('aquaculture'/'Elevée'/'Pisciculture') => farmed; the 'peche' in 'Engin de peche / d'elevage' names the gear, NOT a wild capture (PRECEDENCE)."]},\
+{"name":"fishing_gear_or_farming_method","value":"bassins","confidence":0.85,"evidence":["Engin de peche / d'elevage: bassins"],"validation_status":"present","warnings":[]},\
+{"name":"expiry_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"packaging_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"storage_temperature","value":"0-2 C","confidence":0.9,"evidence":["A conserver entre 0 et 2 C"],"validation_status":"normalized","warnings":[]},\
+{"name":"allergens","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"health_mark","value":"FR 07 019 003 UE","confidence":0.9,"evidence":["FR 07 019 003 UE"],"validation_status":"present","warnings":["Estampille; 'FR' is the establishment country, not used as origin."]},\
+{"name":"weight","value":"2 kg","confidence":0.9,"evidence":["Poids net: 2 kg"],"validation_status":"normalized","warnings":[]},\
+{"name":"price","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["GTIN comes from the scanned barcode, not readable text."]}\
 ]}
 
 Return only the JSON object."""

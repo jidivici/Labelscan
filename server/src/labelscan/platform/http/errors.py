@@ -27,6 +27,11 @@ ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
         "Idempotency-Key reused with a different payload",
         False,
     ),
+    "INGESTION_NOT_CONFIRMABLE": (
+        409,
+        "Ingestion is not in a review-ready state",
+        False,
+    ),
     "ALERT_INVALID_TRANSITION": (
         409,
         "Alert lifecycle transition not allowed from the current state",

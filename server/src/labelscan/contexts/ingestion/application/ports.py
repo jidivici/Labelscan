@@ -75,8 +75,10 @@ class FieldOverrideRepository(Protocol):
     context is set so the run's AFTER INSERT audit trigger fires.
 
     Returns None when the ingestion has no extraction run to override (→ 404).
-    Idempotent: if the latest run already carries this exact human value, no new
-    run is written and the existing field is returned (replayed=True)."""
+    Idempotent twice over: (a) VALUE — if the latest run already carries this exact
+    human value, no new run is written (replayed=True); (b) KEY — when the client
+    supplies an idempotency_key, a repeat of that key (per actor) replays the run
+    the ORIGINAL request produced, even if the field has since changed again."""
 
     def override_field(
         self,
@@ -87,4 +89,35 @@ class FieldOverrideRepository(Protocol):
         note: str | None,
         audit: AuditContext,
         action: str,
+        idempotency_key: str | None = None,
     ) -> OverriddenField | None: ...
+
+
+@dataclass(frozen=True)
+class ConfirmedIngestion:
+    """Outcome of a reviewer confirming an ingestion (terminal review state)."""
+
+    ingestion_id: str
+    status: str  # 'confirmed'
+    replayed: bool  # True => it was already confirmed (idempotent repeat)
+
+
+class ConfirmNotAllowed(Exception):
+    """The ingestion is not in a review-ready state (still processing, or failed) —
+    confirming it would assert a review that never happened (→ 409)."""
+
+    def __init__(self, status: str) -> None:
+        super().__init__(status)
+        self.status = status
+
+
+class ConfirmIngestionRepository(Protocol):
+    """Finalizes the review: transitions a review-ready ingestion
+    (extracted / needs_review / ocr_skipped_garbage) to 'confirmed', audited.
+    Idempotent: an already-confirmed ingestion replays (no write). Returns None
+    when the ingestion does not exist (→ 404); raises ConfirmNotAllowed for any
+    other state (→ 409)."""
+
+    def confirm(
+        self, *, ingestion_id: str, audit: AuditContext, action: str
+    ) -> ConfirmedIngestion | None: ...

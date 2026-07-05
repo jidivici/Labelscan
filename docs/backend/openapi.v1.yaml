@@ -467,10 +467,10 @@ components:
         source:            { type: string, enum: [llm, human] }
         extractor_version: { type: string, nullable: true }
         source_ref:        { type: string, nullable: true, description: "Pointer into the immutable raw OCR (token span); null if unverifiable. Equivalent to extracted_field.evidence." }
-    # D1: the 15 canonical extraction.v1 field names (raw_warnings is a label-level stub on extraction_run, not a per-field name).
+    # D1: the v2 canonical field names (prompt v2.0.0). raw_warnings is a label-level stub on extraction_run, not a per-field name. Legacy product_name/supplier_name kept for immutable historical rows (migration 0011 superset).
     FieldName:
       type: string
-      enum: [product_name, commercial_designation, scientific_name, batch_number, supplier_name, origin_country, FAO_area, production_method, fishing_gear_or_farming_method, expiry_date, packaging_date, storage_temperature, allergens, weight, price]
+      enum: [commercial_designation, scientific_name, producer_name, reseller_brand, batch_number, origin_country, FAO_area, production_method, fishing_gear_or_farming_method, expiry_date, packaging_date, storage_temperature, allergens, health_mark, weight, price, gtin, product_name, supplier_name]
     # D2: validation_status and per-field warnings are persisted (extracted_field) and must appear in the read model so it is a faithful projection.
     ExtractedField:
       type: object

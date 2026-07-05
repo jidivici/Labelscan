@@ -16,15 +16,16 @@
 > The DDL is the companion file [`schema.sql`](./schema.sql); illustrative migrations are in
 > [`migrations/`](./migrations/). Keep all three in sync.
 
-**A note on field count.** The brief references "the 16 fields." `extraction.v1.schema.json`'s
-`fields` object has **15 substantive label fields** — `product_name`, `commercial_designation`,
-`scientific_name`, `batch_number`, `supplier_name`, `origin_country`, `FAO_area`,
-`production_method`, `fishing_gear_or_farming_method`, `expiry_date`, `packaging_date`,
-`storage_temperature`, `allergens`, `weight`, `price` — plus a **field-level `raw_warnings`** key
-(the 16th key in that object) and a separate **top-level `raw_warnings`** array. The schema persists
-the **15 substantive fields** as `extracted_field` rows (each with its own `warnings`), plus `gtin`
-(migration 0008, set from GS1 AI 01) for a total of **16 allowed field_name values**. The label-level
-`raw_warnings` is stored on `extraction_run.raw_warnings`.
+**A note on field count (prompt v2.0.0).** The runtime LLM emits **16 substantive label fields** —
+`commercial_designation`, `scientific_name`, `producer_name`, `reseller_brand`, `batch_number`,
+`origin_country`, `FAO_area`, `production_method`, `fishing_gear_or_farming_method`, `expiry_date`,
+`packaging_date`, `storage_temperature`, `allergens`, `health_mark`, `weight`, `price` — plus `gtin`
+(set from GS1 AI 01) for **17 emitted fields**. v2 dropped `product_name` (`commercial_designation`
+is now THE designation), split `supplier_name` into `producer_name`/`reseller_brand`, and added
+`health_mark` (estampille sanitaire). The `extracted_field.field_name` CHECK is a **SUPERSET**
+(migration 0011): it still also allows the legacy `product_name`/`supplier_name` so the append-only
+immutable historical rows stay valid. The label-level `raw_warnings` is stored on
+`extraction_run.raw_warnings`.
 
 ---
 
@@ -83,7 +84,7 @@ ingestion.ingestion`, `extracted_field.extraction_run_id → extraction_run`,
 `value` and *typed* columns for the uniform provenance/quality attributes.** This is the
 queryability-vs-flexibility trade-off named explicitly:
 
-- The **value shapes are heterogeneous** across the 15 fields (a plain string for `product_name`;
+- The **value shapes are heterogeneous** across the fields (a plain string for `commercial_designation`;
   `{raw, iso_3166_1_alpha2}` for `origin_country`; `{kind, celsius_min, celsius_max, original}` for
   `storage_temperature`; an array for `allergens`; `{amount, unit, basis, ...}` for `weight`). A
   fixed typed SQL column per field would mean 15 sparse, mostly-null columns and a schema change for

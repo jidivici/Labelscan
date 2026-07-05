@@ -16,15 +16,15 @@
       "const": "seafood-label-extraction/v1.0.0"
     },
     "fields": {
-      "description": "Exactly the closed set of target seafood label fields. Every key is required and present even when its value is null. No keys outside this set are permitted (additionalProperties:false).",
+      "description": "Exactly the closed set of target seafood label fields. Every key is required and present even when its value is null. No keys outside this set are permitted (additionalProperties:false). v2.0.0 field set: product_name removed (commercial_designation is THE designation); supplier_name split into producer_name/reseller_brand; health_mark added. NOTE: the polymorphic per-field VALUE shapes below remain the owner-gated TARGET — the runtime adapter currently emits the flat string projection (claude_llm_provider._OUTPUT_SCHEMA).",
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "product_name",
         "commercial_designation",
         "scientific_name",
+        "producer_name",
+        "reseller_brand",
         "batch_number",
-        "supplier_name",
         "origin_country",
         "FAO_area",
         "production_method",
@@ -33,16 +33,17 @@
         "packaging_date",
         "storage_temperature",
         "allergens",
+        "health_mark",
         "weight",
         "price",
         "raw_warnings"
       ],
       "properties": {
-        "product_name": { "$ref": "#/$defs/stringField" },
         "commercial_designation": { "$ref": "#/$defs/stringField" },
         "scientific_name": { "$ref": "#/$defs/stringField" },
+        "producer_name": { "$ref": "#/$defs/stringField" },
+        "reseller_brand": { "$ref": "#/$defs/stringField" },
         "batch_number": { "$ref": "#/$defs/stringField" },
-        "supplier_name": { "$ref": "#/$defs/stringField" },
         "origin_country": { "$ref": "#/$defs/originCountryField" },
         "FAO_area": { "$ref": "#/$defs/faoAreaField" },
         "production_method": { "$ref": "#/$defs/productionMethodField" },
@@ -51,6 +52,7 @@
         "packaging_date": { "$ref": "#/$defs/dateField" },
         "storage_temperature": { "$ref": "#/$defs/temperatureField" },
         "allergens": { "$ref": "#/$defs/allergensField" },
+        "health_mark": { "$ref": "#/$defs/stringField" },
         "weight": { "$ref": "#/$defs/weightField" },
         "price": { "$ref": "#/$defs/priceField" },
         "raw_warnings": { "$ref": "#/$defs/stringField" }

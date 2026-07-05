@@ -20,8 +20,8 @@ the current transaction and reset automatically on COMMIT/ROLLBACK.
 
 from __future__ import annotations
 
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 
 from sqlalchemy import text
 from sqlalchemy.engine import Connection

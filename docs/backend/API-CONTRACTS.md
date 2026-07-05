@@ -141,10 +141,11 @@ paths:
       parameters:
         - { name: id, in: path, required: true, schema: { type: string } }
         - { name: field_name, in: path, required: true,
-            schema: { type: string, enum: [product_name, commercial_designation, scientific_name,
-                      batch_number, supplier_name, origin_country, FAO_area, production_method,
+            schema: { type: string, enum: [commercial_designation, scientific_name, producer_name,
+                      reseller_brand, batch_number, origin_country, FAO_area, production_method,
                       fishing_gear_or_farming_method, expiry_date, packaging_date,
-                      storage_temperature, allergens, weight, price] } }   # D1: 15 canonical extraction.v1 names
+                      storage_temperature, allergens, health_mark, weight, price, gtin,
+                      product_name, supplier_name] } }   # D1: v2 names (prompt v2.0.0) + legacy (migration 0011 superset)
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true

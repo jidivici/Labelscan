@@ -1,13 +1,6 @@
 {
   "schema_version": "seafood-label-extraction/v1.0.0",
   "fields": {
-    "product_name": {
-      "value": "Fresh Atlantic Cod Fillet",
-      "confidence": 0.96,
-      "evidence": ["Fresh Atlantic Cod Fillet"],
-      "validation_status": "present",
-      "warnings": []
-    },
     "commercial_designation": {
       "value": "Cabillaud de l'Atlantique",
       "confidence": 0.85,
@@ -29,11 +22,18 @@
       "validation_status": "present",
       "warnings": []
     },
-    "supplier_name": {
+    "producer_name": {
       "value": "ATLANTIC CATCH LTD",
       "confidence": 0.8,
       "evidence": ["ATLANTIC CATCH LTD"],
       "validation_status": "present",
+      "warnings": ["Only one operator named, no 'Produit pour'/distributor -> treated as producer; reseller_brand left null (RULE 9)."]
+    },
+    "reseller_brand": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": null,
+      "validation_status": "missing",
       "warnings": []
     },
     "origin_country": {
@@ -41,7 +41,7 @@
       "confidence": 0.92,
       "evidence": ["Origin: Norway"],
       "validation_status": "normalized",
-      "warnings": []
+      "warnings": ["The 'FR' health-mark country is NOT used as origin (RULE 8)."]
     },
     "FAO_area": {
       "value": { "raw": "FAO 27 - North East Atlantic", "code": "27" },
@@ -91,6 +91,13 @@
       "evidence": ["Allergens: Fish"],
       "validation_status": "present",
       "warnings": []
+    },
+    "health_mark": {
+      "value": "FR 12.345.678 CE",
+      "confidence": 0.9,
+      "evidence": ["Approval: FR 12.345.678 CE"],
+      "validation_status": "present",
+      "warnings": ["Sanitary mark; its 'FR' country is the establishment, not the origin (Norway)."]
     },
     "weight": {
       "value": { "amount": 320, "unit": "g", "basis": "net", "drained_weight": null, "original": "Net weight: 320 g" },

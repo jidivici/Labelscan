@@ -55,6 +55,35 @@ def test_construction_requires_key_and_does_no_io():
         GoogleVisionOcr(api_key="")
 
 
+def test_feature_is_validated_default_is_document(monkeypatch):
+    # default = dense-text model; TEXT_DETECTION accepted as an explicit opt-in;
+    # anything else fails loudly at construction (never a silent fallback).
+    assert GoogleVisionOcr(api_key="x")._feature == "DOCUMENT_TEXT_DETECTION"
+    assert GoogleVisionOcr(api_key="x", feature="TEXT_DETECTION")._feature == "TEXT_DETECTION"
+    with pytest.raises(ValueError):
+        GoogleVisionOcr(api_key="x", feature="LABEL_DETECTION")
+
+    # wiring: LABELSCAN_OCR_FEATURE is normalized (case) and passed through
+    monkeypatch.setenv("LABELSCAN_OCR_PROVIDER", "google")
+    monkeypatch.setenv("LABELSCAN_GOOGLE_VISION_API_KEY", "test-key-not-used")
+    monkeypatch.setenv("LABELSCAN_OCR_FEATURE", "text_detection")
+    provider = build_ocr_provider()
+    assert provider._feature == "TEXT_DETECTION"
+    monkeypatch.setenv("LABELSCAN_OCR_FEATURE", "BOGUS")
+    with pytest.raises(ValueError):
+        build_ocr_provider()
+
+
+def test_http_client_is_shared_across_calls():
+    # Connection reuse (backlog P1): one httpx.Client per adapter instance, created
+    # lazily (construction does no I/O), identical object on every call.
+    adapter = GoogleVisionOcr(api_key="x")
+    assert adapter._client is None  # nothing built at construction
+    c1 = adapter._http_client()
+    c2 = adapter._http_client()
+    assert c1 is c2
+
+
 def test_parse_extracts_text_and_mean_confidence():
     data = {
         "responses": [
@@ -90,31 +119,38 @@ def test_parse_provider_error_raises():
         _parse_annotate_response(data)
 
 
-class _CapturingResponse:
-    status_code = 200
-    # A minimal valid annotate response so run() parses without error.
-    content = (
-        b'{"responses":[{"fullTextAnnotation":'
-        b'{"text":"Cabillaud","pages":[{"confidence":0.9}]}}]}'
-    )
-
-
-def test_run_request_sends_language_hints_and_full_image(monkeypatch):
+def test_run_request_sends_language_hints_and_full_image():
     """Task D: the request carries DOCUMENT_TEXT_DETECTION + fr/en language hints,
     and the image is sent verbatim (no resize/quality param that would downsample).
-    The API key never appears in the payload (it rides in the query params only)."""
-    captured: dict = {}
-
-    def fake_post(url, *, params, json, timeout):
-        captured["params"] = params
-        captured["json"] = json
-        return _CapturingResponse()
+    The API key never appears in the payload (it rides in the query params only).
+    Runs through the SHARED httpx.Client (backlog P1) via a MockTransport — the
+    real request path, no network."""
+    import json as jsonlib
 
     import httpx
 
-    monkeypatch.setattr(httpx, "post", fake_post)
+    captured: dict = {}
 
-    GoogleVisionOcr(api_key="secret-key").run(b"\x89PNG fake-bytes")
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["params"] = dict(request.url.params)
+        captured["json"] = jsonlib.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "responses": [
+                    {
+                        "fullTextAnnotation": {
+                            "text": "ok",
+                            "pages": [{"confidence": 0.9}],
+                        }
+                    }
+                ]
+            },
+        )
+
+    adapter = GoogleVisionOcr(api_key="secret-key")
+    adapter._client = httpx.Client(transport=httpx.MockTransport(handler))
+    adapter.run(b"\x89PNG fake-bytes")
 
     req = captured["json"]["requests"][0]
     assert req["features"] == [{"type": _FEATURE}]

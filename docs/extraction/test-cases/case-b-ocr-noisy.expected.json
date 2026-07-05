@@ -1,19 +1,12 @@
 {
   "schema_version": "seafood-label-extraction/v1.0.0",
   "fields": {
-    "product_name": {
+    "commercial_designation": {
       "value": "Smoked Sa1mon Slices",
       "confidence": 0.55,
       "evidence": ["Smoked Sa1mon Slices"],
       "validation_status": "present",
-      "warnings": ["OCR noise: '1' likely substitutes 'l' in 'Sa1mon'; value retained verbatim, not corrected."]
-    },
-    "commercial_designation": {
-      "value": null,
-      "confidence": 0.0,
-      "evidence": null,
-      "validation_status": "missing",
-      "warnings": []
+      "warnings": ["OCR noise: '1' likely substitutes 'l' in 'Sa1mon'; value retained verbatim, not corrected. No separate product_name field (v2)."]
     },
     "scientific_name": {
       "value": "Salmo sa1ar",
@@ -29,12 +22,19 @@
       "validation_status": "present",
       "warnings": ["Label key read as 'L0T' (zero for 'O') due to OCR noise; interpreted as lot identifier."]
     },
-    "supplier_name": {
+    "producer_name": {
       "value": "N0RDIC SEAF00D AS",
       "confidence": 0.45,
       "evidence": ["N0RDIC SEAF00D AS"],
       "validation_status": "present",
-      "warnings": ["OCR noise: zeros likely substitute 'O' in supplier name; value retained verbatim, not corrected."]
+      "warnings": ["OCR noise: zeros likely substitute 'O'; value retained verbatim, not corrected. Single operator, no distributor -> producer (RULE 9)."]
+    },
+    "reseller_brand": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": null,
+      "validation_status": "missing",
+      "warnings": []
     },
     "origin_country": {
       "value": { "raw": "N0rway", "iso_3166_1_alpha2": null },
@@ -91,6 +91,13 @@
       "evidence": ["Contains: FlSH. May c0ntain traces 0f S0Y."],
       "validation_status": "present",
       "warnings": ["Only the explicit 'Contains:' allergen ('FlSH', OCR-garbled) is listed as a declared allergen; 'May contain traces of SOY' is a precautionary statement, captured here as a warning rather than a declared allergen."]
+    },
+    "health_mark": {
+      "value": null,
+      "confidence": 0.0,
+      "evidence": null,
+      "validation_status": "missing",
+      "warnings": []
     },
     "weight": {
       "value": { "amount": 200, "unit": "g", "basis": "unspecified", "drained_weight": null, "original": "Wt 200g e" },
