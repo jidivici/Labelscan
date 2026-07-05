@@ -60,7 +60,7 @@ saisie, nettoyage UI). Trois horizons : quick wins (faits), moyen terme, fond.
   canonique. `src/services/fieldLabels.ts`, `src/screens/ArticleDetailScreen.tsx`
 - [x] **§5 Clavier prix** : `decimal-pad` sur le champ `price`. `src/screens/ReviewScreen.tsx`
 
-### 🔜 Moyen terme — ✅ LIVRÉ (21 juin 2026), sauf §6.3
+### 🔜 Moyen terme — ✅ LIVRÉ (21 juin 2026) ; §6.3 livré le 5 juillet 2026 (voir refonte v1)
 - [x] **§1.3 Double aller-retour** : champs du dernier run embarqués dans la réponse de statut
   (`IngestionView.latest_fields`) → `useIngestionResult` construit le run sans 2e fetch (fetch
   gardé en fallback). `read_router.py`, `useIngestionResult.ts`. (Endpoint `/status` allégé :
@@ -75,9 +75,9 @@ saisie, nettoyage UI). Trois horizons : quick wins (faits), moyen terme, fond.
 - [x] **§1.5 Débit worker** : `deploy.replicas: 2` + retrait `container_name` (`SKIP LOCKED` déjà
   multi-worker ; validé `docker compose config`). `docker-compose.yml`. (OCR/LLM concurrents
   intra-ingestion = itération ultérieure.)
-- [ ] **§6.3 Photo** : REPORTÉ. Review + Détail déjà cohérents (`contain` — choix délibéré : ne
-  rogne jamais le contenu de l'étiquette). La « carte photo arrondie cover » de la directive §2 est
-  une refonte visuelle à faire **app lancée** (non vérifiable en édition aveugle ici).
+- [x] **§6.3 Photo** : ✅ LIVRÉ (5 juillet 2026, refonte workflow v1). Carte cover arrondie
+  (Review + Détail) + visionneuse plein écran (`PhotoViewerModal.tsx`, pinch/pan/double-tap) — le
+  rognage devient sans perte puisque le tap ouvre la photo en `contain`. Voir §🔁 ci-dessous.
 
 ### 🏗️ Fond — plans d'action détaillés
 
@@ -91,6 +91,13 @@ import-linter 5/5, `pytest tests/test_field_override.py` (5) + suite backend com
 typecheck + jest mobile (7 tests `fieldOverrideSubmit.test.ts`). Restes possibles (itération
 ultérieure) : `POST /v1/ingestions/{id}/confirm` (finaliser le statut), dédup par Idempotency-Key
 serveur, drain background de l'outbox mobile. Plan d'origine ci-dessous (référence).
+
+**Mise à jour (5 juillet 2026, refonte workflow v1).** Le garde GS1-owned reste le comportement
+par défaut (409 sans flag), mais la garde n'est plus absolue : `force_gs1: true` dans le body
+PATCH fait accepter l'override sous l'action d'audit dédiée `ingestion.gs1_field_overridden`
+(append-only, `source='human'`, jamais un écrasement). Mobile : `fieldOverrideSubmit.ts` tague
+automatiquement les champs GS1 avec `force_gs1` — les 17 champs sont éditables des deux écrans
+(Review, Détail article). Voir §🔁 ci-dessous et `docs/backend/API-CONTRACTS.md` §3.
 
 **Problème.** Les corrections de revue ne vivent que dans l'AsyncStorage du device
 (`src/types/Article.ts:18`, `src/services/storage.ts`) ; le backend garde la valeur machine.
@@ -344,8 +351,9 @@ caler le seuil V2 sur la vraie durée OCR.
   transitions `raw_stored→ocr_done→terminal` (Tier 3) arrivent avec ~0 latence de
   découverte au lieu de ~0-1 s chacune. Upgrade path si le nombre de devices explose :
   LISTEN/NOTIFY (Tier 2) à la place de la sonde, SSE à la place du hold.
-- [ ] **§6.3 Photo « carte cover arrondie »** (directive §2) : refonte visuelle à faire
-  **app lancée** (non vérifiable en édition aveugle). Effort : S-M.
+- [x] **§6.3 Photo « carte cover arrondie »** (directive §2) : ✅ LIVRÉ (5 juillet 2026,
+  refonte workflow v1) — voir §🔁 ci-dessous. **Reste à valider app lancée** (rendu réel,
+  gestes de la visionneuse) : voir la checklist device de la refonte.
 
 ### P3 — Compléter la boucle de revue côté serveur — ✅ LIVRÉ (3 juillet 2026)
 - [x] **`POST /v1/ingestions/{id}/confirm`** : use case `ConfirmIngestion` + `SqlConfirmRepository`
@@ -433,3 +441,54 @@ Vérifié : typecheck 0 + **146 jest** (+2 : machine 12 états, purge). Backend 
 Reste à valider sur device (Phase 0.3) : clavier température Android (`numbers-and-punctuation`
 est iOS-only → clavier complet en repli, signe moins requis pour −18 °C — choix actuel
 délibéré, à revoir à l'essai terrain).
+
+---
+
+## 🔁 Refonte workflow v1 — capture enchaînée (5 juillet 2026)
+
+Refonte complète du flux de scan : capture à la chaîne (envoi en arrière-plan dès le
+déclencheur), file de scans visible sur l'accueil avec compteur 3 étapes, tous les champs
+éditables (y compris GS1), photo en grand, §6.3 livré. Plan détaillé et vérifications :
+`docs/mobile/MOBILE-APP.md` (référence vivante du flux et de l'architecture ScanQueue).
+
+**Décisions produit actées.** ① Enchaînement direct après le déclencheur (flash + haptique +
+pile de vignettes, pas de modale de revue par photo). ② Les 17 champs éditables, y compris
+GS1 (lot/DLC/GTIN/poids/date emballage) — le serveur accepte l'override GS1 sous flag
+explicite `force_gs1`, append-only, audité (voir Fix 4.2 ci-dessus). ③ Stepper 3 étapes par
+carte en attente sur l'accueil : Photo envoyée → Extraction → À valider ; tap → revue ;
+validé → la carte rejoint la liste normale.
+
+**Backend (1 commit).** `force_gs1` sur `PATCH /v1/ingestions/{id}/fields/{name}` :
+`override_field.py` (flag, action d'audit dédiée `ingestion.gs1_field_overridden`),
+`router.py` (`OverrideFieldRequest.force_gs1`), +3 tests (`test_field_override.py`),
+`API-CONTRACTS.md`/`openapi.v1.yaml` à jour. 409 `FIELD_NOT_EDITABLE` inchangé sans le flag
+(rétrocompatibilité totale). Vérifié : 242 passed (`run_local_proofs.sh`), import-linter 5/5.
+
+**Mobile (4 commits).**
+1. **File de scans** (`services/scanQueue.ts`) : singleton + `useSyncExternalStore` (même
+   patron que `outbox.ts`), état persisté (une entrée par scan, photo durable
+   `pending/<id>.jpg`), scheduler à 3 sondages (long-poll) concurrents max, pause/reprise
+   sur `AppState`, réconciliation avec l'outbox au démarrage/foreground/après drain.
+   `services/ingestionResult.ts` : cœur non-hook extrait de l'ancien `useIngestionResult`
+   (supprimé, mort).
+2. **Caméra enchaînée** : `takePhoto` devient terminal (capture → crop → `enqueueScan` →
+   flash/haptique, prêt pour le tir suivant) ; suppression de l'écran de revue photo
+   bloquant et de la branche legacy morte ; nouveau `ScanTray` (pile de vignettes + badge).
+3. **Accueil** : zone « En cours (N) » en `ListHeaderComponent` (hauteur mesurée, pas
+   hardcodée — `getItemLayout` reste exact) ; `PendingScanCard` + `ScanStepper` +
+   `services/scanSteps.ts` (mapping pur statut+ocrDone → 3 étapes) ; navigation Review
+   par `pendingScanId` uniquement (dispatcher Legacy/Backend supprimé — un seul chemin).
+4. **Revue** : entrée par la file (`useScan`), tous champs éditables (`fieldOverrideSubmit.ts`
+   tague `force_gs1` sur les champs GS1 au lieu de les sauter), `PhotoViewerModal` (pinch/pan/
+   double-tap, aucune dépendance nouvelle), carte photo cover arrondie (§6.3) en Revue et
+   Détail article, `completeScan()` au save (la carte quitte la zone en cours).
+
+**Vérifié** : typecheck 0 erreur, **170 jest verts** (+24 : `scanQueue` 13, `ingestionResult` 4,
+`scanSteps` 7). Backend 242 passed + import-linter 5/5.
+
+**Reste (checklist device, app lancée) :** tir enchaîné 5 photos <15 s ; kill pendant
+extraction → relance → cartes restaurées ; mode avion → drain au retour réseau ; serveur down
+→ carte erreur + Réessayer/Supprimer ; édition d'un champ GS1 → vérifier le run `source='human'`
++ l'action d'audit `gs1_field_overridden` côté serveur ; visionneuse pinch/pan/double-tap iOS
+ET Android (reanimated 4, point de vigilance) ; carte cover arrondie jugée à l'œil ; clavier
+température Android (reliquat passe santé, inchangé).

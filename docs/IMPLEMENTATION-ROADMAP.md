@@ -18,7 +18,7 @@ prises en spike AVANT d'écrire les migrations qu'elles conditionnent.
 |---|--------|--------------------|----------------|
 | 0.1 | **Rotation de la clé Google Vision** (Cloud Console) — manuelle | La clé purgée du bundle reste extractible des builds passés | P0 code déjà livré |
 | 0.2 | **Déployer un staging prod-like** (1 VM UE, docker compose actuel) + série de mesures `extraction_timing` / `wait_ms` | Toutes les décisions latence/scale en dépendent ; l'egress Docker-macOS fausse les chiffres actuels | Logs structurés + instrumentation déjà en place |
-| 0.3 | **Session app lancée** : valider la cascade visuelle (CascadeReveal, check animé), faire la refonte photo §6.3 (carte cover arrondie), tester le long-poll réel sur device | Dernier lot de travail « aveugle » à valider à l'œil ; §6.3 attend ça depuis le 21 juin | Tout le code est prêt, seul le rendu reste à juger |
+| 0.3 | **Session app lancée** : valider la cascade visuelle (CascadeReveal, check animé) ET la checklist device de la refonte workflow v1 (capture enchaînée, cartes « En cours », visionneuse pinch/pan/double-tap, carte cover arrondie §6.3 — code livré le 5 juillet, voir `CLAUDE.md` §🔁), tester le long-poll réel sur device | Dernier lot de travail « aveugle » à valider à l'œil ; §6.3 attend ça depuis le 21 juin | Tout le code est prêt, seul le rendu reste à juger |
 
 **Jalon : démo fluide sur device réel + chiffres de latence honnêtes.**
 

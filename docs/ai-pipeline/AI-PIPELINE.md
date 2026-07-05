@@ -22,7 +22,9 @@ anti-fabrication gate, GS1 reconciliation, DLQ+backoff).
 >   [`shared-state.schema.json`](../pipeline/shared-state.schema.json) +
 >   [`eval-suite.md`](../pipeline/eval-suite.md) — the in-process hierarchical pipeline, stages 1–10,
 >   the human-review gates, the 25 eval categories.
-> - [`../../AUDIT.md`](../../AUDIT.md) finding **A3** (bundled Vision key) and `src/services/ocr.ts`.
+> - [`../archive/AUDIT.md`](../archive/AUDIT.md) finding **A3** (bundled Vision key) — resolved:
+>   the on-device OCR path (`src/services/ocr.ts`) was removed (audit §7.3), extraction is
+>   backend-only.
 >
 > **Companion:** [`model-and-cost-notes.md`](./model-and-cost-notes.md) — the concrete model table,
 > verified API parameters, and a worked cost/latency estimate. This document references it; keep
@@ -262,9 +264,10 @@ The default adapter is implemented server-side in
 - **No server-side downsampling.** The uploaded image bytes are sent **verbatim** (base64) — the
   adapter applies **no** resize/crop/quality parameter — so the server never reduces resolution; the
   OCR sees the **full-resolution capture** the client uploaded. The client has already cropped to the
-  placement frame with an 8% safety margin (chantier D — [`../0011-SYNTHESIS.md`](../0011-SYNTHESIS.md)
-  §D, [`../mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md) §3), so "frame coverage" lives on the client
-  and "fidelity" is preserved end-to-end.
+  placement frame with an 8% safety margin ([`../mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md) §2,
+  "Recadrage & fidélité"; historical design notes in
+  [`../archive/0011-SYNTHESIS.md`](../archive/0011-SYNTHESIS.md) §D), so "frame coverage" lives on
+  the client and "fidelity" is preserved end-to-end.
 - **Confidence: fail-closed.** `mean_confidence` is the mean of per-page `fullTextAnnotation`
   confidence; when Vision reports none it is **`0.0`** (never a fabricated score) so the downstream
   validation gate fails closed rather than trusting an unscored read.
