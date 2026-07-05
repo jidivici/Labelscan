@@ -41,11 +41,15 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 
+import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
+import { v4 as uuidv4 } from 'uuid';
+
 import { CaptureButton } from '../components/CaptureButton';
 import { FrameOverlay, FrameState } from '../components/FrameOverlay';
 import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
 import { ScanTray } from '../components/ScanTray';
 import { enqueueScan } from '../services/scanQueue';
+import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -191,6 +195,19 @@ export function CameraScreen() {
       if (!photo) throw new Error('Photo capture failed');
       if (!mountedRef.current) return;
 
+      // Durable copy FIRST, before anything else touches the file. expo-camera's raw
+      // capture lives in an OS-managed Caches subdirectory that is NOT guaranteed to
+      // survive — under rapid chained capture it can vanish mid-crop (observed on
+      // device: NSCocoaErrorDomain 260 "no such file" reading the Camera/ cache file
+      // at UPLOAD time, well after capture). Crop from OUR OWN durable copy so a slow
+      // crop, or a slow enqueue, never races a source the OS can reclaim at any time.
+      const scanId = uuidv4();
+      const durableRawUri = await persistPendingPhoto(`${scanId}-raw`, photo.uri);
+      if (!durableRawUri) {
+        // Could not even secure a durable copy — nothing safe to submit this shot.
+        throw new Error('Could not persist the captured photo');
+      }
+
       // ALWAYS produce a downscaled JPEG for upload + Vision OCR, and apply the frame crop
       // WHEN available. Decoupling the resize from the crop is deliberate: a crop failure
       // (orientation mismatch → computeFrameCrop null, or a manipulate throw) must NOT ship a
@@ -215,14 +232,14 @@ export function CameraScreen() {
         srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
       try {
         const out = await ImageManipulator.manipulateAsync(
-          photo.uri,
+          durableRawUri,
           crop ? [{ crop }, { resize }] : [{ resize }],
           { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
         );
         croppedUri = out.uri;
         framed = crop != null;
       } catch (e) {
-        console.warn('Immediate crop/resize failed; full image will be used:', e);
+        console.warn('Immediate crop/resize failed; durable raw copy will be used:', e);
       }
 
       const capturedAt = new Date().toISOString();
@@ -230,8 +247,16 @@ export function CameraScreen() {
 
       // Enqueue and move on — the scan queue owns submit + extraction from here.
       // Never throws; a submit failure surfaces as a 'submit_error' card at home.
-      void enqueueScan({ tempUri: croppedUri ?? photo.uri, barcodeRaw, capturedAt }).then(() => {
+      void enqueueScan({
+        id: scanId,
+        tempUri: croppedUri ?? durableRawUri,
+        barcodeRaw,
+        capturedAt,
+      }).then((scan) => {
         logLatency('capture', { framed: String(framed) });
+        // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
+        // fell back to this exact uri (then it's the scan's only copy; keep it).
+        if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
       });
 
       lastBarcodeRef.current = null;

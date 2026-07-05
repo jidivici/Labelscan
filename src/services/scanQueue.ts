@@ -285,7 +285,12 @@ function handleSubmitOutcome(id: string, outcome: SubmitOutcome): void {
 // ── Public API ────────────────────────────────────────────────────────────────────
 
 export interface EnqueueScanInput {
-  tempUri: string; // cropped capture (ImageManipulator cache uri)
+  /**
+   * Pre-generated id (the caller already used it to persist a durable copy of the
+   * raw capture before cropping — see CameraScreen). Falls back to a fresh uuid.
+   */
+  id?: string;
+  tempUri: string; // cropped capture (ImageManipulator cache uri), or an already-durable uri
   barcodeRaw?: string;
   capturedAt: string; // ISO 8601
 }
@@ -295,9 +300,9 @@ export interface EnqueueScanInput {
  * entry exists (the camera must not wait on the network).
  */
 export async function enqueueScan(input: EnqueueScanInput): Promise<PendingScan> {
-  const id = uuidv4();
+  const id = input.id ?? uuidv4();
   // Durable copy first — the cache uri may be purged before the operator reviews.
-  // On copy failure, degrade to the cache uri (scan proceeds; photo may not survive
+  // On copy failure, degrade to the input uri (scan proceeds; photo may not survive
   // a restart, which the review screen already tolerates).
   const photoUri = (await persistPendingPhoto(id, input.tempUri)) ?? input.tempUri;
   const op = await enqueueCapture({

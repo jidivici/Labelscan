@@ -128,6 +128,20 @@ describe('scanQueue', () => {
     await flush();
   });
 
+  it('enqueueScan honors a pre-generated id (camera durable-raw-copy handoff)', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockReturnValue(new Promise(() => {}));
+
+    const scan = await enqueueScan({
+      id: 'fixed-id-123',
+      tempUri: 'file:///pending/fixed-id-123-raw.jpg',
+      capturedAt: '2026-07-05T10:00:00Z',
+    });
+
+    expect(scan.id).toBe('fixed-id-123');
+    expect(mockedPersistPhoto).toHaveBeenCalledWith('fixed-id-123', 'file:///pending/fixed-id-123-raw.jpg');
+  });
+
   it('submit succeeded → status becomes extracting and a poll starts', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
