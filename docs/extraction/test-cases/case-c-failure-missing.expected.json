@@ -1,7 +1,6 @@
 {
   "schema_version": "seafood-label-extraction/v1.0.0",
   "fields": {
-    "product_name": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "commercial_designation": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "scientific_name": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "batch_number": {
@@ -11,7 +10,8 @@
       "validation_status": "ambiguous",
       "warnings": ["The token 'Lot' appears but no lot value follows it; no batch number could be read."]
     },
-    "supplier_name": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
+    "producer_name": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
+    "reseller_brand": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "origin_country": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "FAO_area": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "production_method": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
@@ -20,6 +20,7 @@
     "packaging_date": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "storage_temperature": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "allergens": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
+    "health_mark": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "weight": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "price": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] },
     "raw_warnings": { "value": null, "confidence": 0.0, "evidence": null, "validation_status": "missing", "warnings": [] }

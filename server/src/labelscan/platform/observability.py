@@ -43,6 +43,16 @@ _EXTRA_FIELDS = (
     "reason",
     "cache_creation_input_tokens",
     "cache_read_input_tokens",
+    # latency instrumentation (docs/LATENCY-REVIEW.md §6): per-ingestion OCR/LLM durations
+    # and the provider retry count — scalars only, never payloads. Without these allow-listed
+    # the `extraction_timing` event logs but DROPS its numbers (the split stays invisible).
+    "ocr_ms",
+    "llm_ms",
+    "attempts",
+    "image_bytes",
+    # Tier 3 wave 2: how many deterministic preview fields the interim commit wrote
+    # (a count only — never the values).
+    "interim_field_count",
 )
 
 

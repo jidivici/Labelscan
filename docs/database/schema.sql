@@ -236,11 +236,15 @@ CREATE TABLE ingestion.extracted_field (
                          REFERENCES ingestion.extraction_run(id) ON DELETE CASCADE,  -- intra-context
     field_name           text NOT NULL
                           CHECK (field_name IN (
-                              'product_name','commercial_designation','scientific_name',
-                              'batch_number','supplier_name','origin_country','FAO_area',
+                              -- v2 (prompt v2.0.0): commercial_designation is THE designation;
+                              -- supplier split into producer_name/reseller_brand; health_mark added.
+                              'commercial_designation','scientific_name','producer_name',
+                              'reseller_brand','batch_number','origin_country','FAO_area',
                               'production_method','fishing_gear_or_farming_method','expiry_date',
-                              'packaging_date','storage_temperature','allergens','weight','price',
-                              'gtin')),
+                              'packaging_date','storage_temperature','allergens','health_mark',
+                              'weight','price','gtin',
+                              -- legacy v1 names kept for immutable historical rows (migration 0011)
+                              'product_name','supplier_name')),
     -- Normalized polymorphic value (extraction.v1 per-type shapes). NULL value => 'missing'/'ambiguous'.
     value                jsonb,
     -- Provenance/quality — UNIFORM, typed, indexable:

@@ -68,7 +68,14 @@ class RegistrationConsumer:
             scientific_name=vals.get("scientific_name"),
             production_method=vals.get("production_method"),
             fao_area=vals.get("FAO_area"),
-            supplier_name=vals.get("supplier_name"),
+            # Prompt v2 split supplier_name -> reseller_brand (the immediate FBO/distributor,
+            # i.e. the one-step-back supplier for traceability) + producer_name (provenance).
+            # Fall back to the legacy field for v1 historical runs.
+            supplier_name=(
+                vals.get("reseller_brand")
+                or vals.get("producer_name")
+                or vals.get("supplier_name")
+            ),
             use_by=_to_date(vals.get("expiry_date")),
             packaging_date=_to_date(vals.get("packaging_date")),
         )

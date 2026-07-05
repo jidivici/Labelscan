@@ -23,16 +23,19 @@ from labelscan.contexts.ingestion.application.ports import (
 
 _ACTION = "ingestion.field_overridden"
 
-# The 16 canonical extraction field names — mirror of the extracted_field.field_name
-# CHECK (migration 0008) and the LLM adapter's _FIELD_NAMES. Kept here so an unknown
-# field is rejected before the DB is ever touched.
+# The accepted extraction field names — mirror of the extracted_field.field_name CHECK
+# (SUPERSET: migration 0011 widened it) and the LLM adapter's _FIELD_NAMES. Kept here so an
+# unknown field is rejected before the DB is ever touched. The v2 prompt emits
+# producer_name / reseller_brand / health_mark and no longer product_name / supplier_name,
+# but the latter two stay accepted so a reviewer can still correct an immutable v1 run.
 FIELD_NAMES: frozenset[str] = frozenset(
     {
-        "product_name",
+        # v2-emitted set
         "commercial_designation",
         "scientific_name",
+        "producer_name",
+        "reseller_brand",
         "batch_number",
-        "supplier_name",
         "origin_country",
         "FAO_area",
         "production_method",
@@ -41,9 +44,13 @@ FIELD_NAMES: frozenset[str] = frozenset(
         "packaging_date",
         "storage_temperature",
         "allergens",
+        "health_mark",
         "weight",
         "price",
         "gtin",
+        # legacy v1 names — kept editable for historical runs (migration 0011 superset)
+        "product_name",
+        "supplier_name",
     }
 )
 
@@ -83,6 +90,9 @@ class OverrideFieldCommand:
     actor_id: str  # authenticated reviewer (recorded as the human provenance + audit actor)
     correlation_id: str
     trace_id: str
+    # Optional client retry key (stable per outbox operation): a repeat replays the
+    # run the original request produced — never a second append (migration 0013).
+    idempotency_key: str | None = None
 
 
 class OverrideField:
@@ -110,6 +120,7 @@ class OverrideField:
                 trace_id=cmd.trace_id,
             ),
             action=_ACTION,
+            idempotency_key=cmd.idempotency_key,
         )
         if result is None:
             raise IngestionNotFound(cmd.ingestion_id)

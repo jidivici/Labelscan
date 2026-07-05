@@ -117,13 +117,13 @@ OUTPUT FORMAT (absolute, non-negotiable):
 
 The JSON object has exactly these top-level keys: "schema_version", "fields", "raw_warnings".
 - "schema_version" MUST be the string "seafood-label-extraction/v1.0.0".
-- "fields" is an object containing EXACTLY these 16 keys and no others:
-  product_name, commercial_designation, scientific_name, batch_number, supplier_name,
+- "fields" is an object containing EXACTLY these 17 keys and no others (prompt v2.0.0):
+  commercial_designation, scientific_name, producer_name, reseller_brand, batch_number,
   origin_country, FAO_area, production_method, fishing_gear_or_farming_method, expiry_date,
-  packaging_date, storage_temperature, allergens, weight, price, raw_warnings.
+  packaging_date, storage_temperature, allergens, health_mark, weight, price, raw_warnings.
 - "raw_warnings" (top level) is an array of strings for whole-label anomalies (may be empty).
 
-PER-FIELD OBJECT (every one of the 16 fields is an object with EXACTLY these five keys):
+PER-FIELD OBJECT (every one of the 17 fields is an object with EXACTLY these five keys):
 - "value": the normalized value, or null if the field is not explicitly present on the label.
 - "confidence": a number from 0.0 to 1.0 — your confidence in "value". If "value" is null,
   "confidence" MUST be 0.0.
@@ -223,8 +223,8 @@ NORMALIZATION RULES (apply precisely):
   statement is "value": null, "validation_status": "missing" (do not emit an empty array to mean
   "none stated"). If the label explicitly states "allergen-free"/"no allergens", emit an empty
   array [], "validation_status": "present", and a warning noting the explicit none-statement.
-- TEXT FIELDS (product_name, commercial_designation, scientific_name, batch_number, supplier_name,
-  fishing_gear_or_farming_method): "value" is the trimmed text as read. Do NOT correct OCR spelling;
+- TEXT FIELDS (commercial_designation, scientific_name, producer_name, reseller_brand, batch_number,
+  health_mark, fishing_gear_or_farming_method): "value" is the trimmed text as read. Do NOT correct OCR spelling;
   if the text is visibly OCR-garbled, keep it verbatim and add a warning. For batch_number, extract
   the identifier value, not the label key (e.g. from "Lot: L24-0917" the value is "L24-0917").
 - raw_warnings (the FIELD, distinct from the top-level array): this field exists in the closed set
@@ -315,7 +315,7 @@ malformed ISO/ISO-2/ISO-4217 patterns, wrong `schema_version`, extra per-field k
 
 | Field(s) | `value` type | Notes |
 |----------|--------------|-------|
-| product_name, commercial_designation, scientific_name, batch_number, supplier_name, fishing_gear_or_farming_method, **raw_warnings (field)** | `string` or `null` | Verbatim text, trimmed; not spell-corrected. |
+| commercial_designation, scientific_name, producer_name, reseller_brand, batch_number, health_mark, fishing_gear_or_farming_method, **raw_warnings (field)** | `string` or `null` | Verbatim text, trimmed; not spell-corrected. |
 | origin_country | `{raw, iso_3166_1_alpha2}` or `null` | `iso_3166_1_alpha2` matches `^[A-Z]{2}$` or null. |
 | FAO_area | `{raw, code}` or `null` | `code` is the FAO number as written, or null. |
 | production_method | `"wild_caught" \| "farmed" \| null` | Closed enum; out-of-vocab ⇒ null + `ambiguous`. |
@@ -400,11 +400,10 @@ Approval: FR 12.345.678 CE
   the explicit "EUR" code; basis not stated ⇒ `unspecified` **with a warning** (not guessed as total).
 
 **Why it's correct:** every non-null value quotes an exact OCR substring (`evidence`). Nothing is
-inferred. Note the **"Approval: FR 12.345.678 CE"** line is deliberately **not** mapped to any of
-the 16 fields (approval/health-mark number is not in the target set) and does not leak into
-`supplier_name`; it is simply not extracted — demonstrating rule 5 (closed field set, no invented
-fields). The price-basis warning shows the model annotating a normalization choice rather than
-guessing.
+inferred. The **"Approval: FR 12.345.678 CE"** line is the sanitary mark → it now populates
+`health_mark` (v2); its `FR` country MUST NOT leak into `origin_country` (which stays Norway) nor
+into `producer_name`/`reseller_brand` (ABSOLUTE RULE 8: the establishment mark is not the origin).
+The price-basis warning shows the model annotating a normalization choice rather than guessing.
 
 ### 6.b OCR-noisy edge case — ambiguity, conversion, place-name FAO, garble
 
@@ -440,7 +439,7 @@ Key field outcomes and the rule each exercises:
   farmed; flagged, not guessed.
 - `origin_country = {raw:"N0rway", iso_3166_1_alpha2:null}`, `ambiguous` — text is OCR-garbled; the
   ISO code is **not** assigned from a corrupted token.
-- `scientific_name = "Salmo sa1ar"` (verbatim), `supplier_name = "N0RDIC SEAF00D AS"` (verbatim) —
+- `scientific_name = "Salmo sa1ar"` (verbatim), `producer_name = "N0RDIC SEAF00D AS"` (verbatim) —
   **OCR garble is kept, not "corrected"** to "Salmo salar"/"NORDIC SEAFOOD" (rule 1; SC3 still holds
   because evidence is the garbled substring as-read). Each carries a noise warning.
 - `allergens = ["FlSH"]`, `present` — only the **declared** "Contains:" allergen is listed; the

@@ -14,9 +14,13 @@ Everything runs in ONE audited transaction:
   - insert the overridden field with human provenance (value) or as cleared (null),
     honoring ck_value_requires_provenance / ck_evidence_iff_value.
 
-Idempotent: if the latest run already carries this exact human value, no new run is
-written and the existing field is returned (replayed=True) — so a client retry of the
-same override never piles up duplicate runs.
+Idempotent twice over:
+  - VALUE: if the latest run already carries this exact human value, no new run is
+    written and the existing field is returned (replayed=True);
+  - KEY (P3, migration 0013): when the client supplies an Idempotency-Key, the run
+    the ORIGINAL request produced is recorded under (endpoint, actor, key) in the
+    SAME transaction; a repeat of the key replays THAT run's field — so an
+    out-of-order retry after a later A→B edit can never resurrect A as a new run.
 """
 
 from __future__ import annotations
@@ -82,6 +86,19 @@ _INSERT_HUMAN_CLEARED = text(
     " validation_status, warnings, combined_confidence, confidence_band, source) "
     "VALUES (:rid, :fn, NULL, NULL, NULL, NULL, 'missing', '[]'::jsonb, 0.0, 'low', 'human')"
 )
+# Idempotency-Key guard (migration 0013): the key row is written in the SAME
+# transaction as the run it records; ON CONFLICT DO NOTHING keeps a concurrent
+# duplicate harmless (the loser's SELECT on retry finds the winner's row).
+_LOOKUP_IDEMPOTENCY = text(
+    "SELECT run_id::text AS run_id, field_name FROM ingestion.request_idempotency "
+    "WHERE endpoint = 'override_field' AND actor_id = :actor AND idempotency_key = :key"
+)
+_RECORD_IDEMPOTENCY = text(
+    "INSERT INTO ingestion.request_idempotency "
+    "(endpoint, actor_id, idempotency_key, ingestion_id, run_id, field_name) "
+    "VALUES ('override_field', :actor, :key, :iid, :rid, :fn) "
+    "ON CONFLICT (endpoint, actor_id, idempotency_key) DO NOTHING"
+)
 
 
 class SqlFieldOverrideRepository(FieldOverrideRepository):
@@ -97,6 +114,7 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
         note: str | None,
         audit: AuditContext,
         action: str,
+        idempotency_key: str | None = None,
     ) -> OverriddenField | None:
         with self._engine.begin() as conn:
             # REQUIRED — the extraction_run AFTER INSERT audit trigger aborts otherwise.
@@ -107,6 +125,38 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 correlation_id=audit.correlation_id,
                 trace_id=audit.trace_id,
             )
+
+            # KEY replay (P3): this exact request was already processed — return the
+            # field as recorded on the run the ORIGINAL request produced, before any
+            # value comparison (a later A→B edit must not turn a retry into a write).
+            if idempotency_key:
+                seen = (
+                    conn.execute(
+                        _LOOKUP_IDEMPOTENCY,
+                        {"actor": audit.actor_id, "key": idempotency_key},
+                    )
+                    .mappings()
+                    .first()
+                )
+                if seen is not None:
+                    recorded = (
+                        conn.execute(
+                            _CURRENT_FIELD,
+                            {"rid": seen["run_id"], "fn": seen["field_name"]},
+                        )
+                        .mappings()
+                        .one()
+                    )
+                    return OverriddenField(
+                        run_id=seen["run_id"],
+                        field_name=seen["field_name"],
+                        value=recorded["value"],
+                        validation_status=recorded["validation_status"],
+                        source=recorded["source"],
+                        combined_confidence=float(recorded["combined_confidence"]),
+                        confidence_band=recorded["confidence_band"],
+                        replayed=True,
+                    )
 
             latest = conn.execute(_LATEST_RUN, {"iid": ingestion_id}).mappings().first()
             if latest is None:
@@ -126,6 +176,9 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 and current["source"] == "human"
                 and current["value"] == value
             ):
+                self._record_key(
+                    conn, idempotency_key, audit, ingestion_id, parent_run_id, field_name
+                )
                 return OverriddenField(
                     run_id=parent_run_id,
                     field_name=field_name,
@@ -168,6 +221,9 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                         "src": image_id,
                     },
                 )
+                self._record_key(
+                    conn, idempotency_key, audit, ingestion_id, new_run_id, field_name
+                )
                 return OverriddenField(
                     run_id=str(new_run_id),
                     field_name=field_name,
@@ -180,6 +236,9 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 )
 
             conn.execute(_INSERT_HUMAN_CLEARED, {"rid": new_run_id, "fn": field_name})
+            self._record_key(
+                conn, idempotency_key, audit, ingestion_id, new_run_id, field_name
+            )
             return OverriddenField(
                 run_id=str(new_run_id),
                 field_name=field_name,
@@ -190,3 +249,22 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 confidence_band="low",
                 replayed=False,
             )
+
+    @staticmethod
+    def _record_key(
+        conn, idempotency_key, audit: AuditContext, ingestion_id, run_id, field_name
+    ) -> None:
+        """Bind the request key to the run it resolved to — same transaction as the
+        write it protects, so key and result commit (or roll back) together."""
+        if not idempotency_key:
+            return
+        conn.execute(
+            _RECORD_IDEMPOTENCY,
+            {
+                "actor": audit.actor_id,
+                "key": idempotency_key,
+                "iid": ingestion_id,
+                "rid": run_id,
+                "fn": field_name,
+            },
+        )

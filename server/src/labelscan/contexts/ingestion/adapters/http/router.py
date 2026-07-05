@@ -31,6 +31,13 @@ from fastapi import (
 from pydantic import BaseModel
 
 from labelscan.contexts.ingestion.adapters.http.schemas import IngestionAcceptedResponse
+from labelscan.contexts.ingestion.application.confirm_ingestion import (
+    ConfirmIngestion,
+    ConfirmIngestionCommand,
+)
+from labelscan.contexts.ingestion.application.confirm_ingestion import (
+    IngestionNotFound as ConfirmIngestionNotFound,
+)
 from labelscan.contexts.ingestion.application.override_field import (
     FieldNotEditable,
     IngestionNotFound,
@@ -38,6 +45,7 @@ from labelscan.contexts.ingestion.application.override_field import (
     OverrideFieldCommand,
     UnknownField,
 )
+from labelscan.contexts.ingestion.application.ports import ConfirmNotAllowed
 from labelscan.contexts.ingestion.application.submit_ingestion import (
     SubmitIngestion,
     SubmitIngestionCommand,
@@ -210,6 +218,9 @@ def override_field(
         actor_id=principal.actor_id,  # audit context + human provenance: who validated
         correlation_id=request.state.correlation_id,
         trace_id=request.state.trace_id,
+        # Server-side retry dedup (P3): a repeat of this key (per actor) replays the
+        # original outcome instead of appending another run.
+        idempotency_key=idempotency_key,
     )
     try:
         result = use_case(command)
@@ -237,5 +248,71 @@ def override_field(
         source=result.source,
         combined_confidence=result.combined_confidence,
         confidence_band=result.confidence_band,
+        replayed=result.replayed,
+    )
+
+
+# ── P3: reviewer confirmation — finalize the review (terminal 'confirmed') ──────────
+
+_DEFAULT_CONFIRM_USE_CASE: ConfirmIngestion | None = None
+_CONFIRM_LOCK = threading.Lock()
+
+
+def get_confirm_ingestion() -> ConfirmIngestion:
+    # Composition seam (overridden in tests) — same lazy double-checked pattern.
+    global _DEFAULT_CONFIRM_USE_CASE
+    if _DEFAULT_CONFIRM_USE_CASE is None:
+        with _CONFIRM_LOCK:
+            if _DEFAULT_CONFIRM_USE_CASE is None:
+                from labelscan.contexts.ingestion.adapters.sql_confirm_repository import (
+                    SqlConfirmRepository,
+                )
+                from labelscan.platform.db.engine import make_engine
+
+                _DEFAULT_CONFIRM_USE_CASE = ConfirmIngestion(
+                    SqlConfirmRepository(make_engine())
+                )
+    return _DEFAULT_CONFIRM_USE_CASE
+
+
+class ConfirmIngestionResponse(BaseModel):
+    ingestion_id: str
+    status: str  # 'confirmed'
+    replayed: bool  # True => it was already confirmed (idempotent repeat)
+
+
+@router.post(
+    "/v1/ingestions/{ingestion_id}/confirm",
+    response_model=ConfirmIngestionResponse,
+)
+def confirm_ingestion(
+    ingestion_id: str,
+    request: Request,
+    principal: Principal = Depends(require_scope("extraction:review")),
+    use_case: ConfirmIngestion = Depends(get_confirm_ingestion),
+) -> ConfirmIngestionResponse:
+    command = ConfirmIngestionCommand(
+        ingestion_id=ingestion_id,
+        actor_id=principal.actor_id,  # audit: who reviewed
+        correlation_id=request.state.correlation_id,
+        trace_id=request.state.trace_id,
+    )
+    try:
+        result = use_case(command)
+    except ConfirmIngestionNotFound:
+        raise ApiError("NOT_FOUND", f"ingestion {ingestion_id} not found")
+    except ConfirmNotAllowed as exc:
+        # Confirming a still-processing or failed ingestion would assert a review
+        # that never happened — a state error the client must not retry blindly.
+        raise ApiError(
+            "INGESTION_NOT_CONFIRMABLE",
+            f"ingestion is '{exc.status}' — only a review-ready ingestion can be confirmed",
+        )
+    except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError, OSError):
+        raise ApiError("DEPENDENCY_UNAVAILABLE", "storage unavailable; retry")
+
+    return ConfirmIngestionResponse(
+        ingestion_id=result.ingestion_id,
+        status=result.status,
         replayed=result.replayed,
     )

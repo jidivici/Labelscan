@@ -33,10 +33,18 @@ def build_ocr_provider() -> OcrProvider:
             )
         # Imported lazily so this module loads without the adapter's HTTP client.
         from labelscan.contexts.ingestion.adapters.google_vision_ocr import (
+            _FEATURE,
             GoogleVisionOcr,
         )
 
-        return GoogleVisionOcr(api_key=api_key)
+        # Optional cost/latency lever (backlog P1): TEXT_DETECTION is cheaper and
+        # often faster, but the recall trade-off MUST be measured before adoption —
+        # the default stays the dense-text model. Invalid values fail loudly at
+        # startup (adapter validates), never silently fall back.
+        feature = (
+            os.environ.get("LABELSCAN_OCR_FEATURE") or _FEATURE
+        ).strip().upper()
+        return GoogleVisionOcr(api_key=api_key, feature=feature)
 
     raise RuntimeError(
         "OCR provider not configured. Set LABELSCAN_OCR_PROVIDER=google "

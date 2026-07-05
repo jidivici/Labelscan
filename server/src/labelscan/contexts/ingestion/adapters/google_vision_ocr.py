@@ -22,7 +22,12 @@ import json
 from labelscan.contexts.ingestion.application.extraction_ports import OcrResult
 
 _ENDPOINT = "https://vision.googleapis.com/v1/images:annotate"
+# DOCUMENT_TEXT_DETECTION is the safe default (dense-text model, best recall on
+# busy labels). TEXT_DETECTION is ~cheaper/faster but MUST NOT become the default
+# without an eval pass (SC1/SC3/SC10) — it is exposed as config so a prod A/B can
+# measure the recall trade-off without a code change (backlog P1).
 _FEATURE = "DOCUMENT_TEXT_DETECTION"
+_ALLOWED_FEATURES = frozenset({"DOCUMENT_TEXT_DETECTION", "TEXT_DETECTION"})
 _REQUEST_TIMEOUT_S = 30.0
 # French fishmonger labels are predominantly fr, with some en (species/commercial
 # terms, supplier names). Vision auto-detects language, but an explicit hint
@@ -41,16 +46,35 @@ class GoogleVisionOcr:
         api_key: str,
         endpoint: str = _ENDPOINT,
         timeout_s: float = _REQUEST_TIMEOUT_S,
+        feature: str = _FEATURE,
     ) -> None:
         if not api_key:
             raise ValueError("GoogleVisionOcr requires a non-empty api_key")
+        if feature not in _ALLOWED_FEATURES:
+            raise ValueError(
+                f"GoogleVisionOcr feature must be one of {sorted(_ALLOWED_FEATURES)}"
+            )
         self._api_key = api_key
         self._endpoint = endpoint
         self._timeout_s = timeout_s
+        self._feature = feature
+        # Shared HTTP client, created lazily on the FIRST run() (construction stays
+        # I/O-free). Reusing one client keeps the TCP+TLS connection alive across
+        # calls — the per-call handshake was ~600 ms on the measured egress
+        # (docs/LATENCY-REVIEW.md Tier 7 "reste"). The worker holds one adapter
+        # instance for its whole life, so the pool lives as long as the process.
+        self._client = None
 
     @property
     def name(self) -> str:
         return "google-vision"
+
+    def _http_client(self):
+        import httpx  # lazy: importing this module never requires httpx
+
+        if self._client is None:
+            self._client = httpx.Client(timeout=self._timeout_s)
+        return self._client
 
     def run(self, image_bytes: bytes) -> OcrResult:
         import httpx  # lazy: importing this module never requires httpx
@@ -62,19 +86,18 @@ class GoogleVisionOcr:
                     # quality param here, so the server never downsamples — the OCR
                     # sees the full-resolution capture the client uploaded.
                     "image": {"content": base64.b64encode(image_bytes).decode("ascii")},
-                    "features": [{"type": _FEATURE}],
+                    "features": [{"type": self._feature}],
                     "imageContext": {"languageHints": _LANGUAGE_HINTS},
                 }
             ]
         }
         try:
-            resp = httpx.post(
+            resp = self._http_client().post(
                 self._endpoint,
                 params={
                     "key": self._api_key
                 },  # key lives only in the request, never logged
                 json=payload,
-                timeout=self._timeout_s,
             )
         except httpx.HTTPError as exc:
             # Sanitized: the exception text could otherwise echo the URL (which

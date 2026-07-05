@@ -4,13 +4,22 @@ No writes, no domain logic, read connections only. Reflects the append-only
 nature: an ingestion exposes ALL its extraction runs (a re-extraction is a new
 run, never an overwrite); the latest is marked `is_latest` (a derived read
 projection, not a mutation). Fields carry their stored provenance verbatim.
+
+Long-poll (Tier 4): GET /v1/ingestions/{id}?wait=<s>&last_status=<status> holds
+the request (bounded, ≤25 s) until the status DIFFERS from last_status, then
+returns the normal view — the client learns of raw_stored→ocr_done→terminal
+transitions with ~0 discovery latency instead of a ~1 s poll cadence. The wait
+probes the status on short-lived connections (never holds a pool slot), and a
+sync endpoint thread is held for the duration — acceptable at this app's device
+count; LISTEN/NOTIFY (Tier 2) is the upgrade path if that ever changes.
 """
 
 from __future__ import annotations
 
+import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
@@ -21,6 +30,30 @@ from labelscan.platform.http.read_models import AuditEntry, audit_entries
 from labelscan.platform.http.security import require_scope
 
 router = APIRouter()
+
+# Long-poll bounds: the hold is ALWAYS bounded (a client cannot pin a thread
+# indefinitely) and the probe cadence keeps DB load negligible (one indexed
+# SELECT status every ~300 ms per waiting client).
+_MAX_WAIT_S = 25.0
+_PROBE_INTERVAL_S = 0.3
+
+
+def clamp_wait(wait: float) -> float:
+    """Bound the requested long-poll hold to [0, _MAX_WAIT_S] (never negative,
+    never unbounded — an absurd `wait` degrades to the cap, not an error)."""
+    if wait < 0:
+        return 0.0
+    return min(wait, _MAX_WAIT_S)
+
+
+def _probe_status(engine: Engine, ingestion_id: str) -> str | None:
+    """Cheap status read on a short-lived connection (indexed PK lookup).
+    None = ingestion not found (the full view load raises the 404)."""
+    with engine.connect() as c:
+        return c.execute(
+            text("SELECT status FROM ingestion.ingestion WHERE id = :id"),
+            {"id": ingestion_id},
+        ).scalar_one_or_none()
 
 
 class RawArtifactView(BaseModel):
@@ -60,6 +93,16 @@ class FieldView(BaseModel):
     created_at: str
 
 
+class InterimFieldView(BaseModel):
+    # Tier 3 wave 2 — a deterministic (regex) preview field written between OCR and
+    # LLM. Non-authoritative: surfaced ONLY while no extraction run exists; the
+    # reconciled run supersedes it.
+    field_name: str
+    value: Any
+    source: str
+    created_at: str
+
+
 class IngestionView(BaseModel):
     ingestion_id: str
     status: str
@@ -75,6 +118,9 @@ class IngestionView(BaseModel):
     # The latest run's fields, embedded so a polling client renders the review screen
     # WITHOUT a second GET /extraction-runs round-trip (audit §1.3). None until a run exists.
     latest_fields: list[FieldView] | None = None
+    # Wave-2 preview (status ocr_done): present only BEFORE the first run, so a
+    # completed/failed extraction can never show a stale preview as definitive.
+    interim_fields: list[InterimFieldView] | None = None
     audit: list[AuditEntry]
 
 
@@ -98,9 +144,37 @@ class ExtractionRunView(BaseModel):
 def get_ingestion(
     ingestion_id: str,
     request: Request,
+    wait: float = Query(
+        default=0.0,
+        description=(
+            "Long-poll hold in seconds (Tier 4), clamped to 25. Requires "
+            "last_status; the response returns as soon as the status differs "
+            "from last_status, or when the hold expires (with the current state)."
+        ),
+    ),
+    last_status: str | None = Query(
+        default=None,
+        description="The status the client last observed (long-poll baseline).",
+    ),
     _principal=Depends(require_scope("ingestion:read")),
     engine: Engine = Depends(get_engine),
 ) -> IngestionView:
+    # ── Tier 4 long-poll: bounded server-side wait for a status CHANGE ─────────
+    # Both params required to arm the hold (a bare `wait` has no baseline to
+    # compare against). A missing ingestion breaks out immediately — the view
+    # load below raises the same 404 the plain GET always did.
+    wait_s = clamp_wait(wait)
+    if wait_s > 0 and last_status:
+        deadline = time.monotonic() + wait_s
+        while True:
+            current = _probe_status(engine, ingestion_id)
+            if current is None or current != last_status:
+                break
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break  # hold expired — return the (unchanged) current state
+            time.sleep(min(_PROBE_INTERVAL_S, remaining))
+
     with engine.connect() as c:
         row = (
             c.execute(
@@ -148,6 +222,25 @@ def get_ingestion(
         latest_run_id = (
             max(runs, key=lambda r: r["attempt_no"])["run_id"] if runs else None
         )
+        # Wave-2 preview (Tier 3): only queried while NO run exists — once a run has
+        # landed (or failed) the preview is superseded and never surfaced again.
+        interim_fields = None
+        if latest_run_id is None:
+            interim_rows = (
+                c.execute(
+                    text(
+                        "SELECT field_name, value, source, created_at::text AS created_at "
+                        "FROM ingestion.interim_field WHERE ingestion_id = :id "
+                        "ORDER BY field_name"
+                    ),
+                    {"id": ingestion_id},
+                )
+                .mappings()
+                .all()
+            )
+            if interim_rows:
+                interim_fields = [InterimFieldView(**r) for r in interim_rows]
+
         latest_fields = None
         if latest_run_id is not None:
             field_rows = (
@@ -183,6 +276,7 @@ def get_ingestion(
             RunSummary(**r, is_latest=(r["attempt_no"] == max_attempt)) for r in runs
         ],
         latest_fields=latest_fields,
+        interim_fields=interim_fields,
         audit=audit,
     )
 
