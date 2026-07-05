@@ -183,6 +183,9 @@ def get_override_field() -> OverrideField:
 class OverrideFieldRequest(BaseModel):
     value: str | None = None  # null/blank => the reviewer cleared the field
     note: str | None = None
+    # Explicit acknowledgement required to override a GS1-owned (barcode-derived)
+    # field; without it those fields stay 409 FIELD_NOT_EDITABLE (back-compat).
+    force_gs1: bool = False
 
 
 class OverriddenFieldResponse(BaseModel):
@@ -221,6 +224,7 @@ def override_field(
         # Server-side retry dedup (P3): a repeat of this key (per actor) replays the
         # original outcome instead of appending another run.
         idempotency_key=idempotency_key,
+        force_gs1=body.force_gs1,
     )
     try:
         result = use_case(command)
@@ -229,7 +233,7 @@ def override_field(
     except FieldNotEditable:
         raise ApiError(
             "FIELD_NOT_EDITABLE",
-            f"field '{field_name}' is barcode-derived (GS1) and cannot be overridden",
+            f"field '{field_name}' is barcode-derived (GS1); set force_gs1 to override",
         )
     except IngestionNotFound:
         raise ApiError(

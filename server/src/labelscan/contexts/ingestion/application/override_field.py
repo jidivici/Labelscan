@@ -22,6 +22,10 @@ from labelscan.contexts.ingestion.application.ports import (
 )
 
 _ACTION = "ingestion.field_overridden"
+# Distinct audit action when a GS1-owned field is overridden under the explicit flag:
+# a barcode↔operator disagreement is a labelling-integrity anomaly that must stay
+# queryable in the audit trail, separately from ordinary corrections.
+_ACTION_GS1 = "ingestion.gs1_field_overridden"
 
 # The accepted extraction field names — mirror of the extracted_field.field_name CHECK
 # (SUPERSET: migration 0011 widened it) and the LLM adapter's _FIELD_NAMES. Kept here so an
@@ -55,17 +59,18 @@ FIELD_NAMES: frozenset[str] = frozenset(
 )
 
 # GS1-owned fields are read from the barcode symbology (mathematically exact), never
-# from OCR/LLM. A human may NOT silently override them: a barcode↔print mismatch is a
-# labelling-integrity anomaly that must surface as needs_review, never be "fixed" by a
-# manual edit (mirrors extraction_consumer._GS1_OWNED_FIELDS + the reconciliation
-# doctrine where GS1 wins on lot/DLC/weight/GTIN/packaging).
+# from OCR/LLM. A human may override them only under the EXPLICIT ``force_gs1`` flag
+# (workflow v1: the operator stays in charge of all 17 fields): without the flag the
+# request is rejected (409), with it the override is append-only, ``source='human'``
+# and audited under a dedicated action (mirrors extraction_consumer._GS1_OWNED_FIELDS
+# + the reconciliation doctrine where GS1 wins on lot/DLC/weight/GTIN/packaging).
 GS1_OWNED_FIELDS: frozenset[str] = frozenset(
     {"batch_number", "expiry_date", "weight", "gtin", "packaging_date"}
 )
 
 
 def is_human_editable(field_name: str) -> bool:
-    """True iff a reviewer may override this field (a known, non-GS1-owned field)."""
+    """True iff a reviewer may override this field WITHOUT the force_gs1 flag."""
     return field_name in FIELD_NAMES and field_name not in GS1_OWNED_FIELDS
 
 
@@ -74,7 +79,7 @@ class UnknownField(Exception):
 
 
 class FieldNotEditable(Exception):
-    """The field is GS1-owned and cannot be overridden by a human (→ 409)."""
+    """The field is GS1-owned and force_gs1 was not set (→ 409)."""
 
 
 class IngestionNotFound(Exception):
@@ -93,6 +98,9 @@ class OverrideFieldCommand:
     # Optional client retry key (stable per outbox operation): a repeat replays the
     # run the original request produced — never a second append (migration 0013).
     idempotency_key: str | None = None
+    # Explicit acknowledgement that a GS1-owned (barcode-derived) field is being
+    # overridden. Without it, GS1-owned fields stay rejected (409) — full back-compat.
+    force_gs1: bool = False
 
 
 class OverrideField:
@@ -102,7 +110,8 @@ class OverrideField:
     def __call__(self, cmd: OverrideFieldCommand) -> OverriddenField:
         if cmd.field_name not in FIELD_NAMES:
             raise UnknownField(cmd.field_name)
-        if cmd.field_name in GS1_OWNED_FIELDS:
+        gs1_owned = cmd.field_name in GS1_OWNED_FIELDS
+        if gs1_owned and not cmd.force_gs1:
             raise FieldNotEditable(cmd.field_name)
 
         # Normalize: a blank string is a cleared field (value=null), consistent with
@@ -119,7 +128,7 @@ class OverrideField:
                 correlation_id=cmd.correlation_id,
                 trace_id=cmd.trace_id,
             ),
-            action=_ACTION,
+            action=_ACTION_GS1 if gs1_owned else _ACTION,
             idempotency_key=cmd.idempotency_key,
         )
         if result is None:
