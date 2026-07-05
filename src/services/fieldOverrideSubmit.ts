@@ -1,5 +1,5 @@
 /**
- * Foreground submission of human field corrections (audit §4.2).
+ * Foreground submission of human field corrections (audit §4.2, workflow v1).
  *
  * After a reviewer saves an arrivage locally, each EDITED field is pushed to the
  * AUTHORITATIVE backend store via PATCH /v1/ingestions/{id}/fields/{name} so the server
@@ -11,8 +11,10 @@
  * A transient failure leaves the op pending for a later drain; a non-retryable one
  * dead-letters. Best-effort: it never throws, so a sync hiccup never blocks the save.
  *
- * GS1-owned fields (lot/DLC/weight/GTIN/packaging) are exact and NOT human-editable — the
- * backend rejects them (409) and we skip them client-side so they never dead-letter.
+ * Workflow v1: the operator stays in charge of all 17 fields, including GS1-owned ones
+ * (lot/DLC/weight/GTIN/packaging) — those are sent with the explicit `force_gs1` flag so
+ * the server records the override under a dedicated, auditable action instead of
+ * rejecting it (server override_field.py). Without the flag those fields still 409.
  */
 
 import { ApiError, overrideField } from './api';
@@ -25,7 +27,8 @@ import {
 } from './outbox';
 
 // Mirror of the backend GS1_OWNED_FIELDS (override_field.py): these come from the
-// barcode symbology and are never overridable by a human.
+// barcode symbology — overriding them is flagged explicitly (force_gs1) so the server
+// audits the correction under its own action rather than silently accepting it.
 const GS1_OWNED_FIELDS = new Set<string>([
   'batch_number',
   'expiry_date',
@@ -34,9 +37,8 @@ const GS1_OWNED_FIELDS = new Set<string>([
   'packaging_date',
 ]);
 
-/** A field a reviewer may push to the backend (anything that isn't GS1-exact). */
-export function isHumanEditableField(fieldName: string): boolean {
-  return !GS1_OWNED_FIELDS.has(fieldName);
+export function isGs1OwnedField(fieldName: string): boolean {
+  return GS1_OWNED_FIELDS.has(fieldName);
 }
 
 export interface FieldCorrection {
@@ -46,8 +48,7 @@ export interface FieldCorrection {
 
 export interface SubmitOverridesResult {
   submitted: number; // corrections that reached the backend this call
-  pending: number; // left on the outbox for a later drain (transient failure)
-  skipped: number; // GS1-owned / non-editable, never sent
+  pending: number; // left on the outbox for a later drain (transient failure, or 409 without the flag on an old server)
 }
 
 function toOperationError(err: unknown): OperationError {
@@ -58,25 +59,22 @@ function toOperationError(err: unknown): OperationError {
 }
 
 /**
- * Push each editable correction to the backend, best-effort. Never throws: callers can
+ * Push each correction to the backend, best-effort. Never throws: callers can
  * fire-and-forget after the local save without risking the UI flow.
  */
 export async function submitFieldOverrides(input: {
   ingestionId: string;
   fields: FieldCorrection[];
 }): Promise<SubmitOverridesResult> {
-  const result: SubmitOverridesResult = { submitted: 0, pending: 0, skipped: 0 };
+  const result: SubmitOverridesResult = { submitted: 0, pending: 0 };
 
   for (const field of input.fields) {
-    if (!isHumanEditableField(field.field_name)) {
-      result.skipped += 1;
-      continue;
-    }
-
+    const forceGs1 = isGs1OwnedField(field.field_name);
     const op = await enqueueOverrideField({
       ingestion_id: input.ingestionId,
       field_name: field.field_name,
       value: field.value,
+      force_gs1: forceGs1 || undefined,
     });
 
     const claimed = await markInFlight(op.id);
@@ -91,7 +89,11 @@ export async function submitFieldOverrides(input: {
         claimed.payload.field_name,
         claimed.payload.value,
         claimed.payload.note,
-        { idempotencyKey: claimed.idempotencyKey, correlationId: claimed.correlationId },
+        {
+          idempotencyKey: claimed.idempotencyKey,
+          correlationId: claimed.correlationId,
+          forceGs1: claimed.payload.force_gs1,
+        },
       );
       await markSucceeded(claimed.id);
       result.submitted += 1;
