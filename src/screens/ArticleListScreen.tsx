@@ -17,6 +17,7 @@ import {
   Alert,
   TextInput,
   Animated,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -26,23 +27,24 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { ArticleCard, CARD_HEIGHT } from '../components/ArticleCard';
 import { EmptyState } from '../components/EmptyState';
 import { CaptureFab } from '../components/CaptureFab';
+import { PendingScanCard } from '../components/PendingScanCard';
 import { Article } from '../types/Article';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import { getAllArticles, deleteArticle } from '../services/storage';
 import { exportAsJSON, exportAsCSV } from '../services/export';
 import { useArticleSearch } from '../hooks/useArticleSearch';
+import { useScanQueue } from '../hooks/useScanQueue';
+import { discardScan, retryScan, type PendingScan } from '../services/scanQueue';
 import { sortArticlesByName } from '../services/articleGrouping';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 
 // Each card has a FIXED height (CARD_HEIGHT) + its marginBottom, so FlatList can place
-// rows without measuring them — O(1) scroll at thousands of lots (audit §7.1).
+// rows without measuring them — O(1) scroll at thousands of lots (audit §7.1). The
+// "En cours" section sits in ListHeaderComponent above them; getItemLayout adds its
+// MEASURED height (via onLayout, not hardcoded — PendingScanCard/section-title styling
+// can change without this offset math silently drifting) as a constant offset.
 const ITEM_HEIGHT = CARD_HEIGHT + spacing.sm;
-const getItemLayout = (_data: ArrayLike<Article> | null | undefined, index: number) => ({
-  length: ITEM_HEIGHT,
-  offset: ITEM_HEIGHT * index,
-  index,
-});
 
 // Height the search bar expands to when it slides open (box + vertical padding).
 const SEARCH_OPEN_HEIGHT = 44 + spacing.sm * 2;
@@ -57,6 +59,58 @@ export function ArticleListScreen() {
   const { query, setQuery, results } = useArticleSearch(articles);
   // Accueil : arrivages triés par nom de produit (A→Z).
   const ordered = useMemo(() => sortArticlesByName(results), [results]);
+
+  // "En cours" (workflow v1): scans queued by the camera, tracked across screens by
+  // the scan queue. Rendered as the FlatList's header so there's one scroll surface;
+  // its MEASURED height (not hardcoded) keeps getItemLayout exact for the articles
+  // below it (audit §7.1 — O(1) scroll).
+  const { scans: pendingScans } = useScanQueue();
+  const [pendingHeaderHeight, setPendingHeaderHeight] = useState(0);
+  useEffect(() => {
+    if (pendingScans.length === 0) setPendingHeaderHeight(0);
+  }, [pendingScans.length]);
+  const handlePendingHeaderLayout = useCallback((e: LayoutChangeEvent) => {
+    setPendingHeaderHeight(e.nativeEvent.layout.height);
+  }, []);
+  const getItemLayout = useCallback(
+    (_data: ArrayLike<Article> | null | undefined, index: number) => ({
+      length: ITEM_HEIGHT,
+      offset: pendingHeaderHeight + ITEM_HEIGHT * index,
+      index,
+    }),
+    [pendingHeaderHeight],
+  );
+
+  const handleOpenScan = useCallback(
+    (scan: PendingScan) => navigation.navigate('Review', { pendingScanId: scan.id }),
+    [navigation],
+  );
+  const handleRetryScan = useCallback((id: string) => {
+    void retryScan(id);
+  }, []);
+  const handleDiscardScan = useCallback((id: string) => {
+    void discardScan(id);
+  }, []);
+
+  const pendingHeader = useMemo(() => {
+    if (pendingScans.length === 0) return null;
+    return (
+      <View onLayout={handlePendingHeaderLayout}>
+        <Text style={[typography.labelMedium, styles.pendingTitle]}>
+          {`En cours (${pendingScans.length})`}
+        </Text>
+        {pendingScans.map((scan) => (
+          <PendingScanCard
+            key={scan.id}
+            scan={scan}
+            onOpen={handleOpenScan}
+            onRetry={handleRetryScan}
+            onDiscard={handleDiscardScan}
+          />
+        ))}
+      </View>
+    );
+  }, [pendingScans, handlePendingHeaderLayout, handleOpenScan, handleRetryScan, handleDiscardScan]);
 
   // Search slides open from the header (homogeneous with the other actions).
   const [searchOpen, setSearchOpen] = useState(false);
@@ -285,6 +339,7 @@ export function ArticleListScreen() {
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         getItemLayout={getItemLayout}
+        ListHeaderComponent={pendingHeader}
         initialNumToRender={10}
         maxToRenderPerBatch={10}
         windowSize={7}
@@ -401,6 +456,13 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingTop: spacing.sm,
+  },
+  pendingTitle: {
+    color: colors.onSurfaceVariant,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.sm,
   },
   noResults: {
     alignItems: 'center',
