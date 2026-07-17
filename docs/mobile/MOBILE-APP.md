@@ -3,7 +3,7 @@
 **Statut :** Implémenté. Client mince Expo (SDK 54) ; l'extraction « lourde » (OCR + LLM) vit côté
 serveur. Ce document est la **référence du front mobile** — les docs `docs/` étant historiquement
 côté backend, celui-ci comble le manque.
-**Date :** 2026-07-05 (refonte workflow v2 — verrou 17/17, brouillon persistant, photo cuite).
+**Date :** 2026-07-06 (v1.1 — module Calendrier, accueil scopé par journée ; v2.1 la veille).
 **Périmètre :** `src/` uniquement.
 
 > **À lire en regard :**
@@ -156,15 +156,40 @@ soit un nouveau cycle de sondage (`retryScan` sur `extract_error`).
   `scanStepFromStatus(status, ocrDone)` → 3 étapes (Photo envoyée / Extraction / À valider) +
   libellé de l'étape active. Sobre par construction (Clean UI) : pas de pourcentage, pas de
   confiance — une étape est faite / active / en attente / en erreur.
-- **`ScanStepper.tsx`** : même langage visuel que `ExtractionProgress` (PulseDot sur l'étape active,
-  check animé sur une étape faite), en ligne horizontale compacte (vit dans une carte de liste).
-- **`PendingScanCard.tsx`** : vignette photo + stepper, ou — en cas d'erreur — libellé + boutons
+- **`PendingScanCard.tsx`** : vignette photo + libellé d'étape (issu de `scanStepFromStatus` — le
+  composant visuel `ScanStepper.tsx` n'est plus branché depuis la v2.1), ou — en cas d'erreur — boutons
   **Réessayer** / **Supprimer** (avec confirmation). Hauteur **fixe** (`PENDING_CARD_HEIGHT`) pour
   que `getItemLayout` de la `FlatList` des articles reste exact malgré la zone « En cours » en
   `ListHeaderComponent` (la hauteur du header est **mesurée** via `onLayout`, jamais devinée).
 - **Ouverture de la revue** : `navigation.navigate('Review', { pendingScanId })` — `Review` ne lit
   plus rien depuis les paramètres de navigation à part cet id ; photo, code-barres, résultat
   d'extraction sont lus **en direct** depuis la file (`useScan`, §5).
+
+### Calendrier — accueil scopé par journée (v1.1, 6 juillet 2026)
+
+L'accueil est **organisé par journée** : la liste n'affiche que les arrivages de la date
+sélectionnée (**aujourd'hui** par défaut) et le calendrier est le sélecteur de date — jamais une
+page. Icône dans l'app bar **à côté de la loupe**, même patron que la recherche : panneau qui se
+déplie sous le header (hauteur mesurée via une vue interne absolue), exclusion mutuelle entre les
+deux panneaux.
+
+- **Vue mensuelle compacte, style GitHub Contributions** : chaque case encode le **volume** du
+  jour par une intensité de bleu (rampe dérivée de `colors.primary`, 4 niveaux relatifs au jour
+  le plus chargé). Aucun badge ni compteur — l'intensité EST le signal.
+- **Sélecteur, pas navigation** : tap sur un jour → `selectedDay` change, le panneau se ferme, la
+  MÊME liste se re-rend (filtre **en mémoire** — instantané, aucun rechargement). Indication
+  discrète : libellé au-dessus de la liste (« Aujourd'hui » / « 3 juillet 2026 »), icône teintée
+  primary tant qu'un autre jour qu'aujourd'hui scope la liste. Bouton « Aujourd'hui » + chevrons
+  ‹ › dans l'en-tête du panneau.
+- **La recherche omnisciente reste GLOBALE** : une requête active bypasse le scope jour (on
+  retrouve un lot ancien sans connaître sa date) ; l'effacer restaure la journée sélectionnée.
+- **Zone « En cours » toujours visible** quel que soit le jour sélectionné : un scan non validé
+  n'est pas un article, donc pas rattaché à une journée.
+- **Implémentation** : logique **pure** dans [`services/calendar.ts`](../../src/services/calendar.ts)
+  (`dayKey` jour LOCAL — jamais UTC, `countByDay`, `intensityLevel` 0-4, `monthGrid` **6×7 fixe**
+  lundi-premier → hauteur constante, `formatDayKey` parse local) ; rendu dans
+  [`components/CalendarPanel.tsx`](../../src/components/CalendarPanel.tsx). Le header de liste
+  (En cours + libellé du jour) reste **toujours rendu/mesuré** → `getItemLayout` exact.
 
 ---
 
@@ -298,13 +323,14 @@ retirée avec ce chemin — audit §7.3.)
   (viseur + capture enchaînée + `ScanTray`), `Review` (entrée par la file, tous champs éditables),
   `Login`.
 - **`components/`** — `CaptureFab`, `FrameOverlay`, `CaptureButton`, `FlashOverlay`, `ArticleCard`,
-  `EmptyState`, `ScanTray`, `PendingScanCard`, `ScanStepper`, `PhotoViewerModal`, `ExtractionProgress`,
-  `CascadeReveal`, `PulseDot`, `SkeletonFieldList`.
+  `EmptyState`, `ScanTray`, `PendingScanCard`, `CalendarPanel`, `PhotoViewerModal`,
+  `ExtractionProgress`, `CascadeReveal`, `PulseDot`, `SkeletonFieldList`. (`ScanStepper` n'est
+  plus branché — candidat à suppression, voir audit v1.1.)
 - **`services/`** — I/O : `api`, `auth`/`authStorage`, `ingestionSubmit`, `ingestionResult`,
   `ingestionPolling`, `scanQueue`, `storage`, `outbox`, `outboxDrain`, `export`,
-  `fieldOverrideSubmit`. Helpers **purs** (testables) : `dates`, `inputMasks`, `fieldLabels`,
-  `fieldOrder`, `scanSteps`, `extractionStage`, `allergenSuggestions`, `articleSearch`,
-  `articleGrouping`, `gs1`, `faoDisplay`.
+  `fieldOverrideSubmit`. Helpers **purs** (testables) : `dates`, `calendar`, `inputMasks`,
+  `fieldLabels`, `fieldOrder`, `scanSteps`, `extractionStage`, `allergenSuggestions`,
+  `articleSearch`, `articleGrouping`, `fieldHistory`, `fieldCompleteness`, `gs1`, `faoDisplay`.
 - **`hooks/`** — `useArticleSearch`, `useScanQueue` (`useScanQueue`/`useScan`).
 - **`types/`** — `api.ts` (miroir des contrats backend), `Article.ts`.
 - **`theme/`** — tokens Material You (couleurs, espacements, typographie, élévation).
@@ -313,7 +339,7 @@ retirée avec ce chemin — audit §7.3.)
 
 ## 9. Tests
 
-`npx jest --config jest.config.js` (ts-jest, environnement node) — 21 suites, **199 tests** ;
+`npx jest --config jest.config.js` (ts-jest, environnement node) — 22 suites, **212 tests** ;
 notables : `scanQueue` (transitions, cap de sondages, hydratation/réconciliation, dédoublonnage,
 nettoyage photo, **`saveScanEdits` persiste + ré-hydrate le brouillon**), `ingestionResult`,
 `scanSteps` (mapping 5 statuts × `ocrDone`), `fieldCompleteness` (**`filledCountFromValues` = verrou
