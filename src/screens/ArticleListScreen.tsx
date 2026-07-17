@@ -1,13 +1,19 @@
 /**
- * ArticleListScreen — the app's home: browse every saved lot, search, export, capture.
+ * ArticleListScreen — the app's home: browse the selected day's lots, search, export,
+ * capture.
  *
- * Branded header (LabelScan / Articles) with a compact action cluster: the omni-search
- * lives in the header as an icon button that SLIDES a search bar open (homogeneous with
- * export + sign-out), rather than taking a permanent row. The list is sorted by product
- * name; capture is the bottom-right FAB.
+ * Branded header (LabelScan / Articles) with a compact action cluster: the calendar
+ * and the omni-search live in the header as icon buttons that SLIDE a panel open
+ * (homogeneous with export + sign-out), rather than taking a permanent row.
+ *
+ * The list is DAY-SCOPED (today by default): the calendar panel is the date selector —
+ * tap a day and the same screen re-renders with that day's articles (no navigation).
+ * The omni-search intentionally stays GLOBAL (all days): typing a query bypasses the
+ * day scope, clearing it restores it. Articles are sorted by product name; capture is
+ * the bottom-right FAB.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -25,6 +31,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ArticleCard, CARD_HEIGHT } from '../components/ArticleCard';
+import { CalendarPanel } from '../components/CalendarPanel';
 import { EmptyState } from '../components/EmptyState';
 import { CaptureFab } from '../components/CaptureFab';
 import { PendingScanCard } from '../components/PendingScanCard';
@@ -42,6 +49,7 @@ import {
   isProductNameKnownFromRun,
 } from '../services/fieldCompleteness';
 import { sortArticlesByName } from '../services/articleGrouping';
+import { countByDay, dayKey, formatDayKey, todayKey } from '../services/calendar';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography } from '../theme';
 
@@ -63,8 +71,19 @@ export function ArticleListScreen() {
   const [exporting, setExporting] = useState(false);
   // Omni-search: lot, espèce, zone FAO, élevage, fournisseur… (services/articleSearch).
   const { query, setQuery, results } = useArticleSearch(articles);
-  // Accueil : arrivages triés par nom de produit (A→Z).
-  const ordered = useMemo(() => sortArticlesByName(results), [results]);
+  const searching = query.trim().length > 0;
+
+  // Day scope (calendar module): the home list shows ONE day's arrivages — today by
+  // default, or whichever day was picked in the calendar panel. Searching bypasses
+  // the scope (the omni-search stays global across all days, unchanged behavior).
+  const [selectedDay, setSelectedDay] = useState<string>(() => todayKey());
+  const dayCounts = useMemo(() => countByDay(articles), [articles]);
+  const dayScoped = useMemo(
+    () => (searching ? results : results.filter((a) => dayKey(a.saved_at) === selectedDay)),
+    [results, searching, selectedDay],
+  );
+  // Accueil : arrivages de la journée triés par nom de produit (A→Z).
+  const ordered = useMemo(() => sortArticlesByName(dayScoped), [dayScoped]);
 
   // "En cours" (workflow v1): scans queued by the camera, tracked across screens by
   // the scan queue. Rendered as the FlatList's header so there's one scroll surface;
@@ -72,20 +91,17 @@ export function ArticleListScreen() {
   // below it (audit §7.1 — O(1) scroll). The full snapshot (results + interim) drives
   // the "n/17 champs" text + the "name known" highlight on each card.
   const { scans: pendingScans, results: scanResults, interim: scanInterim } = useScanQueue();
-  const [pendingHeaderHeight, setPendingHeaderHeight] = useState(0);
-  useEffect(() => {
-    if (pendingScans.length === 0) setPendingHeaderHeight(0);
-  }, [pendingScans.length]);
-  const handlePendingHeaderLayout = useCallback((e: LayoutChangeEvent) => {
-    setPendingHeaderHeight(e.nativeEvent.layout.height);
+  const [listHeaderHeight, setListHeaderHeight] = useState(0);
+  const handleListHeaderLayout = useCallback((e: LayoutChangeEvent) => {
+    setListHeaderHeight(e.nativeEvent.layout.height);
   }, []);
   const getItemLayout = useCallback(
     (_data: ArrayLike<Article> | null | undefined, index: number) => ({
       length: ITEM_HEIGHT,
-      offset: pendingHeaderHeight + ITEM_HEIGHT * index,
+      offset: listHeaderHeight + ITEM_HEIGHT * index,
       index,
     }),
-    [pendingHeaderHeight],
+    [listHeaderHeight],
   );
 
   const handleOpenScan = useCallback(
@@ -99,13 +115,17 @@ export function ArticleListScreen() {
     void discardScan(id);
   }, []);
 
-  const pendingHeader = useMemo(() => {
-    if (pendingScans.length === 0) return null;
+  // List header: "En cours" scans (day-independent — active work is always visible),
+  // then the discreet label of the day currently scoping the articles below. Always
+  // rendered (even empty) so onLayout keeps getItemLayout's offset exact.
+  const listHeader = useMemo(() => {
     return (
-      <View onLayout={handlePendingHeaderLayout}>
-        <Text style={[typography.labelMedium, styles.pendingTitle]}>
-          {`En cours (${pendingScans.length})`}
-        </Text>
+      <View onLayout={handleListHeaderLayout}>
+        {pendingScans.length > 0 && (
+          <Text style={[typography.labelMedium, styles.pendingTitle]}>
+            {`En cours (${pendingScans.length})`}
+          </Text>
+        )}
         {pendingScans.map((scan) => {
           // /17 score + name-known probe: prefer the FINAL run when ready, else the
           // Tier-3 interim preview (while extracting); submitting scans show 0/17.
@@ -131,32 +151,36 @@ export function ArticleListScreen() {
             />
           );
         })}
+        {!searching && (
+          <Text style={[typography.labelMedium, styles.dayTitle]}>
+            {selectedDay === todayKey() ? 'Aujourd’hui' : formatDayKey(selectedDay)}
+          </Text>
+        )}
       </View>
     );
   }, [
     pendingScans,
     scanResults,
     scanInterim,
-    handlePendingHeaderLayout,
+    searching,
+    selectedDay,
+    handleListHeaderLayout,
     handleOpenScan,
     handleRetryScan,
     handleDiscardScan,
   ]);
 
-  // Search slides open from the header (homogeneous with the other actions).
+  // Search and calendar both slide open from the header (homogeneous actions);
+  // only one panel is open at a time.
   const [searchOpen, setSearchOpen] = useState(false);
   const searchAnim = useRef(new Animated.Value(0)).current;
   const searchInputRef = useRef<TextInput>(null);
 
-  const openSearch = useCallback(() => {
-    setSearchOpen(true);
-    Animated.timing(searchAnim, {
-      toValue: 1,
-      duration: 220,
-      useNativeDriver: false,
-    }).start();
-    requestAnimationFrame(() => searchInputRef.current?.focus());
-  }, [searchAnim]);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const calendarAnim = useRef(new Animated.Value(0)).current;
+  // The panel's natural height, measured from an absolutely-positioned inner view
+  // (measurable even while the slide is at height 0) — the slide animates 0 → this.
+  const [calendarHeight, setCalendarHeight] = useState(0);
 
   const closeSearch = useCallback(() => {
     searchInputRef.current?.blur();
@@ -168,10 +192,54 @@ export function ArticleListScreen() {
     }).start(() => setSearchOpen(false));
   }, [searchAnim, setQuery]);
 
+  const closeCalendar = useCallback(() => {
+    Animated.timing(calendarAnim, {
+      toValue: 0,
+      duration: 180,
+      useNativeDriver: false,
+    }).start(() => setCalendarOpen(false));
+  }, [calendarAnim]);
+
+  const openSearch = useCallback(() => {
+    if (calendarOpen) closeCalendar();
+    setSearchOpen(true);
+    Animated.timing(searchAnim, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+    requestAnimationFrame(() => searchInputRef.current?.focus());
+  }, [searchAnim, calendarOpen, closeCalendar]);
+
+  const openCalendar = useCallback(() => {
+    if (searchOpen) closeSearch();
+    setCalendarOpen(true);
+    Animated.timing(calendarAnim, {
+      toValue: 1,
+      duration: 220,
+      useNativeDriver: false,
+    }).start();
+  }, [calendarAnim, searchOpen, closeSearch]);
+
   const toggleSearch = useCallback(() => {
     if (searchOpen) closeSearch();
     else openSearch();
   }, [searchOpen, openSearch, closeSearch]);
+
+  const toggleCalendar = useCallback(() => {
+    if (calendarOpen) closeCalendar();
+    else openCalendar();
+  }, [calendarOpen, openCalendar, closeCalendar]);
+
+  // Picking a day re-scopes the list instantly (in-memory filter — no reload) and
+  // closes the panel.
+  const handleSelectDay = useCallback(
+    (key: string) => {
+      setSelectedDay(key);
+      closeCalendar();
+    },
+    [closeCalendar],
+  );
 
   // Reload whenever screen comes into focus (after a save)
   useFocusEffect(
@@ -280,6 +348,28 @@ export function ArticleListScreen() {
         <View style={styles.appBarActions}>
           {hasArticles && (
             <Pressable
+              onPress={toggleCalendar}
+              style={[styles.iconButton, calendarOpen && styles.iconButtonActive]}
+              android_ripple={{ color: colors.primaryContainer, borderless: true }}
+              accessibilityRole="button"
+              accessibilityLabel={calendarOpen ? 'Fermer le calendrier' : 'Calendrier'}
+              accessibilityState={{ expanded: calendarOpen }}
+            >
+              <MaterialCommunityIcons
+                name={calendarOpen ? 'calendar-month' : 'calendar-blank-outline'}
+                size={22}
+                // Stays tinted while a past day scopes the list — the discreet cue
+                // that the home screen is not on today.
+                color={
+                  calendarOpen || selectedDay !== todayKey()
+                    ? colors.primary
+                    : colors.onSurfaceVariant
+                }
+              />
+            </Pressable>
+          )}
+          {hasArticles && (
+            <Pressable
               onPress={toggleSearch}
               style={[styles.iconButton, searchOpen && styles.iconButtonActive]}
               android_ripple={{ color: colors.primaryContainer, borderless: true }}
@@ -323,6 +413,36 @@ export function ArticleListScreen() {
         </View>
       </View>
 
+      {/* Slide-open calendar (driven by the header calendar button) — a date
+          selector, never a page: picking a day swaps the list content below. */}
+      {hasArticles && (
+        <Animated.View
+          pointerEvents={calendarOpen ? 'auto' : 'none'}
+          style={[
+            styles.calendarSlide,
+            {
+              height: calendarAnim.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, calendarHeight],
+              }),
+              opacity: calendarAnim,
+            },
+          ]}
+        >
+          <View
+            style={styles.calendarContent}
+            onLayout={(e) => setCalendarHeight(e.nativeEvent.layout.height)}
+          >
+            <CalendarPanel
+              open={calendarOpen}
+              counts={dayCounts}
+              selectedDay={selectedDay}
+              onSelectDay={handleSelectDay}
+            />
+          </View>
+        </Animated.View>
+      )}
+
       {/* Slide-open search (driven by the header search button) */}
       {hasArticles && (
         <Animated.View
@@ -364,13 +484,13 @@ export function ArticleListScreen() {
         </Animated.View>
       )}
 
-      {/* List — sorted by product name */}
+      {/* List — the selected day's arrivages, sorted by product name */}
       <FlatList
         data={ordered}
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         getItemLayout={getItemLayout}
-        ListHeaderComponent={pendingHeader}
+        ListHeaderComponent={listHeader}
         initialNumToRender={10}
         maxToRenderPerBatch={10}
         windowSize={7}
@@ -389,11 +509,22 @@ export function ArticleListScreen() {
             pendingScans.length === 0 ? (
               <EmptyState onCapture={openCapture} />
             ) : null
-          ) : (
+          ) : searching ? (
             <View style={styles.noResults}>
               <MaterialCommunityIcons name="magnify-close" size={40} color={colors.onSurfaceVariant} />
               <Text style={[typography.bodyMedium, styles.noResultsText]}>
                 Aucun résultat pour « {query.trim()} ».
+              </Text>
+            </View>
+          ) : (
+            // Articles exist, just none on the selected day — a quiet day note,
+            // never the onboarding empty state.
+            <View style={styles.noResults}>
+              <MaterialCommunityIcons name="calendar-blank-outline" size={40} color={colors.onSurfaceVariant} />
+              <Text style={[typography.bodyMedium, styles.noResultsText]}>
+                {selectedDay === todayKey()
+                  ? 'Aucun arrivage aujourd’hui.'
+                  : `Aucun arrivage le ${formatDayKey(selectedDay)}.`}
               </Text>
             </View>
           )
@@ -468,6 +599,19 @@ const styles = StyleSheet.create({
   iconButtonActive: {
     backgroundColor: colors.primaryContainer,
   },
+  // ── Slide-open calendar ────────────────────────────────────────────────────────
+  calendarSlide: {
+    overflow: 'hidden',
+    backgroundColor: colors.surface,
+  },
+  // Absolute so the panel keeps its natural height (measurable) while the slide
+  // is collapsed to 0.
+  calendarContent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+  },
   // ── Slide-open search ──────────────────────────────────────────────────────────
   searchSlide: {
     overflow: 'hidden',
@@ -497,6 +641,15 @@ const styles = StyleSheet.create({
     paddingTop: spacing.md,
   },
   pendingTitle: {
+    color: colors.onSurfaceVariant,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+  },
+  // Discreet label of the day scoping the list (same register as pendingTitle).
+  dayTitle: {
     color: colors.onSurfaceVariant,
     textTransform: 'uppercase',
     letterSpacing: 0.8,

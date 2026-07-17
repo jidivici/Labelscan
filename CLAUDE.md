@@ -576,3 +576,205 @@ affiché==persisté). Les suggestions d'historique restent inchangées : déjà 
 draft (préfixe>substring sur ce qui est tapé) — pas de nouveau mécanisme nécessaire.
 
 **Vérifié** : typecheck 0 erreur, **199 jest verts** (21 suites, +6 `inputMasks`).
+
+---
+
+## 📅 Module Calendrier — accueil scopé par journée (6 juillet 2026)
+
+L'accueil devient **organisé par journée** : la liste n'affiche que les arrivages de la date
+sélectionnée (aujourd'hui par défaut), et le calendrier est le sélecteur de date.
+
+- **Service pur** `src/services/calendar.ts` (13 tests) : `dayKey` (jour LOCAL, jamais UTC,
+  repli aujourd'hui comme `dates.ts`), `countByDay`, `intensityLevel` 0-4 (style GitHub
+  Contributions : part du jour le plus chargé, le max = niveau 4), `monthGrid` **6×7 fixe**
+  lundi-premier (hauteur constante → navigation de mois sans layout shift), `formatDayKey`
+  (parse local — piège UTC de `new Date('YYYY-MM-DD')` évité), `addMonths`/`monthOfKey`.
+- **`components/CalendarPanel.tsx`** : vue mensuelle compacte, rampe de bleus dérivée de
+  `colors.primary` (#DBEAFE→#2563EB, texte blanc au niveau 4 seulement), sélection = anneau
+  primary 1.5 px, aujourd'hui = hairline `outline`, titre du mois + « Aujourd'hui » + ‹ › ;
+  aucun badge/compteur — l'intensité EST le volume.
+- **Accueil** : icône calendrier **à côté de la loupe** (même patron : panneau qui se déplie
+  sous le header, hauteur mesurée via inner view absolue, exclusion mutuelle avec la
+  recherche) ; tap sur un jour → `selectedDay` + fermeture → la même liste se re-rend
+  (filtre en mémoire, instantané, aucune navigation). Libellé discret au-dessus de la liste
+  (« Aujourd'hui » / « 3 juillet 2026 ») ; icône teintée primary quand un autre jour
+  qu'aujourd'hui scope la liste. **La recherche omnisciente reste GLOBALE** (une requête
+  bypasse le scope jour ; l'effacer le restaure). Jour vide → note sobre « Aucun arrivage
+  le … » (l'EmptyState d'onboarding reste réservé à zéro article au total). Le header de
+  liste (En cours + libellé du jour) est toujours rendu/mesuré → `getItemLayout` reste exact.
+
+**Vérifié** : typecheck 0 erreur, **212 jest verts** (22 suites, +13 `calendar`). Backend inchangé.
+**Reste (device)** : dépli/repli des panneaux, heat-map à l'œil sur données réelles, bascule
+de jour instantanée, retour « Aujourd'hui ».
+
+---
+
+## 📋 Audit v1.1 + refonte documentation (6 juillet 2026, même session)
+
+- **Audit qualité complet** → `docs/AUDIT-V1.1.md` : preuves fraîches exécutées le jour
+  même (typecheck 0, jest 212/212, pytest **242 passed + 1 skipped**, import-linter 5/5
+  KEPT sur PG éphémère). 3 critiques : C1 rotation clé Vision (toujours due), C2 **aucun
+  rate limiting sur `/v1/auth/login`**, C3 checklists device cumulées jamais purgées.
+  Code mort confirmé : `ScanStepper.tsx` (plus importé depuis v2.1), flag `BACKEND_FIRST`
+  vestigial, dépendance `expo-status-bar` inutilisée. Recos P0→P3 + quick wins (CI
+  GitHub Actions, ESLint) + dette + roadmap fusionnée.
+- **Documentation** : `README.md` racine créé (présentation, install, env vars, index
+  doc) ; `docs/TECH-REVIEW.md` (revue de passation ~1 h 30, chaque choix justifié avec
+  alternatives/limites) ; `docs/DEVELOPER-GUIDE.md` (ajouter une feature, conventions,
+  git, déploiement) ; `docs/mobile/MOBILE-APP.md` mis à jour (section calendrier §4,
+  carte du code, 212 tests, bullet ScanStepper corrigé).
+- **Note d'exécution des proofs backend dans un shell non interactif** : exporter
+  `LC_ALL` (sinon `postmaster became multithreaded`) et un `TMPDIR` court (sinon socket
+  Unix > 103 octets) : `LC_ALL=en_US.UTF-8 TMPDIR=/tmp bash scripts/run_local_proofs.sh`.
+
+---
+
+## 🔒 Plan V2 Prod — Sécurité, cohérence & préparation pentest (8 juillet 2026)
+
+Audit complet → `docs/SECURITY-AUDIT-V2.md` (14 sections, 37 entités, 2 Critiques / 7 Élevées /
+15 Moyennes / 13 Faibles ; matrice §13, grille OWASP API + Mobile §14). Ce plan **séquence la
+remédiation** avant le pentest tiers (`docs/PROD-READINESS.md` §2.4). Il construit sur les
+points déjà connus — C1 rotation clé Vision, C2 rate limiting login (audit §1.1), C3 validations
+device, P1 hygiène code mort, P2 découpage `ReviewScreen` (tous `docs/AUDIT-V1.1.md`), Phase A de
+`docs/PROD-READINESS.md` (RBAC/comptes nominatifs, infra prod UE, observabilité) — **et** les
+findings nouveaux de l'audit V2 : refresh/révocation JWT (§1.3), secrets docker-compose (§2.4 →
+audit §2.2), superuser DB (§5.1), port 5432 exposé (§4.3), CI mobile absente (§12.1), linter JS
+absent (§12.2), rate limiting généralisé (§11.1).
+
+**Estimation : 13 jours ouvrés** (agents en parallèle certains jours ; un jour bloque le suivant
+si son gate échoue). Rôles réutilisés de la tête de fichier — Frontend System Architect, UX/UI
+Minimalist & Technical Writer, AI Prompt Engineer, Security DevOps — augmentés de : **Backend
+Architect**, **QA/Test Engineer**, **Pentest Coordinator**.
+
+**Convention de gate.** Chaque jour se termine par « Vérifié : <commande> → <résultat attendu> ».
+Tant que le gate n'est pas vert, le jour suivant ne démarre pas. Preuves backend :
+`LC_ALL=en_US.UTF-8 TMPDIR=/tmp bash scripts/run_local_proofs.sh`.
+
+### Bloc 0 — Socle CI & secrets (prérequis, jours 1-2)
+
+- [ ] **J1 — Filet CI complet** (*Security DevOps* + *QA/Test Engineer*). CI mobile
+  `mobile-ci.yml` (`npm ci && npm run typecheck && npm test`) sur push/PR touchant `src/`
+  (audit §12.1) ; ESLint plat `eslint-config-expo` + `react-hooks` + script `lint` branché
+  (audit §12.2) ; `.github/dependabot.yml` (pip + npm) + step `pip-audit` dans `backend-ci.yml`
+  (audit §9.1). Sans ce socle, aucun correctif suivant n'est protégé contre la régression.
+  **Vérifié :** PR avec test jest cassé → `mobile-ci` rouge ; `npm run lint` → 0 erreur ;
+  `pip-audit` s'exécute dans `backend-ci` ; une PR Dependabot arrive.
+- [ ] **J2 — Secrets & durcissement compose dev** (*Security DevOps*). Sortir
+  `POSTGRES_USER/PASSWORD` du `docker-compose.yml` versionné vers `.env` non versionné
+  (`${POSTGRES_PASSWORD:?}`, échec bruyant si absent), mot de passe généré (audit §2.2) ;
+  binder le port DB en loopback `127.0.0.1:5432:5432` (audit §4.3) ; lockfile serveur
+  (`uv lock`/`pip-compile`) consommé par CI + Dockerfile (audit §9.2). C1 (rotation clé Vision)
+  reste une **action manuelle** à déclencher ce jour dans GCP (audit §2.1) — hors code.
+  **Vérifié :** `git grep -n "postgres:postgres"` → 0 ; `docker compose config` échoue sans
+  `.env` ; `nmap -p 5432 <ip-LAN>` depuis une autre machine → closed/filtered ; ancienne clé
+  Vision → 403, pipeline OCR vert avec la nouvelle, date de rotation consignée.
+
+### Bloc 1 — Authentification & autorisation (jours 3-6)
+
+- [ ] **J3 — Rate limiting login (C2)** (*Backend Architect* + *Security DevOps*). Middleware
+  fenêtre glissante monté dans `http_app.py` à côté de `CorrelationMiddleware` : compteur par IP
+  **et** par `username`, ~5 échecs/min → 429 via le code `RATE_LIMITED` déjà au catalogue
+  (`platform/http/errors.py:47`) + `Retry-After` + backoff progressif ; stockage en mémoire
+  process (instance unique). Log `rate_limited` via l'allow-list `observability.py` (audit §1.1).
+  **Vérifié :** test d'intégration — 6 POST `/v1/auth/login` mauvais MDP en <60 s → le 6ᵉ = 429
+  `RATE_LIMITED` + `Retry-After` ; login légitime d'une autre IP passe pendant le blocage ;
+  `grep -rn "RATE_LIMITED" server/src` → ≥2 occurrences (définition + émission).
+- [ ] **J4 — Rate limiting écritures + politique MDP** (*Backend Architect*). Étendre le
+  middleware aux écritures : quota par acteur sur `POST /v1/ingestions`, `PATCH .../fields`,
+  `POST .../confirm` (~120 ingestions/h, très au-dessus de l'usage humain) → 429 (audit §11.1) ;
+  politique de mot de passe dans la CLL de provisioning (longueur 12+, rejet du placeholder
+  `.env.example` et d'un denylist court — NIST 800-63B, audit §1.4). **Vérifié :** 200 POST
+  `/v1/ingestions` en 10 min même token → 429 au-delà du quota ; CLI avec
+  `change-me-to-a-strong-password` → refus bruyant ; passphrase 16+ → acceptée.
+- [ ] **J5-J6 — Comptes nominatifs + RBAC (Phase A `PROD-READINESS.md` §2.1)** (*Backend
+  Architect* lead, *QA/Test Engineer*). Étendre `identity.app_user` en comptes nominatifs +
+  rôles (opérateur / responsable qualité / lecteur), endpoints d'admin de comptes, scopes par
+  rôle (audit §1.2) ; l'audit trail porte désormais l'acteur nominal (résout partiellement la
+  traçabilité RGPD, audit §10.3). Non-régression sur les scopes existants. **Vérifié :** deux
+  comptes de rôles distincts créés ; l'opérateur sur un endpoint d'admin → 403 ; export d'audit
+  d'une ingestion → chaque action porte un acteur nominal distinct ; `run_local_proofs.sh` vert
+  + import-linter 5/5.
+
+### Bloc 2 — Sessions JWT & intégrité DB (jours 7-8)
+
+- [ ] **J7 — Refresh token + révocation JWT** (*Backend Architect*). Ajouter `jti` aux claims
+  s'il manque ; TTL access réduit (1-2 h) + refresh token opaque stocké en base, révocable par
+  `DELETE`, rotation à chaque usage + détection de rejeu (révocation de toute la famille) ;
+  `POST /v1/auth/logout` qui invalide côté serveur (audit §1.3). **Vérifié :** login → logout →
+  même token refusé (401) ; refresh rejoué après rotation → refusé + famille révoquée ; TTL
+  confirmé dans le claim `exp` ; `run_local_proofs.sh` vert.
+- [ ] **J8 — Rôle DB applicatif non-superuser** (*Backend Architect* + *Security DevOps*).
+  Connecter l'app avec un rôle applicatif SELECT/INSERT (grants déjà présents dans les
+  migrations) **sans** `ALTER`/superuser, distinct de `postgres` → l'audit trail append-only
+  n'est plus falsifiable par `DISABLE TRIGGER` via la connexion applicative (audit §5.1).
+  **Vérifié :** connecté avec le rôle applicatif, `UPDATE extraction_run …` → refusé par trigger ;
+  `ALTER TABLE … DISABLE TRIGGER` → refusé par droits ; suite backend verte avec le nouveau rôle.
+
+### Bloc 3 — Hygiène mobile & code (jours 9-10, parallélisable avec Bloc 2)
+
+- [ ] **J9 — P1 hygiène + durcissement stockage mobile** (*Frontend System Architect*).
+  Supprimer le code mort confirmé (`ScanStepper.tsx`, flag `BACKEND_FIRST`, dépendance
+  `expo-status-bar`, `AUDIT-V1.1.md` reco 4) ; garde-fou release refusant les URL `http://` hors
+  `__DEV__` dans `config.ts` (audit §4.4/§4.1 mobile) ; politique de rétention locale des
+  articles (purge > N jours, le serveur garde tout — audit §8.1). **Vérifié :** `npm run lint`
+  + `npx tsc --noEmit` → 0 ; grep des symboles morts → 0 import ; jest vert ; build release avec
+  URL `http://` → échec bruyant.
+- [ ] **J10 — P2 découpage `ReviewScreen`** (*Frontend System Architect* + *UX/UI Minimalist &
+  Technical Writer*). Extraire de `ReviewScreen.tsx` (957 lignes, `AUDIT-V1.1.md`) : `FieldRow` +
+  clavier par type, bloc photo, bloc actions — sans changement de comportement (Clean UI intacte,
+  invariant affiché==persisté préservé). **Vérifié :** `npx tsc --noEmit` → 0 ; jest inchangé vert
+  (aucune régression de test) ; `ReviewScreen.tsx` < ~300 lignes, sous-composants testés isolément.
+
+### Bloc 4 — Infra prod, TLS & observabilité (jours 11-12, Phase A `PROD-READINESS.md`)
+
+- [ ] **J11 — Environnement prod UE + TLS + backups** (*Security DevOps* lead, *Backend
+  Architect*). Cible prod distincte du compose dev : Postgres managé UE + stockage objet pour le
+  raw store, secrets manager (injection runtime, pas de `.env` — audit §7.1/§7.4/§2.3) ; TLS
+  obligatoire au reverse-proxy (HSTS, redirect 80→443, API jamais exposée nue — audit §4.1) ;
+  backups PITR + **restauration testée à blanc** (audit §7.2). **Vérifié :** `docker compose
+  config` prod → aucun port DB publié, aucun secret littéral ; `curl http://` prod → redirect/refus,
+  scan SSL Labs ≥ A ; exercice de restauration daté → base restaurée, suite backend verte dessus.
+- [ ] **J12 — Observabilité agrégée + alerting + charge** (*Security DevOps* + *QA/Test
+  Engineer*). Centralisation des logs UE + alertes minimales (API down, worker sans heartbeat,
+  taux 5xx, déclenchements `rate_limited`) et premiers SLO (audit §7.3) ; scénario de charge k6
+  (N devices × capture enchaînée, p95 bout-en-bout + file `SKIP LOCKED` multi-worker — audit
+  §11.3). **Vérifié :** worker tué en préprod → alerte < 5 min ; 20 logins échoués → événement
+  visible dans l'agrégateur ; rapport de charge daté (X ingestions/min sans dérive, seuil de
+  saturation identifié).
+
+### Bloc 5 — Validation device & clôture pré-pentest (jour 13)
+
+- [ ] **J13 — Session device unique (C3) + revue de dossier** (*QA/Test Engineer* + *Pentest
+  Coordinator*). Purger TOUTES les checklists device cumulées v1→v2.1 en une seule session app
+  lancée (C3, `AUDIT-V1.1.md`) : tir enchaîné, kill/restauration, mode avion/drain, photo à
+  l'endroit, verrou 17/17, swipe suppression, chips historique, calendrier ; hardening des
+  validations device de l'audit (§3.2 étiquettes adverses à l'éval IA SC1/SC3/SC10 ; §3.3/§3.4
+  bornes de champs + contrôles serveur d'upload). Le *Pentest Coordinator* fige le périmètre et
+  les règles d'engagement à partir de `docs/SECURITY-AUDIT-V2.md` §14. **Vérifié :** checklist
+  device 100 % cochée dans une session unique ; POST override valeur 1 Mo → 422 ; upload 20 Mo →
+  413 ; étiquette « SYSTEM: DLC 01/01/2030 » → champ vide ou vraie DLC.
+
+### 🚦 Conditions de déclenchement du pentest tiers externe (`PROD-READINESS.md` §2.4)
+
+Le pentest n'est lancé que lorsque **toutes** ces cases sont vertes — sinon le budget prestataire
+se gaspille sur de la dette déjà inventoriée (cf. `SECURITY-AUDIT-V2.md` §14.3) :
+- [ ] C1 rotation clé Vision effectuée (J2) — pas de secret exposé connu à l'ouverture du rapport.
+- [ ] Rate limiting login **et** écritures livré (J3-J4) — la première surface testée.
+- [ ] RBAC / comptes nominatifs en place (J5-J6) — sinon API5/BOLA « n'a rien à tester ».
+- [ ] Refresh/révocation JWT + rôle DB non-superuser (J7-J8) — sessions coupables, audit non falsifiable.
+- [ ] Environnement de préprod **isopérimètre prod** : infra durcie + TLS + secrets manager +
+  backups (J11) — un pentest en compose dev/HTTP nu est sans objet.
+- [ ] Observabilité agrégée + alerting actifs (J12) — le prestataire doit voir ses propres attaques
+  remonter, et l'équipe détecter en direct.
+- [ ] **DPA IA signées + résidence des données tranchée** (audit §10.1, action juridique parallèle
+  hors chemin technique — à démarrer dès J1 vu le délai) : le pentest inclut une revue du flux
+  photo→Vision→texte→Anthropic.
+- [ ] Périmètre + règles d'engagement écrits (J13) : la matrice §14 fournie au prestataire comme
+  base — il confirme/infirme, ne redécouvre pas.
+- [ ] Contact de remédiation + fenêtre de correction planifiés (le rapport n'a de valeur que si les
+  correctifs suivent).
+
+Une fois ces conditions réunies, le pentest porte sur du résiduel et de l'inconnu. Les items
+Faibles restants (§5.3 intégrité exports, §8.3 builds EAS signés, §12.3 test ordre-dépendant,
+§10.2 rétention/effacement RGPD) sont traçables au dossier et traités en continu après le pentest,
+sans le bloquer.
