@@ -39,8 +39,7 @@ Un grand groupe exigera :
   tous les scans portent le même actor). C'est aussi une exigence réglementaire d'auditabilité.
 - [ ] **SSO d'entreprise** (SAML/OIDC — Entra ID est le standard de facto en agro) + provisioning
   (SCIM ou a minima admin UI).
-- [ ] **RBAC** : opérateur (scan/revue), responsable qualité (alertes, exports, overrides),
-  admin site, admin groupe. Les scopes JWT existent déjà — c'est le bon socle, il manque la
+- [ ] **RBAC** : opérateur (scan/revue), admin site, admin groupe. Les scopes JWT existent déjà — c'est le bon socle, il manque la
   couche de gestion.
 - [ ] Rotation des secrets (JWT, clés API) sans redéploiement ; verrouillage/expiration de session.
 **Effort : L (2-4 semaines). C'est le manque n°1.**
@@ -52,7 +51,7 @@ ni de cloisonnement.
 - [ ] Choix d'isolation : schéma-par-tenant ou colonne `tenant_id` + RLS Postgres. Vu
   l'architecture append-only + triggers existante, **RLS + tenant_id** est le chemin le moins
   invasif ; à décider AVANT d'écrire la migration (coûteux à changer après).
-- [ ] Agrégations groupe : un responsable qualité national veut voir tous les sites.
+- [ ] Agrégations groupe : un administrateur national veut voir tous les sites.
 **Effort : L-XL (3-6 semaines selon l'option d'isolation).**
 
 ### 2.3 Infrastructure & exploitation — **BLOQUANT**

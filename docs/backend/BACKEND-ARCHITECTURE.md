@@ -110,9 +110,9 @@ server/src/labelscan/
 │   │   ├── domain/           #     PURE: gate (evaluate), gs1 parser, reconciliation, dataclasses
 │   │   ├── application/      #     use cases + ports (Protocols)
 │   │   └── adapters/         #     http routers, SQL repo, Google Vision, Claude, extraction consumer
-│   ├── traceability/         #   product/supplier/batch chain (consumes extraction.completed)
+│   ├── traceability/         #   product/supplier/batch chain + store arrivals
 │   ├── haccp/                #   control plans + alerts lifecycle
-│   ├── identity/             #   auth: pbkdf2 password, Login use case, app_user repo, /auth/login, CLI
+│   ├── identity/             #   auth + access directory: users, roles, stores, JWT, admin APIs
 │   ├── compliance/ · audit/  #   (thin / placeholder)
 ├── platform/                 # framework/infra, no business logic
 │   ├── db/ (engine, audit_context)  http/ (security=JWT gate, errors, middleware, jwt codec, deps)
@@ -228,17 +228,27 @@ the ingestion until a terminal status or a bounded 30 s / 20-attempt budget.
 
 **Auth (identity context):** `POST /v1/auth/login` (username/password; pbkdf2 hash
 in `identity.app_user`) → **HS256 JWT** carrying `actor_id` / `principal` /
-`scopes` / `role`. Every scoped endpoint depends on `require_scope(scope)` →
+`scopes` / `role` / `store_code`. Every scoped endpoint depends on `require_scope(scope)` →
 `resolve_principal(request)`, which **verifies the Bearer token first** (signature +
 `exp`, secret ≥32 bytes). The legacy `X-Actor-Id/...` header seam is **off by
-default** (`LABELSCAN_ALLOW_HEADER_AUTH`). Single role `admin` → the 6 scopes.
-The audit actor is taken from a **signed claim** (no longer forgeable).
+default** (`LABELSCAN_ALLOW_HEADER_AUTH`). Roles `operator` and `admin` map to
+additive scope sets; only `admin` receives
+`identity:admin`. The audit actor is taken from a **signed claim**.
 
-> **Future evolution:** The design target is RS256/JWKS with OIDC integration and
-> multiple RBAC roles (scanner-device, fishmonger, supervisor, auditor, admin).
-> The current HS256 + admin-only implementation is a pragmatic starting point;
-> the `require_scope()` dependency is already in place so the auth backend can be
-> swapped without touching route definitions.
+`POST/GET /v1/users`, `PATCH/DELETE /v1/users/{id}`, `POST/GET /v1/stores`, and
+`PATCH /v1/stores/{code}` form the back-office identity/access API. Account
+deletion is a reversible soft-disable. Operators must reference an active,
+unique store code; a store assigned to active users cannot be disabled. All
+writes protect the current and last active administrator where applicable and
+are co-committed with an immutable audit entry.
+
+`GET /v1/arrivals` belongs to the traceability context. It projects immutable
+registered batches into a searchable arrivals feed. An operator
+is forcibly scoped to the `store_code` in the signed JWT; an administrator may
+query all stores. The store is captured on ingestion and snapshotted on the
+batch, preserving historical ownership across later user reassignment.
+The future evolution is RS256/JWKS + OIDC; `require_scope()` keeps that swap
+isolated from business routes.
 
 ---
 
@@ -261,11 +271,15 @@ The audit actor is taken from a **signed claim** (no longer forgeable).
   for GS1-reconciled fields (confidence 1.0, bypass evidence gate).
 - **`extracted_field.field_name`** includes `gtin` (migration 0008) — set by GS1
   parser from AI 01, not by the LLM.
-- **Migrations:** Alembic `0001 → 0009`, all reversible (CI runs up→down→up).
+- **Migrations:** Alembic `0001 → 0017`, all reversible (CI runs up→down→up).
   - `0007` adds `identity.app_user` (credential store for JWT auth);
   - `0008` extends `extracted_field` CHECKs (`source += 'gs1'`, `field_name += 'gtin'`);
   - `0009` adds DLQ + exponential backoff to `platform.outbox` (`attempts`, `next_retry_at`,
     `last_error`, `status` columns).
+  - `0014` adds identity RBAC metadata and audited user administration;
+  - `0015` reduces the role model to `admin` and `operator`;
+  - `0016` adds the audited store directory and mandatory operator-to-store association.
+  - `0017` snapshots the submitting store on ingestions and immutable batches for arrivals.
 
 ---
 
@@ -290,6 +304,15 @@ Conventions for every endpoint below:
 | Method | Path | Purpose | Auth scope | Idempotent? |
 |--------|------|---------|-----------|-------------|
 | POST | `/v1/auth/login` | Username/password → HS256 JWT | none | No |
+| POST | `/v1/users` | Create a nominative account. | `identity:admin` | No |
+| GET | `/v1/users` | Filtered/paginated account list. | `identity:admin` | Yes (safe) |
+| PATCH | `/v1/users/{id}` | Change name/role/active state or reset password. | `identity:admin` | State-idempotent |
+| DELETE | `/v1/users/{id}` | Reversibly soft-delete an account. | `identity:admin` | State-idempotent |
+| POST | `/v1/stores` | Create a uniquely coded store. | `identity:admin` | No |
+| GET | `/v1/stores` | List/filter the store directory. | `identity:admin` | Yes (safe) |
+| PATCH | `/v1/stores/{code}` | Rename, activate, or safely disable a store. | `identity:admin` | State-idempotent |
+| GET | `/v1/arrivals` | Search registered arrivals by store and registration date. | `catalog:read` | Yes (safe) |
+| GET | `/v1/arrivals/{batch_id}/image` | Read the store-scoped persisted source photo. | `catalog:read` | Yes (safe) |
 | POST | `/v1/ingestions` | Submit capture (multipart: image + barcode_raw + client_captured_at). Stores raw + enqueues extraction. Returns 202. | `ingestion:write` | **Yes — requires `Idempotency-Key`** |
 | GET | `/v1/ingestions/{id}` | Ingestion status + extraction run summaries + audit. | `ingestion:read` | Yes (safe) |
 | GET | `/v1/extraction-runs/{id}` | Extraction run with per-field details (value/confidence/validation_status/band) + audit. | `ingestion:read` | Yes (safe) |
@@ -366,6 +389,14 @@ Codes are **append-only and never renumbered/repurposed** (same discipline as th
 | `FORBIDDEN` | 403 | Authenticated but lacks scope/role. | No |
 | `NOT_FOUND` | 404 | Resource does not exist. | No |
 | `METHOD_NOT_ALLOWED` | 405 | e.g. attempting to write the audit log. | No |
+| `STORE_NOT_FOUND` | 400 | Referenced store code does not exist. | No |
+| `STORE_REQUIRED` | 400 | An operator has no store assignment. | No |
+| `USER_ALREADY_EXISTS` | 409 | Username is already assigned. | No |
+| `STORE_ALREADY_EXISTS` | 409 | Store code is already assigned. | No |
+| `STORE_INACTIVE` | 409 | Disabled store cannot receive an assignment. | No |
+| `STORE_IN_USE` | 409 | Store still has active assigned users. | No |
+| `LAST_ACTIVE_ADMIN` | 409 | Mutation would remove the last active administrator. | No |
+| `SELF_ACCESS_CHANGE_NOT_ALLOWED` | 409 | Administrator tried to revoke their own access. | No |
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | Key reused with different payload. | No |
 | `RESOURCE_CONFLICT` | 409 | Generic state conflict. | No |
 | `ALERT_INVALID_TRANSITION` | 409 | Alert lifecycle transition not allowed. | No |
@@ -396,16 +427,17 @@ Codes are **append-only and never renumbered/repurposed** (same discipline as th
 | **Token format** | HS256 JWT (symmetric, secret ≥32 bytes) | RS256 JWT (asymmetric, JWKS rotation) |
 | **Signing secret** | `LABELSCAN_JWT_SECRET` env var | IdP JWKS endpoint |
 | **Token TTL** | 12 h default (`LABELSCAN_JWT_TTL_SECONDS`) | 15 min access + refresh rotation |
-| **Roles** | `admin` only → all 6 scopes | scanner-device, fishmonger, supervisor, auditor, admin |
+| **Roles** | `operator`, `admin` | Enterprise IdP groups / site-aware roles |
 | **Login** | `POST /v1/auth/login` (username/password, pbkdf2) | OIDC login at IdP |
 | **Device auth** | Not implemented (devices use admin JWT) | OAuth2 client-credentials per device |
 | **Header auth** | Off by default (`LABELSCAN_ALLOW_HEADER_AUTH=0`) | Removed |
 
-**RBAC scopes (current):** the `admin` role grants all scopes:
-`ingestion:write`, `ingestion:read`, `extraction:review`, `extraction:confirm`,
-`extraction:run`, `batch:write`, `supplier:write`, `supplier:admin`,
-`traceability:read`, `temperature:write`, `haccp:read`, `alert:ack`,
-`alert:resolve`, `audit:read`.
+**RBAC scopes (current):**
+
+- `operator`: `ingestion:write`, `ingestion:read`, `extraction:review`,
+  `catalog:read`;
+- `admin`: all operator scopes plus `haccp:read`, `alert:ack`, `alert:resolve`,
+  `traceability:read`, `export:read`, `identity:admin`.
 
 ### 10.2 Design target RBAC roles (not yet implemented)
 
@@ -441,7 +473,7 @@ Three layers, each rejecting at the cheapest possible point:
 
 ### 12.1 Boundary validation (Pydantic, inbound adapters only)
 
-Pydantic models in `contexts/*/adapters/inbound/http/` — never in `domain/`.
+Pydantic models in `contexts/*/adapters/http/` — never in `domain/`.
 Rejects malformed shapes, wrong types, out-of-range scalars, unknown image media
 types, oversize bodies → `400`/`415`/`413`/`422` before any use case runs.
 
@@ -616,7 +648,7 @@ Constraints:
 | Secrets | API keys in `server/.env` (no secret manager) — **last GO blocker (R2)** | High | Open |
 | Observability | Structured logging done; **metrics + SLO** instrumentation missing | High | Open |
 | Rate limiting | No per-principal rate limits at the edge | High | Open |
-| Auth | HS256 + admin-only; need RS256/JWKS + multiple roles | Medium | Partial |
+| Auth | Local RBAC delivered; need RS256/JWKS + enterprise OIDC/SSO | Medium | Partial |
 | Mobile offline | Durable outbox on device is **not drained** (single foreground attempt) | Medium | Open |
 | Ops | DB backup/PITR; partition-rolling job; multi-stage non-root Dockerfile | Medium | Open |
 | Contract | `value` flattened to `string` vs polymorphic jsonb; confidence `min()` vs versioned composite | Medium | Owner decision |
@@ -637,7 +669,7 @@ retried forever), structured logging, outbox worker heartbeat + compose healthch
 |----------|--------|----------|---------------|
 | **Modular monolith (ADR-0001)** | Low ops cost, single-transaction raw+audit, refactorable boundaries | Independent per-context scaling now | High — extract along seams |
 | **Async, queue-backed extraction** | Ingestion survives provider outages; capture never blocked | Job infra; eventual extraction; outbox + idempotent consumers | High |
-| **HS256 JWT now (RS256 later)** | Quick to implement; no IdP dependency | Symmetric secret (must be shared); no JWKS rotation; single role | Medium — swap to RS256 is an adapter change |
+| **HS256 JWT now (RS256 later)** | Local RBAC without IdP dependency | Symmetric secret (must be shared); no JWKS rotation or SSO | Medium — swap to RS256 is an adapter change |
 | **Claude Haiku 4.5 as default LLM** | Low cost; fast; GS1 handles critical exact fields | Less capable on hard cases; bounded retry may not recover | High — model is config behind port |
 | **Hybrid GS1+LLM extraction** | Zero hallucination on lot/DLC/weight/GTIN; GS1 confidence = 1.0 | GS1 parser only handles HACCP-relevant AIs; barcode-dependent | Medium — falls back to LLM-only if no barcode |
 | **DLQ + exponential backoff** | Poison events no longer retried forever; alertable dead-letter | More state in outbox table; `requeueDeadLetter()` is manual | High |

@@ -20,6 +20,7 @@ security:
   - bearerAuth: []
 
 tags:
+  - { name: identity,     description: "Authentication and admin-only user/store management" }
   - { name: ingestion,    description: "Capability 1-4: label ingestion, OCR/extraction, review" }
   - { name: traceability, description: "Capability 5-7: batches, suppliers, lookup" }
   - { name: haccp,        description: "Capability 8-9: temperature logs, alerts" }
@@ -27,6 +28,206 @@ tags:
   - { name: ops,          description: "health, version" }
 
 paths:
+  # ---- Identity / RBAC ---------------------------------------------------------------
+  /auth/login:
+    post:
+      tags: [identity]
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: Authenticated, content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /o/{organization_slug}/auth/login:
+    post:
+      tags: [identity]
+      operationId: loginOrganization
+      security: []
+      parameters:
+        - { name: organization_slug, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: Authenticated, content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+
+  /mobile/auth/login:
+    post:
+      tags: [identity]
+      operationId: loginMobileOperator
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200': { description: Store operator authenticated, content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } } }
+        '401': { $ref: '#/components/responses/Unauthenticated' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users:
+    post:
+      tags: [identity]
+      operationId: createUser
+      security: [{ bearerAuth: ["identity:admin"] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserCreate' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: USER_ALREADY_EXISTS, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      tags: [identity]
+      operationId: listUsers
+      security: [{ bearerAuth: ["identity:admin"] }]
+      parameters:
+        - { name: role, in: query, schema: { $ref: '#/components/schemas/UserRole' } }
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: store_code, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string, maxLength: 120 } }
+        - $ref: '#/components/parameters/Limit'
+        - { name: offset, in: query, schema: { type: integer, default: 0, minimum: 0 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/UserPage' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /users/{id}:
+    patch:
+      tags: [identity]
+      operationId: updateUser
+      security: [{ bearerAuth: ["identity:admin"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UserUpdate' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/User' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: LAST_ACTIVE_ADMIN or SELF_ACCESS_CHANGE_NOT_ALLOWED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    delete:
+      tags: [identity]
+      operationId: deleteUser
+      summary: Reversibly deactivate an account
+      security: [{ bearerAuth: ["identity:admin"] }]
+      parameters: [ { $ref: '#/components/parameters/Id' } ]
+      responses:
+        '204': { description: Deactivated }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: LAST_ACTIVE_ADMIN or SELF_ACCESS_CHANGE_NOT_ALLOWED, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /stores:
+    post:
+      tags: [identity]
+      operationId: createStore
+      security: [{ bearerAuth: ["identity:admin"] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StoreCreate' }
+      responses:
+        '201': { description: Created, content: { application/json: { schema: { $ref: '#/components/schemas/Store' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: STORE_ALREADY_EXISTS, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+    get:
+      tags: [identity]
+      operationId: listStores
+      security: [{ bearerAuth: ["identity:admin"] }]
+      parameters:
+        - { name: active, in: query, schema: { type: boolean } }
+        - { name: q, in: query, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Store' } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /stores/{code}:
+    patch:
+      tags: [identity]
+      operationId: updateStore
+      security: [{ bearerAuth: ["identity:admin"] }]
+      parameters:
+        - { name: code, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StoreUpdate' }
+      responses:
+        '200': { description: Updated, content: { application/json: { schema: { $ref: '#/components/schemas/Store' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: STORE_IN_USE, content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } } }
+
+  /arrivals:
+    get:
+      tags: [traceability]
+      operationId: listStoreArrivals
+      summary: Search registered arrivals visible to the current store
+      security: [{ bearerAuth: ["catalog:read"] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: store_code, in: query, schema: { type: string }, description: "Admin-only cross-store filter; operators are forced to their JWT store_code" }
+        - { name: date_from, in: query, schema: { type: string, format: date } }
+        - { name: date_to, in: query, schema: { type: string, format: date } }
+        - $ref: '#/components/parameters/Limit'
+        - { name: offset, in: query, schema: { type: integer, default: 0, minimum: 0 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CatalogPage' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /arrivals/{batch_id}/image:
+    get:
+      tags: [traceability]
+      operationId: getStoreArrivalImage
+      summary: Read the persisted source photo for a visible arrival
+      security: [{ bearerAuth: ["catalog:read"] }]
+      parameters:
+        - { name: batch_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Source photo
+          content:
+            image/jpeg: {}
+            image/png: {}
+            image/webp: {}
+            image/heic: {}
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /arrivals/{batch_id}:
+    get:
+      tags: [traceability]
+      operationId: getStoreArrival
+      summary: Read the current 17-field projection for a visible arrival
+      security: [{ bearerAuth: ["catalog:read"] }]
+      parameters:
+        - { name: batch_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CatalogArrival' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   # ---- Capability 1: Label ingestion -------------------------------------------------
   /ingestions:
     post:
@@ -144,6 +345,27 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ExtractedField' } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/IngestionInvalidState' }
+
+  /ingestions/{id}/reviews:
+    post:
+      tags: [ingestion]
+      operationId: finalizeReview
+      summary: Atomically append the complete human revision and confirm ingestion
+      security: [{ bearerAuth: ["extraction:review"] }]
+      parameters:
+        - { $ref: '#/components/parameters/Id' }
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/FinalizeReviewRequest' }
+      responses:
+        '200': { description: Finalized or idempotently replayed, content: { application/json: { schema: { $ref: '#/components/schemas/FinalizeReviewResult' } } } }
+        '400': { $ref: '#/components/responses/ValidationFailed' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/IdempotencyConflict' }
+        '503': { $ref: '#/components/responses/DependencyUnavailable' }
 
   /ingestions/{id}/confirm:
     post:
@@ -408,7 +630,7 @@ components:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: OAuth2 JWT (RS256), verified against IdP JWKS. Scopes per operation; least privilege.
+      description: Local HS256 JWT with tenant, store, role and scopes claims.
 
   parameters:
     Id:             { name: id, in: path, required: true, schema: { type: string } }
@@ -452,6 +674,138 @@ components:
           items:
             type: object
             properties: { field: { type: string }, code: { type: string }, message: { type: string } }
+    # ---- identity ----
+    UserRole:
+      type: string
+      enum: [admin, operator]
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string, minLength: 1 }
+        password: { type: string, minLength: 1, format: password }
+    CurrentUser:
+      type: object
+      required: [id, username, display_name, role, organization_id, organization_slug, store_id, store_code]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        display_name: { type: string }
+        role: { $ref: '#/components/schemas/UserRole' }
+        organization_id: { type: string, format: uuid }
+        organization_slug: { type: string }
+        store_id: { type: [string, "null"], format: uuid }
+        store_code: { type: [string, "null"] }
+    LoginResponse:
+      type: object
+      required: [access_token, token_type, expires_in, user]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, const: bearer }
+        expires_in: { type: integer, minimum: 1 }
+        user: { $ref: '#/components/schemas/CurrentUser' }
+    User:
+      allOf:
+        - $ref: '#/components/schemas/CurrentUser'
+        - type: object
+          required: [active, created_by, created_at, updated_at]
+          properties:
+            active: { type: boolean }
+            created_by: { type: string, format: uuid }
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    UserCreate:
+      type: object
+      required: [username, display_name, password]
+      properties:
+        username: { type: string, minLength: 1 }
+        display_name: { type: string, minLength: 1, maxLength: 120 }
+        password: { type: string, minLength: 1, format: password, writeOnly: true }
+        role: { $ref: '#/components/schemas/UserRole', default: operator }
+        store_code: { type: [string, "null"], description: "Required when role=operator" }
+    UserUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        display_name: { type: string, minLength: 1, maxLength: 120 }
+        password: { type: string, minLength: 1, format: password, writeOnly: true }
+        role: { $ref: '#/components/schemas/UserRole' }
+        active: { type: boolean }
+        store_code: { type: [string, "null"] }
+    UserPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/User' } }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer }
+        offset: { type: integer }
+    Store:
+      type: object
+      required: [id, code, name, active, created_by, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        name: { type: string }
+        active: { type: boolean }
+        created_by: { type: string, format: uuid }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    StoreCreate:
+      type: object
+      required: [code, name]
+      properties:
+        code: { type: string, minLength: 1, pattern: '^[A-Za-z0-9][A-Za-z0-9._-]*$' }
+        name: { type: string, minLength: 1 }
+    StoreUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name: { type: string, minLength: 1 }
+        active: { type: boolean }
+    CatalogProduct:
+      type: object
+      required: [batch_id, store_code, product_name, scientific_name, gtin, lot_code, supplier_name, status, fao_area_code, production_method, use_by, packaging_date, recorded_at, photo_available]
+      properties:
+        batch_id: { type: string, format: uuid }
+        store_code: { type: [string, "null"] }
+        product_name: { type: [string, "null"] }
+        scientific_name: { type: [string, "null"] }
+        gtin: { type: [string, "null"] }
+        lot_code: { type: string }
+        supplier_name: { type: [string, "null"] }
+        status: { type: string, enum: [registered] }
+        fao_area_code: { type: [string, "null"] }
+        production_method: { type: [string, "null"], enum: [wild_caught, farmed, null] }
+        use_by: { type: [string, "null"], format: date }
+        packaging_date: { type: [string, "null"], format: date }
+        recorded_at: { type: string, format: date-time }
+        photo_available: { type: boolean }
+    CatalogPage:
+      type: object
+      required: [items, total, limit, offset]
+      properties:
+        items: { type: array, items: { $ref: '#/components/schemas/CatalogProduct' } }
+        total: { type: integer, minimum: 0 }
+        limit: { type: integer, minimum: 1, maximum: 200 }
+        offset: { type: integer, minimum: 0 }
+    CatalogArrival:
+      type: object
+      required: [batch_id, ingestion_id, store_code, status, fields, validation, revision_no, recorded_at, updated_at, photo_available]
+      properties:
+        batch_id: { type: string, format: uuid }
+        ingestion_id: { type: string, format: uuid }
+        store_code: { type: [string, "null"] }
+        status: { type: string }
+        fields:
+          type: object
+          propertyNames: { $ref: '#/components/schemas/FieldName' }
+          additionalProperties: { type: [string, "null"] }
+        validation: { type: object, additionalProperties: { type: object } }
+        revision_no: { type: integer, minimum: 1 }
+        recorded_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        photo_available: { type: boolean }
     # D4: score == extracted_field.combined_confidence; band == extracted_field.confidence_band.
     Confidence:
       type: object
@@ -553,6 +907,26 @@ components:
         ingestion_id: { type: string }
         status:       { type: string, enum: [confirmed] }
         batch_id:     { type: string, nullable: true }
+    FinalizeReviewRequest:
+      type: object
+      required: [fields]
+      properties:
+        fields:
+          type: object
+          description: Exactly the 17 canonical v2 fields.
+          minProperties: 17
+          maxProperties: 17
+          propertyNames: { $ref: '#/components/schemas/FieldName' }
+          additionalProperties: { type: [string, "null"] }
+        note: { type: [string, "null"] }
+    FinalizeReviewResult:
+      type: object
+      required: [ingestion_id, run_id, status, replayed]
+      properties:
+        ingestion_id: { type: string, format: uuid }
+        run_id: { type: string, format: uuid }
+        status: { type: string, const: confirmed }
+        replayed: { type: boolean }
 
     # ---- traceability ----
     # D5/D6: production_method enum matches batch CHECK (wild_caught|farmed); gear_type dropped (no backing column on batch — gear is only surfaced via the extraction view); scientific_name maps to batch.species_scientific; species (common name) resolves to a product, it is not a batch column.
