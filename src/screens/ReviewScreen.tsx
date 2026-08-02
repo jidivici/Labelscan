@@ -5,8 +5,8 @@
  * `pendingScanId`); reads its photo/barcode/extraction result LIVE from the scan
  * queue (useScan) rather than from navigation params, so it always reflects the
  * queue's current truth. Displays the server extraction result (status + per-field
- * value/confidence/validation_status) and saves a backend Article via
- * saveBackendArticle, then removes the scan from the queue.
+ * value/confidence/validation_status) and finalises the review on the backend before
+ * removing the scan from the local queue.
  */
 
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
@@ -26,12 +26,16 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
-import { saveBackendArticle, getAllArticles } from '../services/storage';
-import { FIELD_ORDER } from '../services/fieldOrder';
+import { getAllArticles } from '../services/storage';
+import { queryClient } from '../services/queryClient';
+import { FIELD_GROUPS, FIELD_ORDER } from '../services/fieldOrder';
 import { suggestAllergen } from '../services/allergenSuggestions';
 import { buildFieldHistory, suggestForField, type FieldHistory } from '../services/fieldHistory';
-import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
-import { enqueueConfirmIngestion } from '../services/outbox';
+import {
+  enqueueFinalizeReview,
+  getOperation,
+  requeueDeadLetter,
+} from '../services/outbox';
 import { drainOutbox } from '../services/outboxDrain';
 import {
   maskDate,
@@ -55,7 +59,11 @@ import {
 import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
 import { parseGs1, gs1FieldValues } from '../services/gs1';
 import { useScan } from '../hooks/useScanQueue';
-import { completeScan, saveScanEdits } from '../services/scanQueue';
+import {
+  attachFinalizeOperation,
+  completeScan,
+  saveScanEdits,
+} from '../services/scanQueue';
 import { filledCountFromValues } from '../services/fieldCompleteness';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
@@ -66,10 +74,19 @@ import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import type { RootStackParamList } from '../navigation/RootNavigator';
 import type { ExtractionField } from '../types/api';
-import type { ArticleField } from '../types/Article';
+import type { Article, ArticleField } from '../types/Article';
 
 type RouteType = RouteProp<RootStackParamList, 'Review'>;
 type NavProp = StackNavigationProp<RootStackParamList, 'Review'>;
+type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+const FIELD_GROUP_ICON: Record<string, IconName> = {
+  identity: 'food-variant',
+  provenance: 'map-marker-radius-outline',
+  traceability: 'shield-check-outline',
+  haccp: 'clipboard-check-outline',
+  commercial: 'scale-balance',
+};
 
 // Landscape photo height at the top of the review — wide and low so the whole label
 // reads landscape, leaving maximum room for the field list below (coherence request).
@@ -77,12 +94,12 @@ const PHOTO_HEIGHT_LANDSCAPE = 200;
 
 // ── Server extraction — single homogeneous editable list ──────────────────────────
 
-// Empty fields get a BLUE "à compléter" highlight, computed reactively from the live
+// Empty fields get a brand-tinted "à compléter" highlight, computed from the live
 // draft inside EditableFieldRow (so it clears the instant a value is typed). We
 // deliberately do NOT surface AI confidence or an "à vérifier" flag: manual validation
 // is the single source of truth (CLAUDE.md "Clean UI Radicale", audit §6.2).
 
-// Canonical display order for the 16 fields. The SAME order drives the loading skeleton
+// Canonical display order for the 17 fields. The SAME order drives the loading skeleton
 // list AND the ready list, so rows never reshuffle when the run lands (audit §2.2 — zero
 // layout shift). Readable HACCP order: identity → method/origin → lot/dates → conservation.
 // FIELD_ORDER now lives in services/fieldOrder.ts — SHARED with ArticleDetailScreen so the
@@ -273,7 +290,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   history?: FieldHistory | null;
 }) {
   // "À compléter" highlight is REACTIVE to the live draft (not the server value): an
-  // empty field is highlighted BLUE, and the highlight vanishes the instant it's filled.
+  // empty field is highlighted with the brand tint, which vanishes as soon as it is filled.
   const empty = draft.trim() === '';
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
@@ -554,43 +571,66 @@ export function ReviewScreen() {
         };
       });
 
-      await saveBackendArticle({
+      // Persist the complete final review operation BEFORE the scan can leave the
+      // queue. The stable key survives a kill/restart and the server commits all 17
+      // values + confirmation atomically.
+      let operation = scan.finalizeOpId
+        ? await getOperation(scan.finalizeOpId)
+        : null;
+      if (!operation) {
+        operation = await enqueueFinalizeReview({
+          ingestion_id: ingestionId,
+          fields: Object.fromEntries(
+            FIELD_ORDER.map((name) => [
+              name,
+              savedFields.find((field) => field.field_name === name)?.value ?? null,
+            ]),
+          ),
+        });
+        attachFinalizeOperation(scan.id, operation.id);
+      } else if (operation.status === 'dead_letter') {
+        operation = await requeueDeadLetter(operation.id);
+        if (operation) attachFinalizeOperation(scan.id, operation.id);
+      }
+      await drainOutbox();
+      const synchronized = operation ? await getOperation(operation.id) : null;
+      if (synchronized?.status !== 'succeeded') {
+        Alert.alert(
+          'En attente de synchronisation',
+          synchronized?.status === 'dead_letter'
+            ? 'L’envoi a échoué après plusieurs tentatives. Vous pourrez le reprendre depuis cette fiche.'
+            : 'L’arrivage reste conservé sur cet appareil et sera envoyé automatiquement dès que le réseau revient.',
+        );
+        return;
+      }
+
+      // The registration projection is produced asynchronously just after the review
+      // endpoint acknowledges it. Put the validated record into the catalogue cache
+      // now, rather than refetching a projection that may not exist for a few seconds.
+      // This makes the card visible the moment the operator returns to "Aujourd'hui";
+      // the next normal or pull-to-refresh fetch reconciles it with the server copy.
+      const savedAt = new Date().toISOString();
+      const optimisticArrival: Article = {
+        id: `pending-${ingestionId}`,
+        source: 'backend_extraction',
         ingestion_id: ingestionId,
         extraction_run_id: run.run_id,
-        captured_at: ingestion.client_captured_at ?? ingestion.server_received_at,
-        tempPhotoUri: photoUri,
-        barcode_raw: barcodeRaw ?? null,
-        ingestion_status: ingestion.status,
-        saved_by: user,
+        captured_at: capturedAt ?? savedAt,
+        photo_uri: photoUri ?? null,
+        barcode_raw: barcodeRaw ?? ingestion.barcode_raw ?? null,
+        ingestion_status: 'confirmed',
         fields: savedFields,
+        saved_at: savedAt,
+        saved_by: user ?? null,
         raw_extraction_run: run,
-      });
+      };
+      queryClient.setQueryData<Article[]>(['catalog', 'arrivals'], (current = []) => [
+        optimisticArrival,
+        ...current.filter((article) => article.ingestion_id !== ingestionId),
+      ]);
 
-      // Cohérence HACCP (audit §4.2): push each human correction to the AUTHORITATIVE
-      // backend store (append-only, source='human') so the server holds the validated
-      // value, not just this device. Best-effort + non-blocking: the local save is done,
-      // so a sync hiccup never stalls the continuous-capture loop. Workflow v1: ALL 17
-      // fields are editable, including GS1-owned ones — submitFieldOverrides tags those
-      // with force_gs1 so the server accepts them under its dedicated audit action.
-      const corrections = savedFields
-        .filter((f) => f.edited)
-        .map((f) => ({ field_name: f.field_name, value: f.value }));
-      // Best-effort backend sync, SEQUENCED: corrections first, THEN the confirm
-      // (the confirmed status asserts "review done" — it must never race ahead of
-      // the corrections it validates), then a drain to replay any stragglers from
-      // previous saves. Fire-and-forget as a whole: the local save is already done,
-      // so a sync hiccup never stalls the continuous-capture loop.
-      void (async () => {
-        if (corrections.length > 0) {
-          await submitFieldOverrides({ ingestionId, fields: corrections });
-        }
-        await enqueueConfirmIngestion({ ingestion_id: ingestionId });
-        await drainOutbox();
-      })();
-
-      // The scan's job is done: leave the queue (drops the pending/ photo copy too —
-      // saveBackendArticle already made its own permanent copy above). closingRef stops
-      // the !scan guard effect from double-navigating while this await yields.
+      // The scan's job is done: leave the queue (and its pending photo copy). closingRef
+      // stops the !scan guard effect from double-navigating while this await yields.
       closingRef.current = true;
       await completeScan(scan.id);
 
@@ -613,13 +653,30 @@ export function ReviewScreen() {
     } finally {
       setSaving(false);
     }
-  }, [run, ingestion, ingestionId, scan, photoUri, barcodeRaw, edits, user, navigation]);
+  }, [
+    run,
+    ingestion,
+    ingestionId,
+    scan,
+    edits,
+    capturedAt,
+    photoUri,
+    barcodeRaw,
+    user,
+    navigation,
+  ]);
 
   // Save is gated on 17/17 (workflow v2): the arrivage is only recorded — and counted —
   // once every field is filled. Below that the button stays disabled and reads "Compléter
   // (n/17)"; the modifications made so far are still persisted on leave.
   const complete = filledCount === FIELD_ORDER.length;
-  const canSave = ready && run != null && ingestion != null && complete;
+  const waitingForSync = scan?.reviewSyncStatus === 'pending';
+  const canSave =
+    ready &&
+    run != null &&
+    ingestion != null &&
+    complete &&
+    !waitingForSync;
 
   return (
     <View style={styles.root}>
@@ -691,24 +748,46 @@ export function ReviewScreen() {
               {ready ? null : (
                 <ExtractionProgress startedAt={mountedAt} ready={false} ocrDone={ocrDone} />
               )}
-              {FIELD_ORDER.map((name) => {
-                const field = fields.find((f) => f.field_name === name);
-                if (field) {
-                  return (
-                    <EditableFieldRow
-                      key={name}
-                      field={field}
-                      draft={effectiveValues[name]}
-                      onChange={handleFieldChange}
-                      suggestion={name === 'allergens' ? allergenSuggestion : undefined}
-                      history={fieldHistory}
-                    />
-                  );
-                }
-                return (
-                  <PendingFieldRow key={name} fieldName={name} gs1Value={pendingValues[name]} />
-                );
-              })}
+              {FIELD_GROUPS.map((group) => (
+                <View key={group.id} style={styles.fieldGroup}>
+                  <View style={styles.fieldGroupHeader}>
+                    <View style={styles.fieldGroupIcon}>
+                      <MaterialCommunityIcons
+                        name={FIELD_GROUP_ICON[group.id]}
+                        size={17}
+                        color={colors.primary}
+                      />
+                    </View>
+                    <Text style={[typography.labelLarge, styles.fieldGroupTitle]}>
+                      {group.title}
+                    </Text>
+                  </View>
+                  <View style={styles.fieldGroupCard}>
+                    {group.fields.map((name) => {
+                      const field = fields.find((item) => item.field_name === name);
+                      if (field) {
+                        return (
+                          <EditableFieldRow
+                            key={name}
+                            field={field}
+                            draft={effectiveValues[name]}
+                            onChange={handleFieldChange}
+                            suggestion={name === 'allergens' ? allergenSuggestion : undefined}
+                            history={fieldHistory}
+                          />
+                        );
+                      }
+                      return (
+                        <PendingFieldRow
+                          key={name}
+                          fieldName={name}
+                          gs1Value={pendingValues[name]}
+                        />
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
             </>
           )}
       </ScrollView>
@@ -737,6 +816,10 @@ export function ReviewScreen() {
             <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>
               {saving
                 ? 'Enregistrement…'
+                : waitingForSync
+                  ? 'En attente de synchronisation'
+                  : scan?.reviewSyncStatus === 'dead_letter'
+                    ? 'Réessayer l’envoi'
                 : !ready
                   ? 'Analyse en cours…'
                   : !complete
@@ -795,6 +878,36 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.outlineVariant,
   },
+  fieldGroup: {
+    marginBottom: spacing.lg,
+  },
+  fieldGroupHeader: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  fieldGroupIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fieldGroupTitle: {
+    flex: 1,
+    color: colors.onSurface,
+  },
+  fieldGroupCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    paddingHorizontal: spacing.md,
+    overflow: 'hidden',
+  },
   // One row layout shared by read-only and editable fields, so the list reads as a
   // single homogeneous column.
   fieldRow: {
@@ -815,7 +928,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     flexShrink: 1,
   },
-  // "À compléter" tag — BLUE, shown only while the field is empty (clears on fill).
+  // "À compléter" tag — brand tinted, shown only while the field is empty.
   attentionTag: {
     color: colors.onPrimaryContainer,
     backgroundColor: colors.primaryContainer,
@@ -833,7 +946,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
   },
-  // Empty-field highlight — a soft BLUE tint + accent border; disappears once filled.
+  // Empty-field highlight — a soft brand tint + accent border; disappears once filled.
   inputHighlighted: {
     backgroundColor: colors.primaryContainer,
     borderColor: colors.primary,

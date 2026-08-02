@@ -25,16 +25,17 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Article } from '../types/Article';
 import { formatDateShort } from '../services/dates';
 import { commonName } from '../services/articleGrouping';
+import { displayFieldValue } from '../services/fieldLabels';
 import { colors, spacing, radius, typography } from '../theme';
 
 interface ArticleCardProps {
   article: Article;
-  onDelete: (id: string) => void;
+  onDelete?: (id: string) => void;
   /** Open the full immutable record (the "lot") for this article. */
   onOpen?: (article: Article) => void;
 }
 
-export const CARD_HEIGHT = 88;
+export const CARD_HEIGHT = 136;
 const DELETE_WIDTH = 80;
 const SWIPE_THRESHOLD = -60;
 
@@ -49,15 +50,22 @@ export const ArticleCard = React.memo(function ArticleCard({
   const translateX = useSharedValue(0);
   const scale = useSharedValue(1);
 
-  // Card content: "nom de produit - lot" on top, registration date (DD/MM/YYYY) below.
-  const lot = article.fields.find((f) => f.field_name === 'batch_number')?.value ?? '';
-  const title =
-    [commonName(article), lot].filter((s) => s.length > 0).join(' - ') ||
-    article.barcode_raw ||
-    'Sans nom';
+  const fieldValue = (name: string) =>
+    article.fields.find((field) => field.field_name === name)?.value?.trim() ?? '';
+  const lot = fieldValue('batch_number');
+  const fao = fieldValue('FAO_area');
+  const scientificName = fieldValue('scientific_name');
+  const producer = fieldValue('producer_name') || fieldValue('reseller_brand');
+  const productionMethod = displayFieldValue('production_method', fieldValue('production_method'));
+  const origin = fieldValue('origin_country');
+  const title = commonName(article) || article.barcode_raw || 'Produit sans nom';
+  const description =
+    [scientificName || producer, productionMethod, origin].filter(Boolean).join(' · ') ||
+    'Description non renseignée';
   const dateStr = formatDateShort(article.saved_at);
 
   const confirmDelete = useCallback(() => {
+    if (!onDelete) return;
     Alert.alert('Supprimer l’article', 'Action irréversible.', [
       {
         text: 'Annuler',
@@ -75,6 +83,7 @@ export const ArticleCard = React.memo(function ArticleCard({
   }, [article.id, onDelete, translateX]);
 
   const panGesture = Gesture.Pan()
+    .enabled(Boolean(onDelete))
     .activeOffsetX([-10, 10])
     .onUpdate((e) => {
       // Only allow left swipe
@@ -104,20 +113,22 @@ export const ArticleCard = React.memo(function ArticleCard({
   return (
     <View style={styles.wrapper}>
       {/* Delete reveal */}
-      <Pressable
-        style={styles.deleteReveal}
-        onPress={confirmDelete}
-        android_ripple={{ color: colors.onError }}
-      >
-        <MaterialCommunityIcons
-          name="trash-can-outline"
-          size={24}
-          color={colors.onError}
-        />
-        <Text style={[typography.labelMedium, { color: colors.onError, marginTop: 2 }]}>
-          Supprimer
-        </Text>
-      </Pressable>
+      {onDelete ? (
+        <Pressable
+          style={styles.deleteReveal}
+          onPress={confirmDelete}
+          android_ripple={{ color: colors.onError }}
+        >
+          <MaterialCommunityIcons
+            name="trash-can-outline"
+            size={24}
+            color={colors.onError}
+          />
+          <Text style={[typography.labelMedium, { color: colors.onError, marginTop: 2 }]}>
+            Supprimer
+          </Text>
+        </Pressable>
+      ) : null}
 
       {/* Swipeable card */}
       <GestureDetector gesture={panGesture}>
@@ -131,46 +142,89 @@ export const ArticleCard = React.memo(function ArticleCard({
             accessibilityRole="button"
             accessibilityLabel="Ouvrir le détail du lot"
           >
-            {/* Thumbnail */}
+            {/* Product image stays in one fixed frame for a stable list rhythm. */}
             <View style={styles.thumbnail}>
               {article.photo_uri ? (
                 <Image
-                  source={{ uri: article.photo_uri }}
+                  source={{ uri: article.photo_uri, headers: article.photo_headers }}
                   style={styles.thumbnailImage}
                   resizeMode="cover"
                 />
               ) : (
                 <MaterialCommunityIcons
-                  name="file-document-outline"
-                  size={32}
-                  color={colors.onSurfaceVariant}
+                  name="food-variant"
+                  size={34}
+                  color={colors.primary}
                 />
               )}
             </View>
 
-            {/* Text stack */}
+            {/* Every information slot has a fixed height, so cards never reflow when
+                optional product fields are missing or unusually long. */}
             <View style={styles.textStack}>
               <Text
-                style={[typography.titleMedium, { color: colors.onSurface }]}
+                style={[typography.titleMedium, styles.title]}
                 numberOfLines={2}
               >
                 {title}
               </Text>
-              <View style={styles.metaRow}>
-                <MaterialCommunityIcons
-                  name="calendar-outline"
-                  size={12}
-                  color={colors.onSurfaceVariant}
-                />
-                <Text
-                  style={[
-                    typography.labelSmall,
-                    { color: colors.onSurfaceVariant, marginLeft: spacing.xs },
-                  ]}
-                >
-                  {dateStr}
-                </Text>
+
+              <Text
+                style={[
+                  typography.bodySmall,
+                  styles.description,
+                  scientificName && styles.scientificName,
+                ]}
+                numberOfLines={1}
+              >
+                {description}
+              </Text>
+
+              <View style={styles.chipRow}>
+                {lot || fao ? (
+                  <>
+                    {lot ? (
+                      <View style={styles.metaChip}>
+                        <Text style={[typography.labelSmall, styles.metaChipText]} numberOfLines={1}>
+                          Lot {lot}
+                        </Text>
+                      </View>
+                    ) : null}
+                    {fao ? (
+                      <View style={styles.metaChip}>
+                        <Text style={[typography.labelSmall, styles.metaChipText]} numberOfLines={1}>
+                          FAO {fao}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </>
+                ) : (
+                  <Text style={[typography.labelSmall, styles.missingMeta]}>
+                    Traçabilité à compléter
+                  </Text>
+                )}
               </View>
+
+              <View style={styles.footerRow}>
+                <View style={styles.metaRow}>
+                  <MaterialCommunityIcons
+                    name="calendar-check-outline"
+                    size={13}
+                    color={colors.onSurfaceVariant}
+                  />
+                  <Text style={[typography.labelSmall, styles.dateText]}>
+                    {dateStr}
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.chevronSlot}>
+              <MaterialCommunityIcons
+                name="chevron-right"
+                size={20}
+                color={colors.outline}
+              />
             </View>
           </Pressable>
         </Animated.View>
@@ -204,20 +258,19 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
+    overflow: 'hidden',
   },
   pressable: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: spacing.md,
+    padding: spacing.sm,
     borderRadius: radius.lg,
     overflow: 'hidden',
   },
-  // Uniform 56×56 thumbnail (same as PendingScanCard): same size, radius and border
-  // everywhere an image appears in a list.
   thumbnail: {
-    width: 56,
-    height: 56,
+    width: 92,
+    height: 118,
     borderRadius: radius.md,
     backgroundColor: colors.surfaceVariant,
     borderWidth: 1,
@@ -225,7 +278,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    marginRight: spacing.md,
+    marginRight: 12,
     flexShrink: 0,
   },
   thumbnailImage: {
@@ -234,10 +287,61 @@ const styles = StyleSheet.create({
   },
   textStack: {
     flex: 1,
+    minWidth: 0,
     gap: spacing.xs,
+    paddingVertical: 0,
+  },
+  title: {
+    color: colors.onSurface,
+  },
+  description: {
+    color: colors.onSurfaceVariant,
+    height: 16,
+  },
+  scientificName: {
+    fontStyle: 'italic',
+  },
+  chipRow: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    height: 22,
+    alignItems: 'center',
+  },
+  metaChip: {
+    minWidth: 0,
+    maxWidth: '56%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryContainer,
+  },
+  metaChipText: {
+    color: colors.onPrimaryContainer,
+    flexShrink: 1,
+  },
+  missingMeta: {
+    color: colors.outline,
+  },
+  footerRow: {
+    marginTop: 'auto',
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   metaRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.xs,
+  },
+  dateText: {
+    color: colors.onSurfaceVariant,
+  },
+  chevronSlot: {
+    width: 24,
+    height: '100%',
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    flexShrink: 0,
   },
 });

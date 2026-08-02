@@ -15,7 +15,11 @@ import React, {
 } from 'react';
 
 import { login as apiLogin, logout as apiLogout } from '../services/auth';
-import { getToken, getUsername, onUnauthenticated } from '../services/authStorage';
+import {
+  getToken,
+  getUsername,
+  onUnauthenticated,
+} from '../services/authStorage';
 
 export type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
 

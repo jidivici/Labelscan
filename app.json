@@ -5,7 +5,7 @@
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/labelscan-logo.png",
     "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
@@ -16,8 +16,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundColor": "#F8F9FF"
+        "foregroundImage": "./assets/labelscan-logo.png",
+        "backgroundColor": "#078B7D"
       },
       "permissions": [
         "android.permission.CAMERA",
@@ -26,7 +26,7 @@
       "package": "com.anonymous.LabelScan"
     },
     "web": {
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/labelscan-logo.png"
     },
     "plugins": [
       [

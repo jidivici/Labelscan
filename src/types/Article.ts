@@ -33,6 +33,7 @@ export interface Article {
   extraction_run_id: string | null;
   captured_at: string; // ISO 8601
   photo_uri: string | null; // permanent local path, when a photo was kept
+  photo_headers?: Record<string, string>;
   barcode_raw: string | null;
   ingestion_status: string; // e.g. 'extracted' | 'needs_review'
   fields: ArticleField[];

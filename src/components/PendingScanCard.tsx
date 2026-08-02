@@ -12,7 +12,7 @@
  * draft when one exists.
  *
  * Layout: [uniform thumbnail] · [état + hint text] · [circular n/17 gauge]. The gauge
- * carries the live score; color signals state (blue=en cours, vert=à valider,
+ * carries the live score; color signals state (accent=en cours, vert=à valider,
  * rouge=erreur). Sober by design — no progress bar, no confidence.
  */
 

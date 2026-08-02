@@ -5,10 +5,9 @@
  * app is consistent end-to-end. Sober identity header (lot + when/who), then a modern card
  * list of every field. Fields are editable IN PLACE (pencil → edit state) — workflow v1:
  * ALL 17 fields, including GS1-exact ones (lot/DLC/weight/GTIN/packaging); the operator
- * stays in charge. Saving an edit RE-RECORDS the article with the current user
- * (saved_by/saved_at) and pushes the human override to the authoritative backend,
- * best-effort (submitFieldOverrides, source='human', force_gs1 tagged automatically for
- * barcode-derived fields).
+ * stays in charge. Saving an edit writes the human override to the authoritative
+ * backend (source='human', force_gs1 tagged automatically for barcode-derived fields),
+ * then refreshes the shared catalogue.
  *
  * Clean UI (CLAUDE.md): no "Édité"/"Modifié" tag, no confidence score, no red. Who/when an
  * edit happened lives only in the header meta, not as per-field badges.
@@ -30,12 +29,13 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
-import { getArticleById, updateBackendArticle } from '../services/storage';
+import { getArticleById } from '../services/storage';
 import { Article, ArticleField } from '../types/Article';
 import { formatDateShort } from '../services/dates';
 import { fieldLabelFr, displayFieldValue } from '../services/fieldLabels';
 import { formatFaoDisplay } from '../services/faoDisplay';
-import { FIELD_ORDER } from '../services/fieldOrder';
+import { commonName } from '../services/articleGrouping';
+import { FIELD_GROUPS } from '../services/fieldOrder';
 import {
   parseTemp,
   formatTemp,
@@ -44,8 +44,8 @@ import {
   formatPrice,
 } from '../services/inputMasks';
 import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
+import { queryClient } from '../services/queryClient';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
-import { useAuth } from '../context/AuthContext';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 
@@ -75,23 +75,50 @@ const FIELD_ICON: Record<string, IconName> = {
   gtin: 'barcode',
 };
 
+const FIELD_GROUP_ICON: Record<string, IconName> = {
+  identity: 'food-variant',
+  provenance: 'map-marker-radius-outline',
+  traceability: 'shield-check-outline',
+  haccp: 'clipboard-check-outline',
+  commercial: 'scale-balance',
+  other: 'dots-horizontal-circle-outline',
+};
+
 function fieldIcon(name: string): IconName {
   return FIELD_ICON[name] ?? 'tag-outline';
 }
 
-/** Order the saved fields by the shared FIELD_ORDER; any extra field is appended after. */
-function orderFields(fields: ArticleField[]): ArticleField[] {
+interface DisplayFieldGroup {
+  id: string;
+  title: string;
+  fields: ArticleField[];
+}
+
+/** Group saved fields by shared business logic; unexpected legacy fields stay visible. */
+function groupFields(fields: ArticleField[]): DisplayFieldGroup[] {
   const byName = new Map(fields.map((f) => [f.field_name, f]));
-  const ordered: ArticleField[] = [];
-  for (const name of FIELD_ORDER) {
-    const f = byName.get(name);
-    if (f) {
-      ordered.push(f);
-      byName.delete(name);
+  const groups: DisplayFieldGroup[] = [];
+
+  for (const group of FIELD_GROUPS) {
+    const groupItems: ArticleField[] = [];
+    for (const name of group.fields) {
+      const field = byName.get(name);
+      if (field) {
+        groupItems.push(field);
+        byName.delete(name);
+      }
+    }
+    if (groupItems.length > 0) {
+      groups.push({ id: group.id, title: group.title, fields: groupItems });
     }
   }
-  for (const f of byName.values()) ordered.push(f);
-  return ordered;
+
+  const extraFields = [...byName.values()];
+  if (extraFields.length > 0) {
+    groups.push({ id: 'other', title: 'Informations complémentaires', fields: extraFields });
+  }
+
+  return groups;
 }
 
 // ── In-place editors (detail screen) — reuse the shared masks/validation ───────────
@@ -185,7 +212,7 @@ function FieldCard({
   return (
     <View style={[styles.card, !last && styles.cardDivider]}>
       <View style={styles.cardIcon}>
-        <MaterialCommunityIcons name={fieldIcon(name)} size={18} color={colors.onSurfaceVariant} />
+        <MaterialCommunityIcons name={fieldIcon(name)} size={18} color={colors.primary} />
       </View>
       <View style={styles.cardBody}>
         <Text style={[typography.labelSmall, styles.cardLabel]}>{fieldLabelFr(name)}</Text>
@@ -230,7 +257,6 @@ export function ArticleDetailScreen() {
   const navigation = useNavigation<DetailNav>();
   const route = useRoute<DetailRoute>();
   const { articleId } = route.params;
-  const { user } = useAuth();
 
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
@@ -254,7 +280,11 @@ export function ArticleDetailScreen() {
     };
   }, [articleId]);
 
-  const orderedFields = useMemo(() => orderFields(article?.fields ?? []), [article]);
+  const groupedFields = useMemo(() => groupFields(article?.fields ?? []), [article]);
+  const fieldCount = useMemo(
+    () => groupedFields.reduce((total, group) => total + group.fields.length, 0),
+    [groupedFields],
+  );
 
   const handleBack = useCallback(() => navigation.goBack(), [navigation]);
 
@@ -282,14 +312,13 @@ export function ArticleDetailScreen() {
     setSaving(true);
 
     const changed: { field_name: string; value: string | null }[] = [];
-    const nextFields = article.fields.map((f) => {
-      if (!(f.field_name in drafts)) return f;
+    for (const f of article.fields) {
+      if (!(f.field_name in drafts)) continue;
       const raw = drafts[f.field_name].trim();
       const value = raw === '' ? null : raw;
-      if (value === (f.value ?? null)) return f; // unchanged
+      if (value === (f.value ?? null)) continue;
       changed.push({ field_name: f.field_name, value });
-      return { ...f, value, edited: true };
-    });
+    }
 
     if (changed.length === 0) {
       setEditing(false);
@@ -297,16 +326,20 @@ export function ArticleDetailScreen() {
       return;
     }
 
-    // Re-record locally (new saved_at + saved_by = the editor), then push the override.
-    const updated = await updateBackendArticle(article.id, { fields: nextFields, saved_by: user });
-    if (updated) setArticle(updated);
-    void submitFieldOverrides({ ingestionId: article.ingestion_id, fields: changed });
+    // The API remains authoritative: no confirmed field is written only to the phone.
+    const result = await submitFieldOverrides({ ingestionId: article.ingestion_id, fields: changed });
+    await queryClient.invalidateQueries({ queryKey: ['catalog', 'arrivals'] });
+    if (result.pending === 0) {
+      // The projection is asynchronous; reload from the API only when it has caught up.
+      const refreshed = await getArticleById(article.id);
+      if (refreshed) setArticle(refreshed);
+    }
 
     setEditing(false);
     setSaving(false);
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 2600);
-  }, [article, drafts, saving, user]);
+  }, [article, drafts, saving]);
 
   if (loading) {
     return (
@@ -331,6 +364,13 @@ export function ArticleDetailScreen() {
   }
 
   const lot = article.fields.find((f) => f.field_name === 'batch_number');
+  const fieldValue = (name: string) =>
+    article.fields.find((field) => field.field_name === name)?.value?.trim() ?? '';
+  const productName = commonName(article) || 'Produit sans nom';
+  const scientificName = fieldValue('scientific_name');
+  const producer = fieldValue('producer_name') || fieldValue('reseller_brand');
+  const fao = fieldValue('FAO_area');
+  const productionMethod = displayFieldValue('production_method', fieldValue('production_method'));
 
   return (
     <View style={[styles.root, { paddingBottom: editing ? 0 : insets.bottom }]}>
@@ -342,33 +382,37 @@ export function ArticleDetailScreen() {
             accessibilityRole="button"
             accessibilityLabel="Voir la photo en plein écran"
           >
-            <Image source={{ uri: article.photo_uri }} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
-            <View style={styles.expandHint}>
-              <MaterialCommunityIcons name="arrow-expand" size={16} color={colors.onPrimary} />
-            </View>
+            <Image
+              source={{ uri: article.photo_uri, headers: article.photo_headers }}
+              resizeMode="cover"
+              style={StyleSheet.absoluteFillObject}
+            />
           </Pressable>
         ) : (
           <View style={[styles.photoCard, styles.photoPlaceholder]}>
             <MaterialCommunityIcons name="file-document-outline" size={48} color={colors.onSurfaceVariant} />
           </View>
         )}
-        <View style={[styles.photoAppBar, { paddingTop: insets.top + 8 }]}>
-          <Pressable
-            onPress={handleBack}
-            hitSlop={12}
-            android_ripple={{ color: 'rgba(255,255,255,0.2)', borderless: true }}
-            accessibilityRole="button"
-            accessibilityLabel="Retour"
-          >
-            <MaterialCommunityIcons name="arrow-left" size={24} color={colors.onPrimary} />
-          </Pressable>
-          <Text style={[typography.titleLarge, { color: colors.onPrimary }]}>Détail du lot</Text>
-          <View style={{ width: 24 }} />
-        </View>
+        <Pressable
+          onPress={handleBack}
+          hitSlop={12}
+          style={[styles.floatingBackButton, { top: insets.top + spacing.sm }]}
+          android_ripple={{ color: 'rgba(255,255,255,0.18)', borderless: true }}
+          accessibilityRole="button"
+          accessibilityLabel="Retour"
+        >
+          <MaterialCommunityIcons
+            name="arrow-left"
+            size={23}
+            color={colors.onPrimary}
+            style={styles.headerIcon}
+          />
+        </Pressable>
       </View>
       <PhotoViewerModal
         visible={viewerOpen}
         photoUri={article.photo_uri}
+        headers={article.photo_headers}
         onClose={() => setViewerOpen(false)}
       />
 
@@ -378,30 +422,72 @@ export function ArticleDetailScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
-        {/* Sober identity header: the lot, when/who, and the edit toggle. */}
+        {/* Product identity first: a stable professional summary before the
+            complete traceability record. */}
         <View style={styles.identityCard}>
-          <View style={styles.identityMain}>
-            <Text style={[typography.labelSmall, styles.overline]}>Numéro de lot</Text>
-            <Text selectable style={[typography.titleLarge, styles.lotValue]}>
-              {lot?.value && lot.value.length > 0 ? lot.value : '—'}
-            </Text>
-            <Text style={[typography.bodySmall, styles.metaCaption]}>
-              {formatDateShort(article.saved_at)}
-              {user ? `  ·  ${user}` : ''}
-            </Text>
+          <View style={styles.identityHeader}>
+            <Text style={[typography.labelSmall, styles.identityEyebrow]}>Produit enregistré</Text>
           </View>
-          {!editing ? (
+
+          <Text selectable style={[typography.headlineSmall, styles.productName]}>
+            {productName}
+          </Text>
+          {scientificName ? (
+            <Text selectable style={[typography.bodyMedium, styles.scientificName]}>
+              {scientificName}
+            </Text>
+          ) : producer ? (
+            <Text selectable style={[typography.bodyMedium, styles.productDescription]}>
+              {producer}
+            </Text>
+          ) : null}
+
+          <View style={styles.summaryChips}>
+            <View style={styles.summaryChip}>
+              <MaterialCommunityIcons name="identifier" size={14} color={colors.primary} />
+              <Text style={[typography.labelMedium, styles.summaryChipText]} numberOfLines={1}>
+                Lot {lot?.value && lot.value.length > 0 ? lot.value : 'non renseigné'}
+              </Text>
+            </View>
+            {fao ? (
+              <View style={styles.summaryChip}>
+                <MaterialCommunityIcons name="map-marker-outline" size={14} color={colors.primary} />
+                <Text style={[typography.labelMedium, styles.summaryChipText]} numberOfLines={1}>
+                  FAO {fao}
+                </Text>
+              </View>
+            ) : null}
+            {productionMethod ? (
+              <View style={styles.summaryChip}>
+                <MaterialCommunityIcons name="waves" size={14} color={colors.primary} />
+                <Text style={[typography.labelMedium, styles.summaryChipText]} numberOfLines={1}>
+                  {productionMethod}
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={styles.identityFooter}>
+            <View style={styles.identityMeta}>
+              <MaterialCommunityIcons name="calendar-check-outline" size={15} color={colors.onSurfaceVariant} />
+              <Text style={[typography.bodySmall, styles.metaCaption]} numberOfLines={1}>
+                {formatDateShort(article.saved_at)}
+                {article.saved_by ? `  ·  ${article.saved_by}` : ''}
+              </Text>
+            </View>
             <Pressable
-              onPress={enterEdit}
-              style={styles.editButton}
+              onPress={editing ? undefined : enterEdit}
+              disabled={editing}
+              style={[styles.editButton, editing && styles.editButtonActive]}
               android_ripple={{ color: colors.primaryContainer }}
               accessibilityRole="button"
               accessibilityLabel="Modifier la fiche"
+              accessibilityState={{ selected: editing, disabled: editing }}
             >
               <MaterialCommunityIcons name="pencil-outline" size={15} color={colors.primary} />
               <Text style={[typography.labelMedium, styles.editButtonText]}>Modifier</Text>
             </Pressable>
-          ) : null}
+          </View>
         </View>
 
         {justSaved ? (
@@ -411,27 +497,37 @@ export function ArticleDetailScreen() {
           </View>
         ) : null}
 
-        <Text style={[typography.labelSmall, styles.overline, styles.sectionLabel]}>
-          {editing ? 'Modifier les champs' : `Champs (${orderedFields.length})`}
-        </Text>
-
-        {orderedFields.length === 0 ? (
+        {fieldCount === 0 ? (
           <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
             Aucun champ extrait.
           </Text>
         ) : (
-          <View style={styles.fieldsCard}>
-            {orderedFields.map((f, i) => (
-              <FieldCard
-                key={f.field_name}
-                field={f}
-                editing={editing}
-                draft={drafts[f.field_name] ?? ''}
-                onChange={handleFieldChange}
-                last={i === orderedFields.length - 1}
-              />
-            ))}
-          </View>
+          groupedFields.map((group) => (
+            <View key={group.id} style={styles.fieldGroup}>
+              <View style={styles.fieldGroupHeader}>
+                <MaterialCommunityIcons
+                  name={FIELD_GROUP_ICON[group.id] ?? FIELD_GROUP_ICON.other}
+                  size={17}
+                  color={colors.primary}
+                />
+                <Text style={[typography.labelLarge, styles.fieldGroupTitle]}>
+                  {group.title}
+                </Text>
+              </View>
+              <View style={styles.fieldsCard}>
+                {group.fields.map((field, index) => (
+                  <FieldCard
+                    key={field.field_name}
+                    field={field}
+                    editing={editing}
+                    draft={drafts[field.field_name] ?? ''}
+                    onChange={handleFieldChange}
+                    last={index === group.fields.length - 1}
+                  />
+                ))}
+              </View>
+            </View>
+          ))
         )}
       </ScrollView>
 
@@ -484,10 +580,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
   },
-  // Same hero height as ReviewScreen (PHOTO_HEIGHT_LANDSCAPE) so every large photo
-  // in the app is framed identically.
+  // A generous, unobstructed product photo. The only overlay is the compact back
+  // control; tapping anywhere else still opens the full-screen viewer.
   photoContainer: {
-    height: 200,
+    height: 248,
     position: 'relative',
     backgroundColor: colors.onSurface,
   },
@@ -502,32 +598,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  expandHint: {
+  floatingBackButton: {
     position: 'absolute',
-    right: spacing.sm,
-    bottom: spacing.sm,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    left: spacing.md,
+    width: 40,
+    height: 40,
+    borderRadius: radius.full,
+    backgroundColor: 'rgba(0,0,0,0.48)',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  photoAppBar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.sm,
-    backgroundColor: 'rgba(0,0,0,0.35)',
+  headerIcon: {
+    width: 24,
+    height: 24,
+    lineHeight: 24,
+    textAlign: 'center',
+    textAlignVertical: 'center',
   },
   contentCard: {
     flex: 1,
-    backgroundColor: colors.surface,
+    backgroundColor: colors.background,
     borderTopLeftRadius: radius.lg,
     borderTopRightRadius: radius.lg,
     marginTop: -radius.lg,
@@ -536,39 +627,97 @@ const styles = StyleSheet.create({
     padding: spacing.lg,
     paddingBottom: spacing['2xl'],
   },
-  // ── Sober identity header ──────────────────────────────────────────────────
+  // ── Product identity summary ───────────────────────────────────────────────
   identityCard: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    padding: spacing.lg,
+    gap: spacing.sm,
     marginBottom: spacing.lg,
+    ...elevation[1],
   },
-  identityMain: {
+  identityHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  identityEyebrow: {
+    color: colors.primary,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  productName: {
+    color: colors.onSurface,
+  },
+  scientificName: {
+    color: colors.onSurfaceVariant,
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
+  productDescription: {
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  summaryChips: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  summaryChip: {
+    maxWidth: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 5,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+  },
+  summaryChipText: {
+    color: colors.onSurfaceVariant,
     flexShrink: 1,
   },
-  lotValue: {
-    color: colors.onSurface,
-    marginTop: 2,
+  identityFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    paddingTop: spacing.sm,
+    borderTopWidth: 1,
+    borderTopColor: colors.outlineVariant,
+  },
+  identityMeta: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
   },
   metaCaption: {
     color: colors.onSurfaceVariant,
-    marginTop: spacing.xs,
   },
-  // Clear "touch to edit" affordance — a labeled pill, not a bare icon.
+  // Secondary action lives in the summary footer so it never competes with the
+  // product title or compresses long names.
   editButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
-    borderRadius: radius.full,
+    borderRadius: radius.sm,
     borderWidth: 1,
-    borderColor: colors.primary,
-    backgroundColor: colors.primaryContainer,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surface,
   },
   editButtonText: {
     color: colors.primary,
+  },
+  editButtonActive: {
+    backgroundColor: colors.primaryContainer,
+    borderColor: colors.primary,
   },
   savedBanner: {
     flexDirection: 'row',
@@ -583,16 +732,22 @@ const styles = StyleSheet.create({
   savedText: {
     color: colors.success,
   },
-  overline: {
-    color: colors.onSurfaceVariant,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    marginBottom: 2,
+  // ── Modern field list (one card, dividers between rows) ─────────────────────
+  fieldGroup: {
+    marginBottom: spacing.lg,
   },
-  sectionLabel: {
+  fieldGroupHeader: {
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xs,
     marginBottom: spacing.sm,
   },
-  // ── Modern field list (one card, dividers between rows) ─────────────────────
+  fieldGroupTitle: {
+    flex: 1,
+    color: colors.onSurface,
+  },
   fieldsCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
@@ -616,7 +771,7 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    backgroundColor: colors.surfaceContainer,
+    backgroundColor: colors.primaryContainer,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -626,7 +781,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   cardLabel: {
-    color: colors.onSurfaceVariant,
+    color: colors.primary,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginBottom: 3,

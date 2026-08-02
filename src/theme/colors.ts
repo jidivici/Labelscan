@@ -1,17 +1,17 @@
 // Design tokens — Color
 //
-// Direction: sober, professional SaaS (Linear / Vercel / Stripe / Notion). A
-// neutral base (white / grays / near-black) with a SINGLE, calmer blue accent.
+// Direction: sober, professional food traceability. A neutral, slightly warm base
+// with a SINGLE ocean-green accent that recalls freshness without becoming loud.
 // Color is reserved for STATE only (success / warning / error / info).
 //
 // The token NAMES are preserved (the old Material-You slots) so every existing
 // import keeps working untouched — only the VALUES changed.
 export const colors = {
-  // Accent — one calmer blue for primary actions, links and active states.
-  primary: '#2563EB',
+  // Accent — the original LabelScan green for primary actions and active states.
+  primary: '#087F72',
   onPrimary: '#FFFFFF',
-  primaryContainer: '#EAF1FE',
-  onPrimaryContainer: '#1E3A8A',
+  primaryContainer: '#DDF4EF',
+  onPrimaryContainer: '#07554E',
 
   // Secondary = neutral gray (subtle "à compléter" tags, highlighted inputs) —
   // deliberately NOT a second brand color, so the UI stays monochrome + 1 accent.
@@ -26,17 +26,17 @@ export const colors = {
   tertiaryContainer: '#EFF1F4',
   onTertiaryContainer: '#334155',
 
-  // Surface & background — cool near-white, separated by hairlines not heavy fills.
-  background: '#F7F8FA',
-  onBackground: '#18181B',
+  // Surface & background — quiet near-white, separated by hairlines not heavy fills.
+  background: '#F4F7F5',
+  onBackground: '#152622',
   surface: '#FFFFFF',
-  onSurface: '#18181B',
-  surfaceVariant: '#F1F2F4',
-  onSurfaceVariant: '#6B7280',
-  surfaceContainer: '#F4F5F7',
-  surfaceContainerHigh: '#ECEEF1',
-  outline: '#9CA3AF',
-  outlineVariant: '#E6E8EC',
+  onSurface: '#152622',
+  surfaceVariant: '#EEF3F1',
+  onSurfaceVariant: '#60706C',
+  surfaceContainer: '#F1F5F3',
+  surfaceContainerHigh: '#E7EFEC',
+  outline: '#93A39F',
+  outlineVariant: '#DDE7E3',
 
   // Semantic — used ONLY to signal a state (vert=succès, orange=attente,
   // rouge=erreur, bleu=info), never for decoration.
@@ -58,8 +58,8 @@ export const colors = {
 
   // Overlay / Scrim
   scrim: 'rgba(0,0,0,0.32)',
-  overlayZone: 'rgba(37,99,235,0.16)',
-  overlayZoneBorder: 'rgba(37,99,235,0.85)',
+  overlayZone: 'rgba(8,127,114,0.16)',
+  overlayZoneBorder: 'rgba(8,127,114,0.88)',
 } as const;
 
 export type ColorToken = keyof typeof colors;

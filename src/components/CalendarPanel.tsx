@@ -3,7 +3,7 @@
  * background intensity encodes how many articles were saved that day. It is purely
  * a DATE SELECTOR for the home list (no page change): tap a day → onSelectDay.
  *
- * Sober by design: hairlines, one blue ramp derived from colors.primary, no badges
+ * Sober by design: hairlines, one green ramp derived from colors.primary, no badges
  * or counters — intensity IS the volume cue. The grid is a fixed 6×7 so navigating
  * months never shifts the layout.
  */
@@ -24,9 +24,9 @@ import {
 } from '../services/calendar';
 import { colors, radius, spacing, typography } from '../theme';
 
-// Heat ramp — tints of the accent blue (#2563EB), level 4 = colors.primary itself.
-// Level 0 stays neutral (no data). Text flips to white only on the darkest step.
-const HEAT_BG = [colors.surfaceContainer, '#DBEAFE', '#93C5FD', '#60A5FA', colors.primary] as const;
+// Filled days use a green heat ramp. The selected day owns the darker brand green,
+// so it always remains visually distinct even when that day contains arrivals.
+const HEAT_BG = [colors.surfaceContainer, '#DDF4EF', '#A9DFD5', '#55B8AA', '#2F9689'] as const;
 const HEAT_TEXT = [
   colors.onSurfaceVariant,
   colors.onPrimaryContainer,
@@ -69,42 +69,42 @@ export function CalendarPanel({ open, counts, selectedDay, onSelectDay }: Calend
     return max;
   }, [counts]);
   const today = todayKey();
+  const currentMonth = monthOfKey(today);
+  const canGoNext =
+    year < currentMonth.year ||
+    (year === currentMonth.year && month < currentMonth.month);
 
   const title = monthTitle(year, month);
 
   return (
     <View style={styles.container}>
-      {/* Header: month title + Aujourd'hui / ‹ › controls */}
+      {/* Month navigation: fixed edge buttons keep the title perfectly centered. */}
       <View style={styles.header}>
+        <Pressable
+          onPress={() => setDisplayed(addMonths(year, month, -1))}
+          style={styles.navButton}
+          accessibilityRole="button"
+          accessibilityLabel="Mois précédent"
+        >
+          <MaterialCommunityIcons name="chevron-left" size={22} color={colors.onSurfaceVariant} />
+        </Pressable>
         <Text style={[typography.titleSmall, styles.monthTitle]}>
           {title.charAt(0).toUpperCase() + title.slice(1)}
         </Text>
-        <View style={styles.controls}>
-          <Pressable
-            onPress={() => onSelectDay(todayKey())}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Revenir à aujourd'hui"
-          >
-            <Text style={[typography.labelLarge, styles.todayAction]}>Aujourd'hui</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => setDisplayed(addMonths(year, month, -1))}
-            style={styles.navButton}
-            accessibilityRole="button"
-            accessibilityLabel="Mois précédent"
-          >
-            <MaterialCommunityIcons name="chevron-left" size={22} color={colors.onSurfaceVariant} />
-          </Pressable>
-          <Pressable
-            onPress={() => setDisplayed(addMonths(year, month, 1))}
-            style={styles.navButton}
-            accessibilityRole="button"
-            accessibilityLabel="Mois suivant"
-          >
-            <MaterialCommunityIcons name="chevron-right" size={22} color={colors.onSurfaceVariant} />
-          </Pressable>
-        </View>
+        <Pressable
+          onPress={() => setDisplayed(addMonths(year, month, 1))}
+          disabled={!canGoNext}
+          style={[styles.navButton, !canGoNext && styles.navButtonDisabled]}
+          accessibilityRole="button"
+          accessibilityLabel="Mois suivant"
+          accessibilityState={{ disabled: !canGoNext }}
+        >
+          <MaterialCommunityIcons
+            name="chevron-right"
+            size={22}
+            color={canGoNext ? colors.onSurfaceVariant : colors.outlineVariant}
+          />
+        </Pressable>
       </View>
 
       {/* Weekday row */}
@@ -125,16 +125,21 @@ export function CalendarPanel({ open, counts, selectedDay, onSelectDay }: Calend
             const level = intensityLevel(count, maxCount);
             const isSelected = cell.key === selectedDay;
             const isToday = cell.key === today;
+            const isFuture = cell.key > today;
+            const hasArrivals = count > 0;
             return (
               <Pressable
                 key={cell.key}
                 onPress={() => onSelectDay(cell.key)}
+                disabled={isFuture}
                 style={[
                   styles.cell,
                   styles.dayCell,
                   { backgroundColor: HEAT_BG[level] },
+                  hasArrivals && styles.filledCell,
                   isToday && styles.todayCell,
                   isSelected && styles.selectedCell,
+                  isFuture && styles.futureCell,
                 ]}
                 accessibilityRole="button"
                 accessibilityLabel={
@@ -142,13 +147,14 @@ export function CalendarPanel({ open, counts, selectedDay, onSelectDay }: Calend
                     ? `${formatDayKey(cell.key)}, ${count} article${count > 1 ? 's' : ''}`
                     : formatDayKey(cell.key)
                 }
-                accessibilityState={{ selected: isSelected }}
+                accessibilityState={{ selected: isSelected, disabled: isFuture }}
               >
                 <Text
                   style={[
                     typography.bodySmall,
                     { color: HEAT_TEXT[level] },
                     isSelected && styles.selectedDayText,
+                    isFuture && styles.futureDayText,
                   ]}
                 >
                   {cell.day}
@@ -175,26 +181,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 40,
+    height: 44,
   },
   monthTitle: {
     color: colors.onSurface,
-  },
-  controls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  todayAction: {
-    color: colors.primary,
-    marginRight: spacing.sm,
+    textAlign: 'center',
+    flex: 1,
   },
   navButton: {
-    width: 32,
-    height: 32,
+    width: 40,
+    height: 40,
     borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  navButtonDisabled: {
+    opacity: 0.55,
   },
   weekRow: {
     flexDirection: 'row',
@@ -213,17 +215,33 @@ const styles = StyleSheet.create({
   dayCell: {
     borderRadius: radius.sm,
   },
+  // A quiet outline completes the green fill cue without competing with selection.
+  filledCell: {
+    borderWidth: 1,
+    borderColor: '#9BCFC5',
+  },
   // Today, unselected: a quiet hairline ring — noticeable, never loud.
   todayCell: {
     borderWidth: 1,
     borderColor: colors.outline,
   },
-  // Selected day: the accent ring (discreet indication of the active date).
+  // Selection owns the strongest color; filled days stay on the lighter heat ramp.
   selectedCell: {
-    borderWidth: 1.5,
+    borderWidth: 2,
     borderColor: colors.primary,
+    backgroundColor: colors.primary,
   },
   selectedDayText: {
     fontFamily: 'Inter_600SemiBold',
+    color: colors.onPrimary,
+  },
+  futureCell: {
+    backgroundColor: '#E8EFEC',
+    borderWidth: 1,
+    borderColor: '#DFE7E3',
+    opacity: 0.72,
+  },
+  futureDayText: {
+    color: colors.outline,
   },
 });
