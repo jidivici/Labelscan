@@ -21,10 +21,32 @@ This is the backend modular monolith for the HACCP seafood traceability system.
   `/v1/extraction-runs/{id}`, `/v1/batches/{id}`, `/v1/alerts`), all with
   problem+json errors per BACKEND §5.2.
 
-> **Still out of scope:** the real OCR provider adapter (only the Claude LLM
-> default adapter is wired — OCR is injected); alert-lifecycle (ack/resolve)
-> write endpoints; real JWT/OIDC auth (the principal is resolved from
-> gateway-forwarded identity headers as the BACKEND §6 seam).
+> Enterprise OIDC/SSO reste hors périmètre. L’isolation multi-organisation,
+> PostgreSQL RLS, les JWT tenantés et le stockage objet S3 compatible sont
+> implémentés pour les rôles locaux `admin` et `operator`.
+
+## User backoffice
+
+The API serves the authenticated LabelScan web portal at
+`/backoffice/o/{organization_slug}/`. It uses the same-origin tenant login,
+`/v1/users`, and
+`/v1/stores` routes plus the store-scoped `/v1/arrivals` feed.
+It keeps the bearer token in session storage until expiry, so reloads preserve
+the session without surviving a browser restart. Administrators manage accounts
+and stores; operators see only registered products captured for their assigned
+store, searchable by product, lot, GTIN or supplier and filterable by date.
+
+In local Docker Compose, open
+[http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
+`LABELSCAN_STATIC_DIR` can override the static asset directory when the server
+is packaged outside the repository or Docker image.
+
+Provision or reset the initial administrator from the values in `server/.env`:
+
+```bash
+docker compose up -d --build
+docker compose exec server python -m labelscan.contexts.identity.adapters.cli
+```
 
 ## Layout (schema-per-context, hexagonal layers)
 
@@ -256,11 +278,11 @@ behaviour**:
   `error_code` catalog (`platform/http/errors.py`, BACKEND §5.2) +
   `correlation_id`/`trace_id`.
 
-Auth is the BACKEND §6 seam: `platform/http/security.py` resolves the principal
-from gateway-forwarded identity headers and enforces a per-endpoint scope
-(fail-closed: `UNAUTHENTICATED` / `FORBIDDEN`). Real JWT/OIDC validation is a
-drop-in replacement for `resolve_principal`. Build the app with
-`labelscan.app.http_app:create_app`.
+Auth is the BACKEND §6 seam: `platform/http/security.py` verifies the Bearer JWT
+and enforces a per-endpoint scope (fail-closed: `UNAUTHENTICATED` /
+`FORBIDDEN`). Trusted gateway headers remain optional and off by default.
+OIDC validation is a future adapter replacement for `resolve_principal`. Build
+the app with `labelscan.app.http_app:create_app`.
 
 ### Read-only query endpoints
 
@@ -280,8 +302,9 @@ connections only** — returning read models that reflect exactly what is stored
   `batch.status`, `alert.state`). `GET /v1/alerts` is filterable + paginated, each
   item joined to its latest audit entry via a single lateral join (no N+1).
 
-Scopes: `ingestion:read` (ingestions/runs), `traceability:read` (batches),
-`haccp:read` (alerts). Read endpoints use read scopes and never the write scope.
+Scopes: `ingestion:read` (ingestions/runs), `catalog:read` (store arrivals),
+`traceability:read` (batch detail), `haccp:read` (alerts). Read endpoints use
+read scopes and never the write scope.
 
 ### Alert lifecycle endpoints
 

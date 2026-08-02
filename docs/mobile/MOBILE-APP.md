@@ -16,14 +16,14 @@ côté backend, celui-ci comble le manque.
 
 ## 1. Vue d'ensemble
 
-- **Auth** : JWT par appareil (`POST /v1/auth/login`), token attaché en `Authorization: Bearer`
+- **Auth** : JWT opérateur (`POST /v1/mobile/auth/login`), token attaché en `Authorization: Bearer`
   ([`services/auth.ts`](../../src/services/auth.ts), [`services/api.ts`](../../src/services/api.ts)).
   Toute l'app est derrière l'écran de connexion ([`context/AuthContext.tsx`](../../src/context/AuthContext.tsx)).
 - **Extraction backend uniquement.** L'ancien chemin OCR sur l'appareil (Google Vision côté client)
   a été retiré pour des raisons de sécurité (une clé `EXPO_PUBLIC_*` est extractible de tout build) —
   voir l'ADR historique dans `CLAUDE.md` §P0. Le flux est : recadrage au cadre → capture enchaînée
   (file de scans) → `POST /v1/ingestions` → extraction asynchrone (worker) → écran de vérification
-  éditable → enregistrement local de l'article.
+  éditable → finalisation durable côté backend et cache local de consultation.
 - **Contrat d'extraction v2 — 17 champs** (prompt v2.0.0) : `commercial_designation`,
   `scientific_name`, `producer_name`, `reseller_brand`, `production_method`,
   `fishing_gear_or_farming_method`, `FAO_area`, `origin_country`, `health_mark`, `batch_number`,
@@ -339,7 +339,7 @@ retirée avec ce chemin — audit §7.3.)
 
 ## 9. Tests
 
-`npx jest --config jest.config.js` (ts-jest, environnement node) — 22 suites, **212 tests** ;
+`npx jest --config jest.config.js` (ts-jest, environnement node) — 23 suites, **214 tests** ;
 notables : `scanQueue` (transitions, cap de sondages, hydratation/réconciliation, dédoublonnage,
 nettoyage photo, **`saveScanEdits` persiste + ré-hydrate le brouillon**), `ingestionResult`,
 `scanSteps` (mapping 5 statuts × `ocrDone`), `fieldCompleteness` (**`filledCountFromValues` = verrou

@@ -1,17 +1,25 @@
 # LabelScan — API Contracts (OpenAPI 3.1 fragments + error catalog)
 
-**Status:** Partially implemented — see [`BACKEND-ARCHITECTURE.md`](./BACKEND-ARCHITECTURE.md) §8
-for the list of implemented vs planned endpoints. This document describes the target API contract.
+**Status:** Core enterprise flow implemented — see
+[`ENTERPRISE-ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md) for the tenant,
+storage and synchronization invariants.
 **Date:** 2026-06-18 (updated from 2026-06-14 design)
 **Companion to:** [`BACKEND-ARCHITECTURE.md`](./BACKEND-ARCHITECTURE.md) (see §8 endpoint list,
 §9 error model, §10 auth, §11 idempotency). Machine-readable skeleton:
 [`openapi.v1.yaml`](./openapi.v1.yaml).
 
-**Implementation notes (as of 2026-06-18):**
-- Auth: HS256 JWT (not RS256/OIDC yet); single `admin` role grants all scopes.
+**Implementation notes (as of 2026-07-26):**
+- Auth: HS256 JWT (not RS256/OIDC yet); RBAC roles `admin` and `operator` are
+  mapped to least-privilege scopes.
 - Default LLM: `claude-haiku-4-5` (not `claude-opus-4-8`); GS1 handles critical exact fields.
 - `extracted_field.source` ∈ `{llm, gs1, human}` (not `{llm, human}`); `field_name` includes `gtin`.
-- Implemented endpoints: POST /auth/login, POST /ingestions, GET /ingestions/{id},
+- Implemented endpoints: POST /o/{organization_slug}/auth/login,
+  POST /mobile/auth/login,
+  POST/GET /users,
+  PATCH/DELETE /users/{id}, POST/GET /stores, PATCH /stores/{code},
+  GET /arrivals, GET /arrivals/{batch_id}, GET /arrivals/{batch_id}/image,
+  POST /ingestions, GET /ingestions/{id},
+  POST /ingestions/{id}/reviews,
   GET /extraction-runs/{id}, GET /batches/{id}, GET /alerts, POST /alerts/{id}/acknowledge,
   POST /alerts/{id}/resolve, GET /health/*, GET /version.
 
@@ -27,6 +35,85 @@ Common conventions (all operations):
 - Response headers (always): `X-Correlation-Id`, `traceparent`. On idempotent replay:
   `Idempotency-Replayed: true`.
 - Error bodies: `application/problem+json` per [§5](#error-code-catalog).
+
+---
+
+## 0. Back-office identity and access management
+
+The canonical login route is
+`POST /v1/o/{organization_slug}/auth/login`. The organization is resolved from
+the route, then signed into the JWT with `organization_id`, `organization_slug`,
+`store_id` and `store_code`. The legacy `POST /v1/auth/login` route remains a
+temporary compatibility alias for the default `labelscan` organization.
+Tenant-protected operations never accept an arbitrary organization from the
+request body or query string.
+
+All user and store administration endpoints require `identity:admin`.
+Responses never contain a password or password hash.
+
+- `POST /v1/users` accepts non-empty `username`, `display_name`, `password`,
+  `store_code`, and `role` (`operator` by default). No artificial maximum is
+  imposed on the username or password. An operator must reference an active
+  store. It returns `201`, or `409 USER_ALREADY_EXISTS`.
+- `GET /v1/users` supports `role`, `active`, `store_code`, `q`, `limit` and `offset`, and
+  returns `{items,total,limit,offset}`.
+- `PATCH /v1/users/{id}` accepts any non-empty subset of `display_name`,
+  `password`, `role`, `active`, and `store_code`.
+- `DELETE /v1/users/{id}` performs the same reversible soft-delete as
+  `active=false`, and returns `204`.
+- `POST /v1/stores` creates a store from a unique normalized `code` and `name`;
+  integrations may omit the code and let the service create an opaque internal
+  identifier. `GET /v1/stores` lists or filters stores for administrators,
+  while `GET /v1/stores/current` returns only the assigned store name for an
+  operator. `PATCH /v1/stores/{code}` renames or activates/deactivates one. A
+  store with active users cannot be deactivated.
+
+Deactivation is the supported soft-delete for accounts.
+  An administrator cannot remove their own admin access, and concurrent changes
+  cannot remove the last active administrator (`409
+  SELF_ACCESS_CHANGE_NOT_ALLOWED` / `LAST_ACTIVE_ADMIN`).
+
+Creates and updates are recorded by a database trigger in
+`audit.audit_log`, in the same transaction, with actions
+`identity.user_created`, `identity.user_updated`, `identity.store_created`, and
+`identity.store_updated`.
+
+---
+
+## 0.1 Mobile operator login
+
+`POST /v1/mobile/auth/login` accepts the same identifier/password pair as the
+web login but issues a token only for an active `operator` assigned to a store.
+An administrator uses the web back-office and receives `403 FORBIDDEN` on this
+mobile route. No device activation or QR code is required.
+
+---
+
+## 0.2 Store-scoped arrivals — `GET /v1/arrivals`
+
+The arrivals feed exposes registered traceability batches as product occurrences.
+It requires `catalog:read`.
+
+- Operators are always restricted server-side to the `store_code` carried by
+  their signed JWT; supplying another store returns `403 FORBIDDEN`.
+- Administrators can query all stores or select `store_code`.
+- `q` searches product/common name, scientific name, lot, GTIN, and supplier.
+- `date_from` and `date_to` filter the immutable batch registration date.
+- Results use `{items,total,limit,offset}` and contain no mutable client-owned
+  data.
+
+The store is captured when the ingestion is submitted and copied to the
+immutable batch, so historical products do not move if a user later changes
+stores.
+
+`GET /v1/arrivals/{batch_id}/image` returns the persisted source photo. It uses
+the same `catalog:read` scope and store isolation as the arrivals feed.
+
+`GET /v1/arrivals/{batch_id}` returns the current append-only projection:
+the canonical 17 fields, validation metadata, revision date and
+`photo_available`. An administrator may read any store in its organization; an
+operator is limited to the store signed into its JWT. Unknown and invisible
+identifiers both return `404`, preventing identifier probing across tenants.
 
 ---
 
@@ -130,7 +217,30 @@ paths:
 
 ---
 
-## 3. Confirm + override — `POST /v1/ingestions/{id}/confirm`, `PATCH .../fields/{name}`  (Capability 4)
+## 3. Atomic review — `POST /v1/ingestions/{id}/reviews` (Capability 4)
+
+The mobile production flow submits the final review in one transaction. The
+request contains `fields`, whose keys must be exactly the 17 canonical fields,
+and requires a durable `Idempotency-Key`.
+
+The transaction:
+
+1. locks the ingestion and validates tenant/store ownership;
+2. appends a human extraction revision and its 17 fields;
+3. confirms the ingestion;
+4. records the idempotency response and request hash;
+5. publishes `catalog.review_finalized` through the transactional outbox.
+
+Replaying the same key and body returns the original result without duplicate.
+Reusing the key with a different body returns `409 IDEMPOTENCY_KEY_REUSED`.
+The projection consumer updates `arrival_projection`; prior extraction runs and
+human revisions remain immutable.
+
+The former per-field override and confirm endpoints remain temporarily
+compatible during the mobile rollout, but new clients use only the atomic
+review operation.
+
+### Legacy confirm + override endpoints
 
 ```yaml
   /v1/ingestions/{id}/fields/{field_name}:
@@ -461,6 +571,14 @@ client retry (with backoff + jitter, reusing the same `Idempotency-Key` for unsa
 | `FORBIDDEN` | 403 | Lacks required scope/role. | No |
 | `NOT_FOUND` | 404 | Resource absent or not visible. | No |
 | `METHOD_NOT_ALLOWED` | 405 | e.g. write attempt on audit log. | No |
+| `STORE_NOT_FOUND` | 400 | Referenced store code does not exist. | No |
+| `STORE_REQUIRED` | 400 | An operator has no store assignment. | No |
+| `USER_ALREADY_EXISTS` | 409 | Username is already assigned. | No |
+| `STORE_ALREADY_EXISTS` | 409 | Store code is already assigned. | No |
+| `STORE_INACTIVE` | 409 | Disabled store cannot receive an assignment. | No |
+| `STORE_IN_USE` | 409 | Store still has active assigned users. | No |
+| `LAST_ACTIVE_ADMIN` | 409 | Mutation would remove the last active administrator. | No |
+| `SELF_ACCESS_CHANGE_NOT_ALLOWED` | 409 | Administrator tried to revoke their own access. | No |
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | Key reused with a different payload. | No (new key) |
 | `RESOURCE_CONFLICT` | 409 | Generic conflict (e.g. in-progress idempotent op, duplicate). | Sometimes (poll) |
 | `ALERT_INVALID_TRANSITION` | 409 | Alert lifecycle move not allowed. | No |

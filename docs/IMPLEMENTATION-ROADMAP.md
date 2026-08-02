@@ -34,13 +34,12 @@ Le socle existe déjà — c'est une **extension**, pas une construction :
 `identity.app_user` (migration 0007, hash, login JWT), `actor_id` porté par le token jusqu'à
 l'audit trail non contournable, scopes déjà vérifiés par `require_scope` sur chaque endpoint.
 
-1. **Migration 0014** : élargir `ck_app_user_role` → `('admin','quality_manager','operator')`
+1. **Migration 0014** : élargir `ck_app_user_role` → `('admin','operator')`
    + colonnes `display_name`, `active`, `created_by`. (Pattern exact de la 0011 : élargir un
    CHECK sans casser l'existant.)
 2. **Mapping rôle → scopes** (à l'émission du JWT, dans `login.py`) :
    - `operator` : `ingestion:write ingestion:read extraction:review` (scan + revue + confirm) ;
-   - `quality_manager` : + `haccp:read` + alertes acknowledge/resolve + exports ;
-   - `admin` : + gestion des utilisateurs.
+   - `admin` : tous les scopes métier + gestion des utilisateurs.
    Aucune modification des endpoints : `require_scope` fait déjà le travail.
 3. **Endpoints de gestion** (`identity/adapters/http`) : `POST/GET /v1/users`,
    `PATCH /v1/users/{id}` (désactivation, reset mot de passe), scope `identity:admin`,
@@ -130,7 +129,7 @@ migration écrite après la 0014 soit compatible avec le choix.
 1. **Multi-tenant** selon le spike de phase 1 (recommandation a priori : `tenant_id` + RLS
    Postgres — le moins invasif vu les triggers/append-only existants) : modèle
    organisation → sites → utilisateurs, chaque ingestion rattachée à un site, agrégations
-   groupe pour le responsable qualité national.
+   groupe pour l'administrateur national.
 2. **SSO OIDC** (Entra ID en premier) à côté du login local — la couche JWT/scopes de la
    phase 1 reste, seul l'émetteur change ; provisioning SCIM si exigé.
 3. **API d'intégration** : compléter l'OpenAPI, webhooks (arrivage confirmé, alerte,

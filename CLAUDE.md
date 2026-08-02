@@ -688,7 +688,7 @@ Tant que le gate n'est pas vert, le jour suivant ne démarre pas. Preuves backen
   `change-me-to-a-strong-password` → refus bruyant ; passphrase 16+ → acceptée.
 - [ ] **J5-J6 — Comptes nominatifs + RBAC (Phase A `PROD-READINESS.md` §2.1)** (*Backend
   Architect* lead, *QA/Test Engineer*). Étendre `identity.app_user` en comptes nominatifs +
-  rôles (opérateur / responsable qualité / lecteur), endpoints d'admin de comptes, scopes par
+  rôles (opérateur / admin), endpoints d'admin de comptes, scopes par
   rôle (audit §1.2) ; l'audit trail porte désormais l'acteur nominal (résout partiellement la
   traçabilité RGPD, audit §10.3). Non-régression sur les scopes existants. **Vérifié :** deux
   comptes de rôles distincts créés ; l'opérateur sur un endpoint d'admin → 403 ; export d'audit

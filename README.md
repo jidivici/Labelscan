@@ -7,7 +7,9 @@ DLC, estampille sanitaire, …) avec une doctrine stricte : **jamais de donnée 
 tout est **auditable et immuable** côté serveur.
 
 - **Mobile** : Expo / React Native (TypeScript) — capture enchaînée, revue éditable,
-  enregistrement local, calendrier des arrivages.
+  synchronisation automatique et catalogue serveur avec cache hors ligne.
+- **Backoffice web** : portail React partagé, catalogue photographique pour les
+  opérateurs et gestion des comptes et magasins pour les admins.
 - **Backend** : FastAPI / PostgreSQL (Python 3.11) — monolithe modulaire hexagonal,
   pipeline hybride GS1 + OCR (Google Vision) + LLM (Claude Haiku, escalade Opus),
   append-only + audit.
@@ -28,10 +30,10 @@ tout est **auditable et immuable** côté serveur.
 - **Calendrier des arrivages** (v1.1) : accueil organisé par journée ; vue mensuelle
   style « GitHub Contributions » (intensité = volume), sélection d'un jour = la liste
   bascule instantanément, recherche omnisciente qui reste globale.
-- **Corrections auditables** : chaque correction humaine est POSTée au serveur en
-  append-only (`source='human'`, jamais d'écrasement), avec outbox offline + clés
-  d'idempotence.
-- **Export** JSON / CSV des articles.
+- **Validation atomique 17/17** : la révision humaine complète et la confirmation
+  sont enregistrées ensemble, en append-only, avec rejeu idempotent.
+- **Multi-organisation** : JWT tenanté, magasins, RLS PostgreSQL et photos privées
+  isolent chaque groupe.
 
 ## Architecture (vue d'ensemble)
 
@@ -43,12 +45,13 @@ Mobile (Expo RN)                        Backend (FastAPI + PostgreSQL)
 │  3 long-polls max)      ├────────────►│        OCR (Vision) → gate qualité   │
 │ Review (17/17, brouillon│  GET status │        → interim regex → LLM (Haiku) │
 │  overrides force_gs1)   │◄────────────┤        → gate no-fab → réconciliation│
-│ Accueil (jour + heatmap)│  long-poll  │ contexts: ingestion/traceability/    │
-│ AsyncStorage (articles) │             │  haccp/compliance/audit/identity     │
+│ Catalogue API + cache   │  long-poll  │ contexts: ingestion/traceability/    │
+│ Outbox finalize_review  │             │ haccp/audit/identity + projection    │
 └─────────────────────────┘             └──────────────────────────────────────┘
 ```
 
-Références détaillées : [`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md)
+Références détaillées : [`docs/ENTERPRISE-ARCHITECTURE.md`](docs/ENTERPRISE-ARCHITECTURE.md),
+[`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md)
 (+ ADR), [`docs/mobile/MOBILE-APP.md`](docs/mobile/MOBILE-APP.md),
 [`docs/backend/API-CONTRACTS.md`](docs/backend/API-CONTRACTS.md),
 [`docs/TECH-REVIEW.md`](docs/TECH-REVIEW.md) (revue de passation).
@@ -72,8 +75,28 @@ npm install
 npx expo start -c               # Metro ; app dev client sur le device
 ```
 
-Connexion : identifiants admin définis côté serveur (`LABELSCAN_ADMIN_USERNAME` /
-`LABELSCAN_ADMIN_PASSWORD`) ; l'app obtient un JWT via `POST /v1/auth/login`.
+Connexion mobile : compte opérateur créé par l’administrateur dans le portail ;
+l’app obtient un JWT via `POST /v1/mobile/auth/login`. Un compte administrateur
+est volontairement refusé sur l’application mobile.
+
+Portail web utilisateurs, magasins et arrivages :
+[http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
+Les administrateurs gèrent les comptes et magasins ; les opérateurs
+accèdent aux arrivages enregistrés pour leur magasin, avec recherche et filtres
+par date. Ces arrivages sont persistés dans PostgreSQL et partagés entre les
+comptes autorisés du magasin.
+
+Pour initialiser ou réinitialiser le compte administrateur défini dans `server/.env` :
+
+```bash
+docker compose up -d --build
+docker compose exec server python -m labelscan.contexts.identity.adapters.cli
+```
+
+Ouvrir ensuite `/backoffice/o/labelscan/`, saisir `LABELSCAN_ADMIN_USERNAME` et
+`LABELSCAN_ADMIN_PASSWORD`, créer d'abord les établissements avec
+**Magasins**, puis utiliser **Nouvel utilisateur** pour créer les autres comptes
+administrateur ou opérateur.
 
 ## Variables d'environnement
 
@@ -96,8 +119,8 @@ Les `.env` sont git-ignorés et vérifiés absents de tout l'historique.
 | Commande | Effet |
 |---|---|
 | `npm run typecheck` | TypeScript strict, 0 erreur attendu |
-| `npm test` | Jest (22 suites, 212 tests) — logique pure uniquement, pas de rendu natif |
-| `bash server/scripts/run_local_proofs.sh` | Suite backend complète : PG 16 **éphémère**, migrations, import-linter (5 contrats), pytest (242 tests) |
+| `npm test` | Jest (23 suites, 214 tests) |
+| `bash server/scripts/run_local_proofs.sh` | PostgreSQL éphémère, migrations, 5 contrats d’architecture et 284 tests backend |
 | `docker compose up` | Stack locale (db + api + 2 workers) |
 | `npx expo run:ios` / `run:android` | Build dev client |
 
@@ -118,9 +141,9 @@ Les `.env` sont git-ignorés et vérifiés absents de tout l'historique.
 
 ## État & limites connues
 
-- Suite mobile et backend vertes (212 jest / 242 pytest) ; plusieurs éléments d'UI
-  restent **à valider sur device** (checklists en fin de `CLAUDE.md`).
-- Mono-utilisateur (un compte admin) — identité nominative/RBAC/SSO planifiés
-  (`docs/IMPLEMENTATION-ROADMAP.md`, Phase 1).
-- Stockage mobile AsyncStorage (port `ArticleStore` prêt pour SQLite à l'échelle).
+- Suites mobile et backend vertes (214 Jest / 284 pytest), build React validé.
+- Comptes nominatifs, RBAC `operator`/`admin`, organisations, magasins, RLS et
+  stockage S3 compatible sont implémentés. SSO/OIDC reste hors de ce chantier.
+- Le téléphone conserve une file hors ligne et un cache ; PostgreSQL et le
+  stockage objet restent les sources de vérité.
 - Voir l'audit v1.1 pour la liste priorisée complète.
