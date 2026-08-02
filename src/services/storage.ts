@@ -7,8 +7,9 @@
  * 6 MB blob ceiling, O(1) writes. To run on expo-sqlite in production, implement the port
  * and call setArticleStore(new SqliteArticleStore()) at app init; nothing here changes.
  *
- * This facade still owns the PHOTO lifecycle (cache → permanent documents dir), which is
- * orthogonal to where the record is stored.
+ * The server is the source of truth for confirmed arrivals. This store is retained only
+ * for pending scans and as an offline fallback for legacy local records; confirmed
+ * arrivals are always requested from the catalogue API first.
  */
 
 import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
@@ -114,17 +115,28 @@ export async function sweepPendingPhotos(referencedUris: readonly string[]): Pro
   }
 }
 
-// ─── Reads (delegated to the active store) ──────────────────────────────────────
+// ─── Confirmed-arrival reads (server first, legacy fallback offline) ─────────────
 
 export async function getAllArticles(): Promise<Article[]> {
-  return store.getAll();
+  try {
+    const { listCatalogArticles } = await import('./catalogApi');
+    return await listCatalogArticles();
+  } catch {
+    // Offline consultation remains possible for records created by older app versions.
+    return store.getAll();
+  }
 }
 
 export async function getArticleById(id: string): Promise<Article | null> {
-  return store.getById(id);
+  const { getCatalogArticle } = await import('./catalogApi');
+  const serverArticle = await getCatalogArticle(id);
+  return serverArticle ?? store.getById(id);
 }
 
-// ─── Save a backend-extraction article ──────────────────────────────────────────
+// ─── Legacy local-record helpers ────────────────────────────────────────────────
+//
+// Kept for one-version migration compatibility. New confirmed arrivals must use the
+// finalize-review API and are not written through these functions.
 
 export interface SaveBackendArticleInput {
   ingestion_id: string;

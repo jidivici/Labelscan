@@ -29,8 +29,8 @@ import {
   StyleSheet,
   View,
   Text,
-  Dimensions,
   Pressable,
+  useWindowDimensions,
 } from 'react-native';
 import { StatusBar } from 'react-native';
 import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
@@ -39,6 +39,7 @@ import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
 import { v4 as uuidv4 } from 'uuid';
@@ -52,23 +53,16 @@ import { logLatency } from '../services/latencyLog';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
 // Label-placement frame — both the VISUAL GUIDE and the crop region. The full
 // photo is captured, then cropped to this rectangle before submit (see
 // computeFrameCrop). The frame is sized to ≈100% of the useful zone (the whole band
-// between the top bar and the bottom tray) so the operator can place the ENTIRE
+// between the floating controls and the shutter) so the operator can place the ENTIRE
 // label inside — earlier the frame was a small landscape rectangle and labels that
 // overflowed it were cropped away, losing OCR content (the regression we fix here).
-const TOP_BAR_H = 90;
-const BOTTOM_TRAY_H = 120;
+const TOP_CONTROL_BAND_H = 56;
+const BOTTOM_CONTROLS_H = 88;
 // Reserve a little room below the frame for the instruction caption.
-const CAPTION_RESERVE = 44;
-const FRAME_LEFT = SCREEN_WIDTH * 0.02; // ~96% of the width
-const FRAME_WIDTH = SCREEN_WIDTH - FRAME_LEFT * 2;
-const FRAME_TOP = TOP_BAR_H + 12;
-const FRAME_HEIGHT =
-  SCREEN_HEIGHT - FRAME_TOP - BOTTOM_TRAY_H - CAPTION_RESERVE;
+const CAPTION_RESERVE = 36;
 
 // Safety margin: expand the mapped crop a touch beyond the frame on every side so a
 // label resting right against the brackets is not clipped at the edges. Clamped to
@@ -92,31 +86,40 @@ const CROP_SAFETY_MARGIN = 0.08; // 8% of the frame's width/height per axis
 function computeFrameCrop(
   photoWidth: number,
   photoHeight: number,
+  geometry: {
+    screenWidth: number;
+    screenHeight: number;
+    frameLeft: number;
+    frameTop: number;
+    frameWidth: number;
+    frameHeight: number;
+  },
 ): { originX: number; originY: number; width: number; height: number } | null {
   if (!photoWidth || !photoHeight) return null;
+  const { screenWidth, screenHeight, frameLeft, frameTop, frameWidth, frameHeight } = geometry;
 
   // Orientation guard: photo and screen must share orientation for this mapping.
-  if (SCREEN_WIDTH > SCREEN_HEIGHT !== photoWidth > photoHeight) return null;
+  if (screenWidth > screenHeight !== photoWidth > photoHeight) return null;
 
   // Cover fit: one scale factor; the larger axis ratio wins so the photo covers
   // the whole screen. The centered overflow is the offset we subtract back out.
-  const scale = Math.max(SCREEN_WIDTH / photoWidth, SCREEN_HEIGHT / photoHeight);
-  const offsetX = (photoWidth * scale - SCREEN_WIDTH) / 2;
-  const offsetY = (photoHeight * scale - SCREEN_HEIGHT) / 2;
+  const scale = Math.max(screenWidth / photoWidth, screenHeight / photoHeight);
+  const offsetX = (photoWidth * scale - screenWidth) / 2;
+  const offsetY = (photoHeight * scale - screenHeight) / 2;
 
   // Expand the frame rect (in screen space) by the safety margin on every side
   // before inverting the transform, so edges near the brackets aren't clipped.
-  const marginX = FRAME_WIDTH * CROP_SAFETY_MARGIN;
-  const marginY = FRAME_HEIGHT * CROP_SAFETY_MARGIN;
-  const frameLeft = FRAME_LEFT - marginX;
-  const frameTop = FRAME_TOP - marginY;
-  const frameWidth = FRAME_WIDTH + marginX * 2;
-  const frameHeight = FRAME_HEIGHT + marginY * 2;
+  const marginX = frameWidth * CROP_SAFETY_MARGIN;
+  const marginY = frameHeight * CROP_SAFETY_MARGIN;
+  const cropLeft = frameLeft - marginX;
+  const cropTop = frameTop - marginY;
+  const cropWidth = frameWidth + marginX * 2;
+  const cropHeight = frameHeight + marginY * 2;
 
-  let originX = (frameLeft + offsetX) / scale;
-  let originY = (frameTop + offsetY) / scale;
-  let width = frameWidth / scale;
-  let height = frameHeight / scale;
+  let originX = (cropLeft + offsetX) / scale;
+  let originY = (cropTop + offsetY) / scale;
+  let width = cropWidth / scale;
+  let height = cropHeight / scale;
 
   // Clamp into the photo so we never ask the manipulator for out-of-bounds pixels.
   originX = Math.max(0, Math.min(originX, photoWidth));
@@ -137,7 +140,25 @@ function computeFrameCrop(
 type NavProp = StackNavigationProp<RootStackParamList, 'Camera'>;
 
 export function CameraScreen() {
+  const insets = useSafeAreaInsets();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation<NavProp>();
+  const bottomTrayHeight = insets.bottom + BOTTOM_CONTROLS_H;
+  const frameLeft = screenWidth * 0.03;
+  const frameWidth = screenWidth - frameLeft * 2;
+  const frameTop = insets.top + TOP_CONTROL_BAND_H;
+  const frameHeight = Math.max(
+    180,
+    screenHeight - frameTop - bottomTrayHeight - CAPTION_RESERVE,
+  );
+  const frameGeometry = {
+    screenWidth,
+    screenHeight,
+    frameLeft,
+    frameTop,
+    frameWidth,
+    frameHeight,
+  };
   // Mount the live preview only while this screen is focused (freed whenever another
   // screen sits on top; released for good once popped back to Articles).
   const isFocused = useIsFocused();
@@ -239,11 +260,15 @@ export function CameraScreen() {
         // image to Vision. Cap the LONG edge at ~1600px + compress 0.8 (Tier 7).
         let croppedUri: string | undefined;
         let framed = false;
-        const crop = computeFrameCrop(capturedPhoto.width, capturedPhoto.height);
+        const crop = computeFrameCrop(
+          capturedPhoto.width,
+          capturedPhoto.height,
+          frameGeometry,
+        );
         if (!crop) {
           logLatency('frame_crop_skipped', {
             photo: `${capturedPhoto.width}x${capturedPhoto.height}`,
-            screen: `${Math.round(SCREEN_WIDTH)}x${Math.round(SCREEN_HEIGHT)}`,
+            screen: `${Math.round(screenWidth)}x${Math.round(screenHeight)}`,
           });
         }
         const srcW = crop ? crop.width : capturedPhoto.width;
@@ -293,7 +318,7 @@ export function CameraScreen() {
         }
       }
     })();
-  }, [taking]);
+  }, [taking, frameGeometry, screenWidth, screenHeight]);
 
   // ── Barcode detected — store for the next capture, no auto-shoot ───────────
   const handleBarcodeScanned = useCallback(
@@ -387,45 +412,53 @@ export function CameraScreen() {
       {/* Label-placement frame (placement guide + crop region applied on validate) */}
       <FrameOverlay
         state={frameState}
-        frameTop={FRAME_TOP}
-        frameLeft={FRAME_LEFT}
-        frameWidth={FRAME_WIDTH}
-        frameHeight={FRAME_HEIGHT}
+        frameTop={frameTop}
+        frameLeft={frameLeft}
+        frameWidth={frameWidth}
+        frameHeight={frameHeight}
       />
 
-      {/* Top overlay bar */}
-      <View style={styles.topBar}>
+      {/* Floating controls only: no opaque header obscuring the preview. */}
+      <View
+        style={[
+          styles.topControls,
+          {
+            top: insets.top + spacing.sm,
+          },
+        ]}
+      >
         <Pressable
           onPress={closeCapture}
-          style={styles.topBarBack}
+          style={styles.topControlButton}
           hitSlop={8}
           accessibilityRole="button"
           accessibilityLabel="Revenir aux articles"
         >
-          <MaterialCommunityIcons name="arrow-left" size={24} color={colors.onPrimary} />
+          <MaterialCommunityIcons name="arrow-left" size={23} color={colors.onPrimary} />
         </Pressable>
-        <Text style={[typography.titleLarge, styles.topBarTitle]}>
-          Scan Label
-        </Text>
         <Pressable
           onPress={toggleFlash}
-          style={[styles.topBarAction, torchOn && styles.topBarActionActive]}
+          style={[styles.topControlButton, torchOn && styles.topControlActive]}
           hitSlop={8}
           accessibilityRole="button"
-          accessibilityLabel={torchOn ? 'Éteindre le flash' : 'Allumer le flash'}
+          accessibilityLabel={torchOn ? 'Éteindre la torche' : 'Allumer la torche'}
           accessibilityState={{ selected: torchOn }}
         >
           <MaterialCommunityIcons name={flashIcon} size={22} color={colors.onPrimary} />
         </Pressable>
       </View>
 
-      {/* Bottom control tray — just the centered shutter. The scan queue (thumbnail
-          stack + count) lives on the home screen's "En cours" section, so the camera
-          stays a clean, distraction-free viewfinder. */}
-      <View style={styles.bottomTray}>
-        <View style={styles.traySlot} />
+      {/* Floating shutter only: the photo stays visible down to the safe area. */}
+      <View
+        style={[
+          styles.bottomTray,
+          {
+            height: bottomTrayHeight,
+            paddingBottom: insets.bottom + spacing.md,
+          },
+        ]}
+      >
         <CaptureButton onPress={takePhoto} loading={taking} disabled={taking} />
-        <View style={styles.traySlot} />
       </View>
 
       {/* Flash white overlay */}
@@ -439,65 +472,40 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  topBar: {
+  topControls: {
     position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: 90,
-    paddingTop: 44, // status bar safe area
-    backgroundColor: 'rgba(0,0,0,0.40)',
+    left: spacing.md,
+    right: spacing.md,
+    height: 44,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: spacing.lg,
+    justifyContent: 'space-between',
   },
-  topBarTitle: {
-    color: colors.onPrimary,
-    flex: 1,
-    textAlign: 'center',
-  },
-  topBarBack: {
-    position: 'absolute',
-    left: spacing.lg,
-    bottom: 6,
-    width: 36,
-    height: 36,
+  topControlButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  topBarAction: {
-    position: 'absolute',
-    right: spacing.lg,
-    bottom: 6,
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // Torch ON — a filled accent pill makes the state unmistakable.
-  topBarActionActive: {
+  // Torch ON — the brand fill makes the state unmistakable.
+  topControlActive: {
     backgroundColor: colors.primary,
+    borderColor: 'rgba(255,255,255,0.34)',
   },
   bottomTray: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    height: 120,
-    paddingBottom: 24,
-    backgroundColor: 'rgba(0,0,0,0.50)',
+    backgroundColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingHorizontal: spacing.xl,
-  },
-  traySlot: {
-    width: 48,
-    height: 48,
-    alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.md,
   },
   permissionContainer: {
     flex: 1,

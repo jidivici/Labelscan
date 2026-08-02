@@ -1,9 +1,8 @@
 /**
  * FrameOverlay — label-placement guide drawn over the camera viewfinder.
  *
- * A large centered window (where the operator places the whole label) with a dark
- * scrim masking everything outside it, corner brackets, an instruction caption and
- * a discreet "barcode detected" badge.
+ * A large centered window (where the operator places the whole label) with a light
+ * focus veil outside it, corner brackets and a discreet "barcode detected" badge.
  *
  * The window is both the placement guide and the crop region: the full photo is
  * captured, then cropped to this frame before it is sent to the backend (see
@@ -36,7 +35,8 @@ interface FrameOverlayProps {
 
 const CORNER_SIZE = 32;
 const CORNER_THICKNESS = 4;
-const SCRIM = 'rgba(0,0,0,0.55)';
+const SCRIM = 'rgba(0,0,0,0.18)';
+const CAPTION_BACKGROUND = 'rgba(0,0,0,0.58)';
 
 // High-contrast brackets (white) at rest for sunlight; tinted by state otherwise.
 const bracketColor: Record<FrameState, string> = {
@@ -71,14 +71,9 @@ export function FrameOverlay({
   const bracketsAnim = useAnimatedStyle(() => ({ opacity: pulse.value }));
 
   const color = bracketColor[state];
-  const caption =
-    state === 'error'
-      ? 'Échec — réessayez'
-      : 'Placez toute l’étiquette dans le cadre';
-
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* Scrim: four dark panels around the (transparent) frame window */}
+      {/* A light focus veil preserves the full photo instead of creating black bars. */}
       <View style={[styles.scrim, { top: 0, left: 0, right: 0, height: frameTop }]} />
       <View style={[styles.scrim, { top: frameTop + frameHeight, left: 0, right: 0, bottom: 0 }]} />
       <View style={[styles.scrim, { top: frameTop, left: 0, width: frameLeft, height: frameHeight }]} />
@@ -109,10 +104,11 @@ export function FrameOverlay({
         ) : null}
       </View>
 
-      {/* Instruction caption, just below the frame */}
-      <View style={[styles.caption, { top: frameTop + frameHeight + spacing.md }]}>
-        <Text style={[typography.labelLarge, styles.captionText]}>{caption}</Text>
-      </View>
+      {state === 'error' ? (
+        <View style={[styles.caption, { top: frameTop + frameHeight + spacing.md }]}>
+          <Text style={[typography.labelLarge, styles.captionText]}>Échec — réessayez</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -185,7 +181,7 @@ const styles = StyleSheet.create({
   },
   captionText: {
     color: colors.onPrimary,
-    backgroundColor: SCRIM,
+    backgroundColor: CAPTION_BACKGROUND,
     paddingHorizontal: spacing.md,
     paddingVertical: spacing.xs,
     borderRadius: radius.sm,

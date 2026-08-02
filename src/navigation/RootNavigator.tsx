@@ -109,7 +109,6 @@ export function RootNavigator() {
   if (status === 'signedOut') {
     return <LoginScreen />;
   }
-
   return (
     <NavigationContainer>
       <AppNavigator />

@@ -17,8 +17,15 @@
  */
 
 import { AppState, type AppStateStatus } from 'react-native';
+import NetInfo from '@react-native-community/netinfo';
 
-import { ApiError, confirmIngestion, createIngestion, overrideField } from './api';
+import {
+  ApiError,
+  confirmIngestion,
+  createIngestion,
+  finalizeReview,
+  overrideField,
+} from './api';
 import {
   listPendingDue,
   markFailed,
@@ -64,6 +71,18 @@ async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
     });
     return { handled: true };
   }
+  if (op.type === 'finalize_review') {
+    await finalizeReview(
+      op.payload.ingestion_id,
+      op.payload.fields,
+      op.payload.note,
+      {
+        idempotencyKey: op.idempotencyKey,
+        correlationId: op.correlationId,
+      },
+    );
+    return { handled: true };
+  }
   if (op.type === 'create_ingestion') {
     const res = await createIngestion(
       op.payload.file,
@@ -106,6 +125,7 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
         if (
           op.type !== 'override_field' &&
           op.type !== 'confirm_ingestion' &&
+          op.type !== 'finalize_review' &&
           op.type !== 'create_ingestion'
         ) {
           result.skipped += 1;
@@ -147,7 +167,15 @@ export function registerOutboxDrainOnForeground(): () => void {
     if (state === 'active') void drainOutbox();
   };
   const sub = AppState.addEventListener('change', onChange);
+  const unsubscribeNetwork = NetInfo.addEventListener((state) => {
+    if (state.isConnected && state.isInternetReachable !== false) {
+      void drainOutbox();
+    }
+  });
   // Also drain once at registration (app just started — same plausibility).
   void drainOutbox();
-  return () => sub.remove();
+  return () => {
+    sub.remove();
+    unsubscribeNetwork();
+  };
 }

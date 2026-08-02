@@ -294,6 +294,30 @@ export function confirmIngestion(
   );
 }
 
+export interface FinalizeReviewResponse {
+  ingestion_id: string;
+  run_id: string;
+  status: 'confirmed';
+  replayed: boolean;
+}
+
+/** Persist all 17 final values and confirmation in one idempotent server commit. */
+export function finalizeReview(
+  ingestionId: string,
+  fields: Record<string, string | null>,
+  note?: string,
+  options: RequestOptions = {},
+): Promise<FinalizeReviewResponse> {
+  return apiRequest<FinalizeReviewResponse>(
+    `/v1/ingestions/${encodeURIComponent(ingestionId)}/reviews`,
+    {
+      method: 'POST',
+      body: { fields, ...(note ? { note } : {}) },
+      ...options,
+    },
+  );
+}
+
 /** GET /v1/extraction-runs/{id} — a single run with its extracted fields. */
 export function getExtractionRun(
   runId: string,

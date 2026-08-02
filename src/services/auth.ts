@@ -8,12 +8,20 @@
  */
 
 import { apiRequest } from './api';
-import { clearToken, clearUsername, setToken, setUsername } from './authStorage';
+import {
+  clearToken,
+  clearUsername,
+  setToken,
+  setUsername,
+} from './authStorage';
 
 interface LoginResponse {
   access_token: string;
   token_type: string;
   expires_in: number;
+  user: {
+    role: 'admin' | 'operator';
+  };
 }
 
 /**
@@ -21,17 +29,22 @@ interface LoginResponse {
  * e.g. UNAUTHENTICATED for bad credentials — so the caller can show a message.
  */
 export async function login(username: string, password: string): Promise<void> {
-  const res = await apiRequest<LoginResponse>('/v1/auth/login', {
-    method: 'POST',
-    body: { username, password },
-    skipAuth: true, // the login call must not carry (or react to) a stale token
-  });
+  const res = await apiRequest<LoginResponse>(
+    '/v1/mobile/auth/login',
+    {
+      method: 'POST',
+      body: { username, password },
+      skipAuth: true, // the login call must not carry (or react to) a stale token
+    },
+  );
   if (!res?.access_token) {
     throw new Error('Login response did not include an access token');
   }
+  if (res.user.role !== 'operator') {
+    throw new Error('MOBILE_OPERATOR_ONLY');
+  }
   await setToken(res.access_token);
-  // Remember who signed in (not from the JWT — we never decode it) so saved articles
-  // can be stamped with the author. Not a secret; cleared on logout.
+  // Remember who signed in for the UI. Not a secret; cleared on logout.
   await setUsername(username);
 }
 

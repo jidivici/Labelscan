@@ -39,7 +39,8 @@ export type OutboxOperationType =
   | 'create_ingestion'
   | 'poll_ingestion_status'
   | 'override_field'
-  | 'confirm_ingestion';
+  | 'confirm_ingestion'
+  | 'finalize_review';
 
 /** Payload for POST /v1/ingestions (mirrors the Batch-4 createIngestion args). */
 export interface CreateIngestionPayload {
@@ -66,6 +67,13 @@ export interface OverrideFieldPayload {
 /** Payload for POST /v1/ingestions/{id}/confirm — finalize the review (P3). */
 export interface ConfirmIngestionPayload {
   ingestion_id: string;
+}
+
+/** Complete atomic human review persisted by POST /reviews. */
+export interface FinalizeReviewPayload {
+  ingestion_id: string;
+  fields: Record<string, string | null>;
+  note?: string;
 }
 
 /** Result recorded on a succeeded create_ingestion op (read by the polling batch). */
@@ -109,11 +117,17 @@ export interface ConfirmIngestionOperation extends OutboxOperationBase {
   payload: ConfirmIngestionPayload;
 }
 
+export interface FinalizeReviewOperation extends OutboxOperationBase {
+  type: 'finalize_review';
+  payload: FinalizeReviewPayload;
+}
+
 export type OutboxOperation =
   | CreateIngestionOperation
   | PollIngestionStatusOperation
   | OverrideFieldOperation
-  | ConfirmIngestionOperation;
+  | ConfirmIngestionOperation
+  | FinalizeReviewOperation;
 
 /** Error info supplied to markFailed (e.g. derived from the Batch-4 ApiError). */
 export interface OperationError {
@@ -280,6 +294,13 @@ export function enqueueConfirmIngestion(
   opts: EnqueueOptions = {},
 ): Promise<ConfirmIngestionOperation> {
   return enqueue({ type: 'confirm_ingestion', payload }, opts) as Promise<ConfirmIngestionOperation>;
+}
+
+export function enqueueFinalizeReview(
+  payload: FinalizeReviewPayload,
+  opts: EnqueueOptions = {},
+): Promise<FinalizeReviewOperation> {
+  return enqueue({ type: 'finalize_review', payload }, opts) as Promise<FinalizeReviewOperation>;
 }
 
 // ── Status transitions ─────────────────────────────────────────────────────────

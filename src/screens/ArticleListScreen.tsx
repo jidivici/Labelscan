@@ -6,11 +6,9 @@
  * and the omni-search live in the header as icon buttons that SLIDE a panel open
  * (homogeneous with export + sign-out), rather than taking a permanent row.
  *
- * The list is DAY-SCOPED (today by default): the calendar panel is the date selector —
- * tap a day and the same screen re-renders with that day's articles (no navigation).
- * The omni-search intentionally stays GLOBAL (all days): typing a query bypasses the
- * day scope, clearing it restores it. Articles are sorted by product name; capture is
- * the bottom-right FAB.
+ * The list opens on today's arrivals. The calendar selects another day; omni-search
+ * intentionally remains global. Articles are sorted by product name; capture is the
+ * bottom-right FAB.
  */
 
 import React, { useCallback, useMemo, useRef, useState } from 'react';
@@ -23,12 +21,14 @@ import {
   Alert,
   TextInput,
   Animated,
+  Image,
   LayoutChangeEvent,
+  RefreshControl,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ArticleCard, CARD_HEIGHT } from '../components/ArticleCard';
 import { CalendarPanel } from '../components/CalendarPanel';
@@ -37,7 +37,7 @@ import { CaptureFab } from '../components/CaptureFab';
 import { PendingScanCard } from '../components/PendingScanCard';
 import { Article } from '../types/Article';
 import type { RootStackParamList } from '../navigation/RootNavigator';
-import { getAllArticles, deleteArticle } from '../services/storage';
+import { useCatalogArticles } from '../services/catalogApi';
 import { exportAsJSON, exportAsCSV } from '../services/export';
 import { useArticleSearch } from '../hooks/useArticleSearch';
 import { useScanQueue } from '../hooks/useScanQueue';
@@ -67,15 +67,14 @@ export function ArticleListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
   const { signOut } = useAuth();
-  const [articles, setArticles] = useState<Article[]>([]);
+  const { data: articles = [], refetch, isRefetching } = useCatalogArticles();
   const [exporting, setExporting] = useState(false);
   // Omni-search: lot, espèce, zone FAO, élevage, fournisseur… (services/articleSearch).
   const { query, setQuery, results } = useArticleSearch(articles);
   const searching = query.trim().length > 0;
 
-  // Day scope (calendar module): the home list shows ONE day's arrivages — today by
-  // default, or whichever day was picked in the calendar panel. Searching bypasses
-  // the scope (the omni-search stays global across all days, unchanged behavior).
+  // The home list is day-scoped, starting on today. Search intentionally remains
+  // global across the operator's permitted store.
   const [selectedDay, setSelectedDay] = useState<string>(() => todayKey());
   const dayCounts = useMemo(() => countByDay(articles), [articles]);
   const dayScoped = useMemo(
@@ -122,7 +121,7 @@ export function ArticleListScreen() {
     return (
       <View onLayout={handleListHeaderLayout}>
         {pendingScans.length > 0 && (
-          <Text style={[typography.labelMedium, styles.pendingTitle]}>
+          <Text style={[typography.titleLarge, styles.pendingTitle]}>
             {`En cours (${pendingScans.length})`}
           </Text>
         )}
@@ -151,11 +150,34 @@ export function ArticleListScreen() {
             />
           );
         })}
-        {!searching && (
-          <Text style={[typography.labelMedium, styles.dayTitle]}>
-            {selectedDay === todayKey() ? 'Aujourd’hui' : formatDayKey(selectedDay)}
-          </Text>
-        )}
+        <View style={styles.sectionHeading}>
+          <View style={styles.sectionCopy}>
+            <Text style={[typography.titleLarge, styles.sectionTitle]} numberOfLines={1}>
+              {searching
+                ? 'Résultats'
+                : selectedDay === todayKey()
+                  ? 'Aujourd’hui'
+                  : formatDayKey(selectedDay)}
+            </Text>
+            <Text style={[typography.labelMedium, styles.sectionSubtitle]}>
+              {searching
+                ? `${dayScoped.length} correspondance${dayScoped.length !== 1 ? 's' : ''}`
+                : `${dayScoped.length} arrivage${dayScoped.length !== 1 ? 's' : ''}`}
+            </Text>
+          </View>
+          {!searching && selectedDay !== todayKey() ? (
+            <Pressable
+              onPress={() => setSelectedDay(todayKey())}
+              style={styles.todayButton}
+              android_ripple={{ color: colors.primaryContainer }}
+              accessibilityRole="button"
+              accessibilityLabel="Revenir aux arrivages d’aujourd’hui"
+            >
+              <MaterialCommunityIcons name="calendar-today" size={16} color={colors.onPrimaryContainer} />
+              <Text style={[typography.labelMedium, styles.todayButtonText]}>Aujourd’hui</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </View>
     );
   }, [
@@ -164,6 +186,7 @@ export function ArticleListScreen() {
     scanInterim,
     searching,
     selectedDay,
+    dayScoped.length,
     handleListHeaderLayout,
     handleOpenScan,
     handleRetryScan,
@@ -235,32 +258,20 @@ export function ArticleListScreen() {
   // closes the panel.
   const handleSelectDay = useCallback(
     (key: string) => {
+      if (key > todayKey()) return;
       setSelectedDay(key);
       closeCalendar();
     },
     [closeCalendar],
   );
 
-  // Reload whenever screen comes into focus (after a save)
-  useFocusEffect(
-    useCallback(() => {
-      loadArticles();
-    }, [])
-  );
-
-  const loadArticles = async () => {
-    const data = await getAllArticles();
-    setArticles(data);
-  };
-
-  const handleDelete = useCallback(async (id: string) => {
-    try {
-      await deleteArticle(id);
-      setArticles((prev) => prev.filter((a) => a.id !== id));
-    } catch {
-      Alert.alert('Erreur', 'Impossible de supprimer l’article.');
-    }
-  }, []);
+  // A validated review places its card in this cache immediately. Avoid refetching
+  // on the return navigation: the server's asynchronous projection may not yet be
+  // visible, which used to make that new card disappear. Pull-to-refresh remains the
+  // explicit, sober way to ask for the latest server data.
+  const handleRefresh = useCallback(() => {
+    void refetch();
+  }, [refetch]);
 
   // Stable callbacks + renderItem so React.memo(ArticleCard) actually skips unchanged rows.
   const handleOpen = useCallback(
@@ -270,9 +281,9 @@ export function ArticleListScreen() {
 
   const renderItem = useCallback(
     ({ item }: { item: Article }) => (
-      <ArticleCard article={item} onDelete={handleDelete} onOpen={handleOpen} />
+      <ArticleCard article={item} onOpen={handleOpen} />
     ),
-    [handleDelete, handleOpen],
+    [handleOpen],
   );
 
   const handleExportJSON = useCallback(async () => {
@@ -329,78 +340,72 @@ export function ArticleListScreen() {
     ]);
   }, [signOut]);
 
-  const hasArticles = articles.length > 0;
-
   return (
     <View style={[styles.root, { paddingTop: insets.top }]}>
       {/* Branded app bar */}
       <View style={styles.appBar}>
         <View style={styles.brand}>
-          <View style={styles.brandMark}>
-            <MaterialCommunityIcons name="barcode-scan" size={20} color={colors.onPrimary} />
-          </View>
+          <Image
+            source={require('../../assets/labelscan-logo.png')}
+            style={styles.brandMark}
+            accessibilityLabel="Logo LabelScan"
+          />
           <View style={styles.brandText}>
             <Text style={[typography.titleLarge, styles.brandTitle]}>LabelScan</Text>
-            <Text style={[typography.labelSmall, styles.brandSubtitle]}>Articles</Text>
+            <Text style={[typography.labelSmall, styles.brandSubtitle]}>Traçabilité</Text>
           </View>
         </View>
 
         <View style={styles.appBarActions}>
-          {hasArticles && (
-            <Pressable
-              onPress={toggleCalendar}
-              style={[styles.iconButton, calendarOpen && styles.iconButtonActive]}
-              android_ripple={{ color: colors.primaryContainer, borderless: true }}
-              accessibilityRole="button"
-              accessibilityLabel={calendarOpen ? 'Fermer le calendrier' : 'Calendrier'}
-              accessibilityState={{ expanded: calendarOpen }}
-            >
-              <MaterialCommunityIcons
-                name={calendarOpen ? 'calendar-month' : 'calendar-blank-outline'}
+          <Pressable
+            onPress={toggleCalendar}
+            style={[styles.iconButton, calendarOpen && styles.iconButtonActive]}
+            android_ripple={{ color: colors.primaryContainer, borderless: true }}
+            accessibilityRole="button"
+            accessibilityLabel={calendarOpen ? 'Fermer le calendrier' : 'Calendrier'}
+            accessibilityState={{ expanded: calendarOpen }}
+          >
+            <View style={styles.iconGlyphSlot}>
+              <Ionicons
+                name={calendarOpen ? 'calendar' : 'calendar-outline'}
                 size={22}
-                // Stays tinted while a past day scopes the list — the discreet cue
-                // that the home screen is not on today.
-                color={
-                  calendarOpen || selectedDay !== todayKey()
-                    ? colors.primary
-                    : colors.onSurfaceVariant
-                }
+                color={calendarOpen ? colors.primary : colors.onSurfaceVariant}
               />
-            </Pressable>
-          )}
-          {hasArticles && (
-            <Pressable
-              onPress={toggleSearch}
-              style={[styles.iconButton, searchOpen && styles.iconButtonActive]}
-              android_ripple={{ color: colors.primaryContainer, borderless: true }}
-              accessibilityRole="button"
-              accessibilityLabel={searchOpen ? 'Fermer la recherche' : 'Rechercher'}
-              accessibilityState={{ expanded: searchOpen }}
-            >
-              <MaterialCommunityIcons
-                name={searchOpen ? 'close' : 'magnify'}
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={toggleSearch}
+            style={[styles.iconButton, searchOpen && styles.iconButtonActive]}
+            android_ripple={{ color: colors.primaryContainer, borderless: true }}
+            accessibilityRole="button"
+            accessibilityLabel={searchOpen ? 'Fermer la recherche' : 'Rechercher'}
+            accessibilityState={{ expanded: searchOpen }}
+          >
+            <View style={styles.iconGlyphSlot}>
+              <Ionicons
+                name={searchOpen ? 'close-outline' : 'search-outline'}
                 size={22}
                 color={searchOpen ? colors.primary : colors.onSurfaceVariant}
               />
-            </Pressable>
-          )}
-          {hasArticles && (
-            <Pressable
-              onPress={showExportOptions}
-              disabled={exporting}
-              style={styles.iconButton}
-              android_ripple={{ color: colors.primaryContainer, borderless: true }}
-              accessibilityRole="button"
-              accessibilityLabel="Exporter les articles"
-              accessibilityState={{ disabled: exporting }}
-            >
-              <MaterialCommunityIcons
-                name="export-variant"
+            </View>
+          </Pressable>
+          <Pressable
+            onPress={showExportOptions}
+            disabled={exporting}
+            style={styles.iconButton}
+            android_ripple={{ color: colors.primaryContainer, borderless: true }}
+            accessibilityRole="button"
+            accessibilityLabel="Exporter les articles"
+            accessibilityState={{ disabled: exporting }}
+          >
+            <View style={styles.iconGlyphSlot}>
+              <Ionicons
+                name="share-outline"
                 size={22}
-                color={exporting ? colors.onSurfaceVariant : colors.primary}
+                color={exporting ? colors.outline : colors.onSurfaceVariant}
               />
-            </Pressable>
-          )}
+            </View>
+          </Pressable>
           <Pressable
             onPress={handleSignOut}
             style={styles.iconButton}
@@ -408,15 +413,16 @@ export function ArticleListScreen() {
             accessibilityRole="button"
             accessibilityLabel="Se déconnecter"
           >
-            <MaterialCommunityIcons name="logout" size={22} color={colors.onSurfaceVariant} />
+            <View style={styles.iconGlyphSlot}>
+              <Ionicons name="log-out-outline" size={22} color={colors.onSurfaceVariant} />
+            </View>
           </Pressable>
         </View>
       </View>
 
       {/* Slide-open calendar (driven by the header calendar button) — a date
           selector, never a page: picking a day swaps the list content below. */}
-      {hasArticles && (
-        <Animated.View
+      <Animated.View
           pointerEvents={calendarOpen ? 'auto' : 'none'}
           style={[
             styles.calendarSlide,
@@ -440,12 +446,10 @@ export function ArticleListScreen() {
               onSelectDay={handleSelectDay}
             />
           </View>
-        </Animated.View>
-      )}
+      </Animated.View>
 
       {/* Slide-open search (driven by the header search button) */}
-      {hasArticles && (
-        <Animated.View
+      <Animated.View
           style={[
             styles.searchSlide,
             {
@@ -481,10 +485,9 @@ export function ArticleListScreen() {
               ) : null}
             </View>
           </View>
-        </Animated.View>
-      )}
+      </Animated.View>
 
-      {/* List — the selected day's arrivages, sorted by product name */}
+      {/* List — the complete catalogue or the selected day's arrivals, sorted by name */}
       <FlatList
         data={ordered}
         keyExtractor={(item) => item.id}
@@ -500,34 +503,35 @@ export function ArticleListScreen() {
           { paddingBottom: insets.bottom + spacing['3xl'] + 72 },
         ]}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefetching}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            progressBackgroundColor={colors.surface}
+            progressViewOffset={spacing.sm}
+            title="Actualisation…"
+            titleColor={colors.onSurfaceVariant}
+          />
+        }
         ListEmptyComponent={
-          articles.length === 0 ? (
-            // Never show the big "no articles, scan a label" empty state while a
-            // scan is already "en cours" (rendered above via ListHeaderComponent) —
-            // that would contradict the section right above it. The list is simply
-            // empty below the pending zone until the first arrivage is validated.
-            pendingScans.length === 0 ? (
-              <EmptyState onCapture={openCapture} />
-            ) : null
-          ) : searching ? (
+          searching ? (
             <View style={styles.noResults}>
               <MaterialCommunityIcons name="magnify-close" size={40} color={colors.onSurfaceVariant} />
               <Text style={[typography.bodyMedium, styles.noResultsText]}>
                 Aucun résultat pour « {query.trim()} ».
               </Text>
             </View>
-          ) : (
-            // Articles exist, just none on the selected day — a quiet day note,
-            // never the onboarding empty state.
-            <View style={styles.noResults}>
-              <MaterialCommunityIcons name="calendar-blank-outline" size={40} color={colors.onSurfaceVariant} />
-              <Text style={[typography.bodyMedium, styles.noResultsText]}>
-                {selectedDay === todayKey()
-                  ? 'Aucun arrivage aujourd’hui.'
-                  : `Aucun arrivage le ${formatDayKey(selectedDay)}.`}
-              </Text>
-            </View>
-          )
+          ) : pendingScans.length === 0 ? (
+            selectedDay === todayKey() ? (
+              <EmptyState onAction={openCapture} />
+            ) : (
+              <View style={styles.emptyArrival}>
+                <Text style={[typography.bodyMedium, styles.noResultsText]}>Aucun arrivage</Text>
+              </View>
+            )
+          ) : null
         }
         showsVerticalScrollIndicator={false}
       />
@@ -549,7 +553,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingVertical: spacing.sm,
     backgroundColor: colors.surface,
     borderBottomWidth: 1,
@@ -563,8 +567,8 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   brandMark: {
-    width: 38,
-    height: 38,
+    width: 40,
+    height: 40,
     borderRadius: radius.md,
     backgroundColor: colors.primary,
     alignItems: 'center',
@@ -587,17 +591,26 @@ const styles = StyleSheet.create({
   appBarActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.xs,
+    justifyContent: 'flex-end',
+    gap: 0,
   },
   iconButton: {
-    width: 44,
-    height: 44,
+    width: 40,
+    height: 40,
     borderRadius: radius.full,
     alignItems: 'center',
     justifyContent: 'center',
   },
   iconButtonActive: {
     backgroundColor: colors.primaryContainer,
+  },
+  // Vector icons are font glyphs with different baselines. Centering each one in
+  // the same nested slot avoids baseline drift between calendar/search/export/logout.
+  iconGlyphSlot: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   // ── Slide-open calendar ────────────────────────────────────────────────────────
   calendarSlide: {
@@ -638,30 +651,57 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
   listContent: {
+    flexGrow: 1,
     paddingTop: spacing.md,
   },
   pendingTitle: {
-    color: colors.onSurfaceVariant,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    color: colors.onSurface,
     marginHorizontal: spacing.lg,
     marginTop: spacing.xs,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
   },
-  // Discreet label of the day scoping the list (same register as pendingTitle).
-  dayTitle: {
-    color: colors.onSurfaceVariant,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
+  todayButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    minHeight: 36,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryContainer,
+    overflow: 'hidden',
+  },
+  todayButtonText: {
+    color: colors.onPrimaryContainer,
+  },
+  sectionHeading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginHorizontal: spacing.lg,
-    marginTop: spacing.xs,
-    marginBottom: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  sectionCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingRight: spacing.sm,
+  },
+  sectionTitle: {
+    color: colors.onSurface,
+  },
+  sectionSubtitle: {
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
   },
   noResults: {
     alignItems: 'center',
     paddingTop: spacing['2xl'],
     paddingHorizontal: spacing.lg,
     gap: spacing.sm,
+  },
+  emptyArrival: {
+    alignItems: 'center',
+    paddingTop: spacing['2xl'],
+    paddingHorizontal: spacing.lg,
   },
   noResultsText: {
     color: colors.onSurfaceVariant,

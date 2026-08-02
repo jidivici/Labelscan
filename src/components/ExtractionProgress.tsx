@@ -39,7 +39,7 @@ function AnimatedCheck() {
         transform: [{ scale: pop.interpolate({ inputRange: [0, 1], outputRange: [0.4, 1] }) }],
       }}
     >
-      {/* Loading uses the accent BLUE end-to-end (green is reserved for a saved state). */}
+      {/* Loading uses the brand accent end-to-end (success stays reserved for a saved state). */}
       <MaterialCommunityIcons name="check-circle" size={16} color={colors.primary} />
     </Animated.View>
   );

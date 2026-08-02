@@ -30,10 +30,16 @@ const DOUBLE_TAP_SCALE = 2.5;
 export interface PhotoViewerModalProps {
   visible: boolean;
   photoUri: string | null | undefined;
+  headers?: Record<string, string>;
   onClose: () => void;
 }
 
-export function PhotoViewerModal({ visible, photoUri, onClose }: PhotoViewerModalProps) {
+export function PhotoViewerModal({
+  visible,
+  photoUri,
+  headers,
+  onClose,
+}: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
@@ -111,7 +117,11 @@ export function PhotoViewerModal({ visible, photoUri, onClose }: PhotoViewerModa
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <GestureHandlerRootView style={styles.root}>
         <GestureDetector gesture={gesture}>
-          <Animated.Image source={{ uri: photoUri }} style={[styles.image, imageStyle]} resizeMode="contain" />
+          <Animated.Image
+            source={{ uri: photoUri, headers }}
+            style={[styles.image, imageStyle]}
+            resizeMode="contain"
+          />
         </GestureDetector>
         <Pressable
           onPress={onClose}

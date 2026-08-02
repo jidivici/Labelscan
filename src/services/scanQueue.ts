@@ -78,6 +78,9 @@ export interface PendingScan {
    * are filled and it is validated (then completeScan drops it). Undefined = untouched.
    */
   edits?: Record<string, string>;
+  /** Durable atomic review operation; the scan stays visible until it succeeds. */
+  finalizeOpId?: string;
+  reviewSyncStatus?: 'pending' | 'dead_letter';
 }
 
 /** Review-ready payload for one scan (in-memory only — the server is the truth). */
@@ -382,6 +385,14 @@ export function saveScanEdits(id: string, edits: Record<string, string>): void {
   updateScan(id, { edits });
 }
 
+/** Link the scan to its already-persisted finalization operation. */
+export function attachFinalizeOperation(id: string, operationId: string): void {
+  updateScan(id, {
+    finalizeOpId: operationId,
+    reviewSyncStatus: 'pending',
+  });
+}
+
 /** Remove a validated scan (the article save already copied the photo out). */
 export async function completeScan(id: string): Promise<void> {
   const removed = removeScan(id);
@@ -399,6 +410,18 @@ export async function completeScan(id: string): Promise<void> {
 export async function reconcileScanQueue(): Promise<void> {
   try {
     for (const scan of [...scans]) {
+      if (scan.finalizeOpId) {
+        const finalize = await getOperation(scan.finalizeOpId);
+        if (finalize?.status === 'succeeded') {
+          await completeScan(scan.id);
+          continue;
+        }
+        if (finalize?.status === 'dead_letter') {
+          updateScan(scan.id, { reviewSyncStatus: 'dead_letter' });
+          continue;
+        }
+        updateScan(scan.id, { reviewSyncStatus: 'pending' });
+      }
       if (scan.status === 'submitting') {
         const op = await getOperation(scan.submitOpId);
         if (!op) {

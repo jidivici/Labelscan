@@ -9,6 +9,7 @@
 import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -25,7 +26,13 @@ import { ApiError } from '../services/api';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 
 function messageForError(err: unknown): string {
+  if (err instanceof Error && err.message === 'MOBILE_OPERATOR_ONLY') {
+    return 'L’application mobile est réservée aux opérateurs.';
+  }
   if (err instanceof ApiError) {
+    if (err.code === 'FORBIDDEN' || err.status === 403) {
+      return 'L’application mobile est réservée aux opérateurs.';
+    }
     if (err.code === 'UNAUTHENTICATED' || err.status === 401) {
       return 'Identifiant ou mot de passe incorrect.';
     }
@@ -70,11 +77,15 @@ export function LoginScreen() {
     >
       <View style={[styles.container, { paddingTop: insets.top + spacing.xl, paddingBottom: insets.bottom + spacing.lg }]}>
         <View style={styles.header}>
-          <View style={styles.logo}>
-            <MaterialCommunityIcons name="barcode-scan" size={40} color={colors.primary} />
-          </View>
+          <Image
+            source={require('../../assets/labelscan-logo.png')}
+            style={styles.logo}
+            accessibilityLabel="Logo LabelScan"
+          />
           <Text style={[typography.headlineSmall, styles.title]}>LabelScan</Text>
-          <Text style={[typography.bodyMedium, styles.subtitle]}>Connectez-vous pour continuer</Text>
+          <Text style={[typography.bodyMedium, styles.subtitle]}>
+            Traçabilité des produits de la mer
+          </Text>
         </View>
 
         <View style={styles.form}>
@@ -157,10 +168,7 @@ const styles = StyleSheet.create({
   logo: {
     width: 88,
     height: 88,
-    borderRadius: radius.full,
-    backgroundColor: colors.primaryContainer,
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderRadius: radius.xl,
     marginBottom: spacing.lg,
     ...elevation[1],
   },
