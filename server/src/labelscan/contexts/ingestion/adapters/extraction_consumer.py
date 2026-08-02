@@ -54,6 +54,7 @@ from labelscan.contexts.ingestion.domain.reconciliation import (
     reconcile,
 )
 from labelscan.platform.db.audit_context import set_audit_context
+from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.observability import get_logger
 
 _log = get_logger("ingestion.extraction")
@@ -235,7 +236,7 @@ class ExtractionConsumer:
         corr, trace = msg.correlation_id, msg.trace_id
 
         # Deterministic socle FIRST: parse the native-scanned barcode (exact data).
-        image_bytes, image_artifact_id, barcode_raw = self._load_image_meta(
+        image_bytes, image_artifact_id, barcode_raw, organization_id = self._load_image_meta(
             ingestion_id
         )
         gs1 = parse_gs1(barcode_raw)
@@ -247,7 +248,9 @@ class ExtractionConsumer:
         _ocr_t0 = time.monotonic()
         try:
             ocr, ocr_artifact_id = self._with_provider_retry(
-                lambda: self._ensure_ocr(ingestion_id, image_bytes, corr, trace)
+                lambda: self._ensure_ocr(
+                    ingestion_id, organization_id, image_bytes, corr, trace
+                )
             )
         except _ProviderExhausted as e:
             self._persist_failed(worker_conn, ingestion_id, corr, trace, error=str(e))
@@ -291,7 +294,14 @@ class ExtractionConsumer:
         # effort by design: the preview is non-authoritative (the reconciled run
         # supersedes it), so a failure here must never fail the extraction.
         try:
-            self._persist_interim(ingestion_id, ocr, known, corr, trace)
+            self._persist_interim(
+                ingestion_id,
+                ocr,
+                known,
+                corr,
+                trace,
+                organization_id=organization_id,
+            )
         except Exception as e:  # noqa: BLE001 — preview only, never fatal
             _log.warning(
                 "interim_persist_failed",
@@ -308,6 +318,7 @@ class ExtractionConsumer:
             llm = self._with_provider_retry(
                 lambda: self._ensure_llm(
                     ingestion_id,
+                    organization_id,
                     ocr.full_text,
                     known,
                     corr,
@@ -363,6 +374,7 @@ class ExtractionConsumer:
                 esc = self._with_provider_retry(
                     lambda: self._ensure_llm(
                         ingestion_id,
+                        organization_id,
                         ocr.full_text,
                         known,
                         corr,
@@ -486,13 +498,17 @@ class ExtractionConsumer:
 
     # ---- step helpers -------------------------------------------------------
 
-    def _load_image_meta(self, ingestion_id: str) -> tuple[bytes, str, str | None]:
-        """Return (image bytes, image raw_artifact id, ingestion.barcode_raw)."""
+    def _load_image_meta(
+        self, ingestion_id: str
+    ) -> tuple[bytes, str, str | None, str]:
+        """Return image bytes, artifact id, barcode and tenant id."""
         with self._engine.connect() as c:
             row = (
                 c.execute(
                     text(
-                        "SELECT id::text AS id, checksum_sha256 FROM ingestion.raw_artifact "
+                        "SELECT id::text AS id, checksum_sha256, "
+                        "organization_id::text AS organization_id "
+                        "FROM ingestion.raw_artifact "
                         "WHERE ingestion_id = :id AND artifact_kind = 'image' ORDER BY occurred_at LIMIT 1"
                     ),
                     {"id": ingestion_id},
@@ -504,13 +520,17 @@ class ExtractionConsumer:
                 text("SELECT barcode_raw FROM ingestion.ingestion WHERE id = :id"),
                 {"id": ingestion_id},
             ).scalar_one()
-        image_bytes = self._raw.read(checksum=row["checksum_sha256"])
-        return image_bytes, row["id"], barcode_raw
+        image_bytes = self._raw.read(
+            checksum=row["checksum_sha256"],
+            organization_id=row["organization_id"],
+        )
+        return image_bytes, row["id"], barcode_raw, row["organization_id"]
 
     def _ensure_ocr(
-        self, ingestion_id, image_bytes, corr, trace
+        self, ingestion_id, organization_id, image_bytes, corr, trace
     ) -> tuple[OcrResult, str]:
         with self._engine.begin() as c:
+            set_tenant_context(c, organization_id)
             existing = (
                 c.execute(
                     text(
@@ -523,13 +543,20 @@ class ExtractionConsumer:
                 .first()
             )
             if existing:  # dedup: OCR already ran for this ingestion — no external call
-                raw = self._raw.read(checksum=existing["checksum_sha256"])
+                raw = self._raw.read(
+                    checksum=existing["checksum_sha256"],
+                    organization_id=organization_id,
+                )
                 return _ocr_from_json(raw), str(existing["id"])
 
             ocr = self._ocr.run(image_bytes)  # <-- external call (only on miss)
             normalized = _ocr_to_json(ocr)
             checksum = _sha(normalized)
-            ref = self._raw.put(normalized, checksum=checksum)
+            ref = self._raw.put(
+                normalized,
+                checksum=checksum,
+                organization_id=organization_id,
+            )
             set_audit_context(
                 c,
                 actor_id=SYSTEM_ACTOR,
@@ -540,11 +567,14 @@ class ExtractionConsumer:
             artifact_id = c.execute(
                 text(
                     "INSERT INTO ingestion.raw_artifact "
-                    "(ingestion_id, artifact_kind, storage_ref, checksum_sha256, correlation_id, trace_id) "
-                    "VALUES (:id, 'ocr_json', :ref, :ck, :corr, :trace) RETURNING id"
+                    "(ingestion_id, organization_id, artifact_kind, storage_ref, "
+                    " checksum_sha256, correlation_id, trace_id) "
+                    "VALUES (:id, :organization_id, 'ocr_json', :ref, :ck, :corr, :trace) "
+                    "RETURNING id"
                 ),
                 {
                     "id": ingestion_id,
+                    "organization_id": organization_id,
                     "ref": ref,
                     "ck": checksum,
                     "corr": corr,
@@ -556,6 +586,7 @@ class ExtractionConsumer:
     def _ensure_llm(
         self,
         ingestion_id,
+        organization_id,
         ocr_text,
         known_field_names,
         corr,
@@ -575,6 +606,7 @@ class ExtractionConsumer:
         else:
             where_model = "model = :model"
         with self._engine.begin() as c:
+            set_tenant_context(c, organization_id)
             existing = (
                 c.execute(
                     text(
@@ -589,7 +621,10 @@ class ExtractionConsumer:
             )
             if existing:  # dedup: this model already ran — no external call
                 return _llm_from_json(
-                    self._raw.read(checksum=existing["checksum_sha256"])
+                    self._raw.read(
+                        checksum=existing["checksum_sha256"],
+                        organization_id=organization_id,
+                    )
                 )
 
             result = llm.run(
@@ -597,7 +632,11 @@ class ExtractionConsumer:
             )  # <-- external call (only on miss)
             normalized = _llm_to_json(result)
             checksum = _sha(normalized)
-            ref = self._raw.put(normalized, checksum=checksum)
+            ref = self._raw.put(
+                normalized,
+                checksum=checksum,
+                organization_id=organization_id,
+            )
             set_audit_context(
                 c,
                 actor_id=SYSTEM_ACTOR,
@@ -608,11 +647,13 @@ class ExtractionConsumer:
             c.execute(
                 text(
                     "INSERT INTO ingestion.raw_artifact "
-                    "(ingestion_id, artifact_kind, model, storage_ref, checksum_sha256, correlation_id, trace_id) "
-                    "VALUES (:id, 'llm_output', :model, :ref, :ck, :corr, :trace)"
+                    "(ingestion_id, organization_id, artifact_kind, model, storage_ref, "
+                    " checksum_sha256, correlation_id, trace_id) "
+                    "VALUES (:id, :organization_id, 'llm_output', :model, :ref, :ck, :corr, :trace)"
                 ),
                 {
                     "id": ingestion_id,
+                    "organization_id": organization_id,
                     "model": model,
                     "ref": ref,
                     "ck": checksum,
@@ -622,7 +663,15 @@ class ExtractionConsumer:
             )
             return _llm_from_json(normalized)
 
-    def _persist_interim(self, ingestion_id, ocr, gs1_known, corr, trace) -> None:
+    def _persist_interim(
+        self,
+        ingestion_id,
+        ocr,
+        gs1_known,
+        corr,
+        trace,
+        organization_id=None,
+    ) -> None:
         """Tier 3 wave 2: commit the deterministic preview + the ocr_done transit.
 
         Own transaction on a clean connection (the final persist on worker_conn is
@@ -638,6 +687,8 @@ class ExtractionConsumer:
             f for f in extract_interim_fields(ocr.full_text) if f.name not in gs1_known
         )
         with self._engine.begin() as c:
+            if organization_id:
+                set_tenant_context(c, organization_id)
             set_audit_context(
                 c,
                 actor_id=SYSTEM_ACTOR,

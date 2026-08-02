@@ -27,6 +27,7 @@ from labelscan.contexts.ingestion.application.ports import (
     PersistResult,
 )
 from labelscan.platform.db.audit_context import set_audit_context
+from labelscan.platform.db.tenant_context import set_tenant_context
 
 _CLAIM = text(
     "INSERT INTO platform.idempotency_key "
@@ -40,13 +41,15 @@ _FIND_EXISTING = text(
 )
 _INSERT_INGESTION = text(
     "INSERT INTO ingestion.ingestion "
-    "(id, status, image_ref, checksum_sha256, barcode_raw, client_captured_at, correlation_id, trace_id) "
-    "VALUES (:iid, 'raw_stored', :ref, :ck, :bc, :cca, :corr, :trace)"
+    "(id, status, image_ref, checksum_sha256, barcode_raw, client_captured_at, "
+    "organization_id, store_id, store_code, correlation_id, trace_id) "
+    "VALUES (:iid, 'raw_stored', :ref, :ck, :bc, :cca, "
+    ":organization_id, :store_id, :store, :corr, :trace)"
 )
 _INSERT_RAW = text(
     "INSERT INTO ingestion.raw_artifact "
-    "(ingestion_id, artifact_kind, storage_ref, checksum_sha256, correlation_id, trace_id) "
-    "VALUES (:iid, 'image', :ref, :ck, :corr, :trace)"
+    "(ingestion_id, organization_id, artifact_kind, storage_ref, checksum_sha256, correlation_id, trace_id) "
+    "VALUES (:iid, :organization_id, 'image', :ref, :ck, :corr, :trace)"
 )
 # Transactional outbox: enqueued in the SAME transaction as the ingestion write,
 # so the event exists if and only if the ingestion committed. NOT a call into
@@ -62,9 +65,14 @@ class SqlIngestionRepository(IngestionWriteRepository):
         self._engine = engine
 
     @staticmethod
-    def _scope_hash(principal: str, route: str, content_sha256: str) -> str:
+    def _scope_hash(
+        principal: str,
+        route: str,
+        content_sha256: str,
+        store_code: str | None,
+    ) -> str:
         return hashlib.sha256(
-            f"{principal}:{route}:{content_sha256}".encode()
+            f"{principal}:{store_code or '-'}:{route}:{content_sha256}".encode()
         ).hexdigest()
 
     def persist(
@@ -74,15 +82,28 @@ class SqlIngestionRepository(IngestionWriteRepository):
         storage_ref: str,
         barcode_raw: str | None,
         client_captured_at: str | None,
+        store_code: str | None = None,
+        organization_id: str | None = None,
+        store_id: str | None = None,
         principal: str,
         route: str,
         audit: AuditContext,
         action: str,
     ) -> PersistResult:
-        scope_hash = self._scope_hash(principal, route, content_sha256)
+        scope_hash = self._scope_hash(principal, route, content_sha256, store_code)
         ingestion_id = str(uuid.uuid4())
 
         with self._engine.begin() as conn:
+            if organization_id is None:
+                organization_id = str(
+                    conn.execute(
+                        text(
+                            "SELECT id FROM identity.organization "
+                            "WHERE slug = 'labelscan'"
+                        )
+                    ).scalar_one()
+                )
+            set_tenant_context(conn, organization_id)
             # REQUIRED — without this the audit trigger aborts the inserts.
             set_audit_context(
                 conn,
@@ -108,10 +129,17 @@ class SqlIngestionRepository(IngestionWriteRepository):
                 "ck": content_sha256,
                 "corr": audit.correlation_id,
                 "trace": audit.trace_id,
+                "organization_id": organization_id,
             }
             conn.execute(
                 _INSERT_INGESTION,
-                {**params, "bc": barcode_raw, "cca": client_captured_at},
+                {
+                    **params,
+                    "bc": barcode_raw,
+                    "cca": client_captured_at,
+                    "store": store_code,
+                    "store_id": store_id,
+                },
             )
             conn.execute(_INSERT_RAW, params)
             conn.execute(
@@ -122,6 +150,8 @@ class SqlIngestionRepository(IngestionWriteRepository):
                             "ingestion_id": ingestion_id,
                             "checksum_sha256": content_sha256,
                             "image_ref": storage_ref,
+                            "organization_id": organization_id,
+                            "store_id": store_id,
                         }
                     ),
                     "corr": audit.correlation_id,

@@ -15,31 +15,64 @@ from __future__ import annotations
 
 import os
 import sys
+import uuid
 
 from sqlalchemy import text
 
 from labelscan.contexts.identity.domain.password import hash_password
 from labelscan.contexts.identity.domain.user import ADMIN_ROLE
+from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.engine import make_engine
 
 
 def upsert_admin(username: str, password: str) -> str:
-    """Create the admin user, or reset its password and re-activate it. Returns the id."""
+    """Create the admin, or reset its password and reactivate it. Return its id."""
     encoded = hash_password(password)
     engine = make_engine()
     with engine.begin() as conn:
+        organization_id = conn.execute(
+            text(
+                "SELECT id::text FROM identity.organization "
+                "WHERE slug = 'labelscan'"
+            )
+        ).scalar_one()
+        existing_id = conn.execute(
+            text(
+                "SELECT id::text FROM identity.app_user "
+                "WHERE organization_id = :organization_id AND username = :u"
+            ),
+            {"organization_id": organization_id, "u": username},
+        ).scalar_one_or_none()
+        user_id = existing_id or str(uuid.uuid4())
+        # Bootstrap is deliberately self-attributed. Subsequent provisioning
+        # records the same account as actor and subject.
+        set_audit_context(
+            conn,
+            actor_id=user_id,
+            action="identity.admin_provisioned",
+            correlation_id="cli-provisioning",
+            trace_id="cli-provisioning",
+        )
         row = conn.execute(
             text(
-                "INSERT INTO identity.app_user (username, password_hash, role, is_active) "
-                "VALUES (:u, :h, :r, true) "
-                "ON CONFLICT (username) DO UPDATE "
+                "INSERT INTO identity.app_user "
+                "(id, organization_id, organization_code, username, display_name, "
+                "password_hash, role, active, created_by) "
+                "VALUES (:id, :organization_id, 'labelscan', :u, :u, :h, :r, true, :id) "
+                "ON CONFLICT (organization_id, username) DO UPDATE "
                 "SET password_hash = excluded.password_hash, "
                 "    role = excluded.role, "
-                "    is_active = true, "
+                "    active = true, "
                 "    updated_at = now() "
                 "RETURNING id::text"
             ),
-            {"u": username, "h": encoded, "r": ADMIN_ROLE},
+            {
+                "id": user_id,
+                "organization_id": organization_id,
+                "u": username,
+                "h": encoded,
+                "r": ADMIN_ROLE,
+            },
         ).first()
     return row[0]
 

@@ -18,14 +18,15 @@ services:
 
   server:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     container_name: labelscan-server
     env_file: ./server/.env
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/labelscan_test"
+      LABELSCAN_OBJECT_STORE: "filesystem"
       LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
     volumes:
       - labelscan-raw-store:/app/data/raw
@@ -36,8 +37,8 @@ services:
 
   worker:
     build:
-      context: ./server
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: server/Dockerfile
     # No container_name: replicas need unique names. Running N workers is safe — the
     # outbox claim uses FOR UPDATE SKIP LOCKED (audit §1.5) — and each replica keeps its
     # OWN heartbeat file, so the per-container healthcheck stays correct.
@@ -46,6 +47,7 @@ services:
     env_file: ./server/.env
     environment:
       DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/labelscan_test"
+      LABELSCAN_OBJECT_STORE: "filesystem"
       LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
     volumes:
       - labelscan-raw-store:/app/data/raw

@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' blob:; style-src 'self'; script-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+    >
+    <meta name="theme-color" content="#078b7d">
+    <title>LabelScan — Portail</title>
+    <link rel="icon" type="image/png" href="./assets/labelscan-logo.png">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main id="login-view" class="login-shell">
+      <section class="login-brand" aria-labelledby="brand-title">
+        <div class="brand-lockup">
+          <img
+            class="brand-logo brand-logo-large"
+            src="./assets/labelscan-logo.png"
+            alt=""
+            width="112"
+            height="112"
+          >
+          <h1 id="brand-title">LabelScan</h1>
+          <p class="brand-subtitle">Portail web</p>
+        </div>
+      </section>
+
+      <section class="login-panel" aria-labelledby="login-title">
+        <div class="mobile-brand">
+          <img
+            class="brand-logo"
+            src="./assets/labelscan-logo.png"
+            alt=""
+            width="72"
+            height="72"
+          >
+          <strong>LabelScan</strong>
+        </div>
+        <div class="login-heading">
+          <h2 id="login-title">Connexion</h2>
+          <p>Compte LabelScan</p>
+        </div>
+
+        <div id="login-error" class="notice notice-error" role="alert" hidden></div>
+
+        <form id="login-form" class="form-stack">
+          <label class="field">
+            <span>Identifiant</span>
+            <input
+              id="login-username"
+              name="username"
+              type="text"
+              placeholder="prenom.nom@entreprise.fr"
+              autocomplete="username"
+              autocapitalize="none"
+              required
+            >
+          </label>
+          <label class="field">
+            <span>Mot de passe</span>
+            <input
+              id="login-password"
+              name="password"
+              type="password"
+              placeholder="Votre mot de passe"
+              autocomplete="current-password"
+              required
+            >
+          </label>
+          <button id="login-submit" class="button button-primary button-wide" type="submit">
+            <span>Se connecter</span>
+            <span class="button-arrow" aria-hidden="true">→</span>
+          </button>
+        </form>
+        <p class="session-note">
+          Votre session reste active après un rechargement, jusqu’à son expiration
+          ou votre déconnexion.
+        </p>
+      </section>
+    </main>
+
+    <div id="admin-view" class="app-shell" hidden>
+      <aside class="sidebar">
+        <a id="portal-brand" class="sidebar-brand" href="#catalog-section" aria-label="LabelScan, accueil">
+          <img
+            class="brand-logo brand-logo-small"
+            src="./assets/labelscan-logo.png"
+            alt=""
+            width="42"
+            height="42"
+          >
+          <span>
+            <strong>LabelScan</strong>
+            <small>Portail</small>
+          </span>
+        </a>
+
+        <nav class="sidebar-nav" aria-label="Navigation principale">
+          <a id="catalog-nav" class="nav-item" href="#catalog-section">
+            <span class="nav-icon" aria-hidden="true">▦</span>
+            Arrivages
+          </a>
+          <a id="users-nav" class="nav-item nav-item-active" href="#users-section" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">◎</span>
+            Utilisateurs
+          </a>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="sidebar-user">
+            <span id="sidebar-initials" class="avatar avatar-dark">AD</span>
+            <span>
+              <strong id="sidebar-user-name">Administrateur</strong>
+              <small id="sidebar-user-role">Compte admin</small>
+            </span>
+          </div>
+          <button id="logout-button" class="button button-ghost button-wide" type="button">
+            Se déconnecter
+          </button>
+        </div>
+      </aside>
+
+      <div class="app-content">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title">Gestion des utilisateurs</h1>
+          </div>
+          <div id="admin-actions" class="topbar-actions">
+            <button id="manage-stores-button" class="button button-secondary" type="button">
+              Magasins
+            </button>
+            <button id="create-user-button" class="button button-primary" type="button">
+              <span aria-hidden="true">＋</span>
+              Nouvel utilisateur
+            </button>
+          </div>
+        </header>
+
+        <main class="page-content">
+          <section id="users-section" class="portal-section">
+            <section class="intro-row">
+              <div>
+                <h2>Comptes et accès</h2>
+                <p>Gérez les utilisateurs et leur magasin d’affectation.</p>
+              </div>
+              <span id="last-refresh" class="refresh-label">À jour</span>
+            </section>
+
+            <div id="page-error" class="notice notice-error" role="alert" hidden></div>
+            <div id="page-success" class="notice notice-success" role="status" hidden></div>
+
+            <section class="table-panel" aria-labelledby="users-list-title">
+              <div class="table-toolbar">
+                <div>
+                  <h2 id="users-list-title">Utilisateurs</h2>
+                  <p id="users-count">0 compte</p>
+                </div>
+                <div class="toolbar-actions">
+                  <label class="search-field">
+                    <span class="sr-only">Rechercher un utilisateur</span>
+                    <span aria-hidden="true">⌕</span>
+                    <input
+                      id="users-search"
+                      type="search"
+                      placeholder="Rechercher un utilisateur"
+                    >
+                  </label>
+                  <button
+                    id="users-filter-toggle"
+                    class="button button-secondary filter-toggle"
+                    type="button"
+                    aria-controls="users-filter-panel"
+                    aria-expanded="false"
+                  >
+                    Filtres
+                    <span id="users-filter-count" class="filter-count" hidden>0</span>
+                  </button>
+                </div>
+              </div>
+
+              <div id="users-filter-panel" class="filter-panel" hidden>
+                <label>
+                  <span>Magasin</span>
+                  <select id="store-filter">
+                    <option value="">Tous les magasins</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Rôle</span>
+                  <select id="role-filter">
+                    <option value="">Tous les rôles</option>
+                    <option value="operator">Opérateur</option>
+                    <option value="admin">Administrateur</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Statut</span>
+                  <select id="status-filter">
+                    <option value="">Tous les statuts</option>
+                    <option value="active">Actifs</option>
+                    <option value="inactive">Désactivés</option>
+                  </select>
+                </label>
+                <button id="users-filter-reset" class="button button-text" type="button">
+                  Réinitialiser
+                </button>
+              </div>
+
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Utilisateur</th>
+                      <th>Rôle</th>
+                      <th>Magasin</th>
+                      <th>Statut</th>
+                      <th>Création</th>
+                      <th><span class="sr-only">Actions</span></th>
+                    </tr>
+                  </thead>
+                  <tbody id="users-table-body">
+                    <tr><td colspan="6" class="empty-cell">Chargement des utilisateurs…</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section id="catalog-section" class="portal-section" hidden>
+            <section class="intro-row">
+              <div>
+                <h2>Arrivages enregistrés</h2>
+                <p id="catalog-context">Produits validés et partagés avec votre magasin.</p>
+              </div>
+              <div class="intro-meta">
+                <strong id="catalog-total">0</strong>
+                <span id="catalog-total-label">arrivage</span>
+                <small id="catalog-last-refresh" class="refresh-label">À jour</small>
+              </div>
+            </section>
+
+            <div id="catalog-error" class="notice notice-error" role="alert" hidden></div>
+
+            <section class="catalog-area" aria-labelledby="catalog-list-title">
+              <div class="catalog-section-heading">
+                <div>
+                  <h2 id="catalog-list-title">Catalogue des arrivages</h2>
+                  <p id="catalog-count">0 arrivage</p>
+                </div>
+              </div>
+
+              <div class="catalog-toolbar">
+                <label class="search-field">
+                  <span class="sr-only">Rechercher dans les arrivages</span>
+                  <span aria-hidden="true">⌕</span>
+                  <input
+                    id="catalog-search"
+                    type="search"
+                    placeholder="Nom, lot, GTIN ou fournisseur…"
+                  >
+                </label>
+                <button
+                  id="catalog-filter-toggle"
+                  class="button button-secondary filter-toggle"
+                  type="button"
+                  aria-controls="catalog-filter-panel"
+                  aria-expanded="false"
+                >
+                  Filtres
+                  <span id="catalog-filter-count" class="filter-count" hidden>0</span>
+                </button>
+              </div>
+
+              <div id="catalog-filter-panel" class="filter-panel catalog-filter-panel" hidden>
+                <label id="catalog-store-filter-label">
+                  <span>Magasin</span>
+                  <select id="catalog-store-filter">
+                    <option value="">Tous les magasins</option>
+                  </select>
+                </label>
+                <label class="date-filter">
+                  <span>Date de début</span>
+                  <input id="catalog-date-from" type="date">
+                </label>
+                <label class="date-filter">
+                  <span>Date de fin</span>
+                  <input id="catalog-date-to" type="date">
+                </label>
+                <button id="catalog-filter-reset" class="button button-text" type="button">
+                  Réinitialiser
+                </button>
+              </div>
+
+              <div id="catalog-grid" class="catalog-grid" aria-live="polite">
+                <div class="catalog-state">Chargement des arrivages…</div>
+              </div>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <dialog id="create-user-dialog" class="dialog">
+      <form id="create-user-form" class="dialog-card">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Nouveau compte</p>
+            <h2>Ajouter un utilisateur</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-dialog="create-user-dialog" aria-label="Fermer">×</button>
+        </div>
+        <div class="dialog-body form-grid">
+          <label class="field field-full">
+            <span>Nom affiché</span>
+            <input id="create-display-name" type="text" placeholder="Camille Martin" maxlength="120" required>
+          </label>
+          <label class="field field-full">
+            <span>Identifiant</span>
+            <input id="create-username" type="text" placeholder="camille.martin" autocomplete="off" required>
+          </label>
+          <label class="field field-full">
+            <span>Mot de passe temporaire</span>
+            <input id="create-password" type="password" autocomplete="new-password" required>
+          </label>
+          <label class="field field-full">
+            <span>Magasin</span>
+            <select id="create-store-code" required>
+              <option value="">Sélectionner un magasin</option>
+            </select>
+          </label>
+          <label class="field field-full">
+            <span>Rôle</span>
+            <select id="create-role" required>
+              <option value="operator">Opérateur</option>
+              <option value="admin">Administrateur</option>
+            </select>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button class="button button-secondary" type="button" data-close-dialog="create-user-dialog">Annuler</button>
+          <button id="create-user-submit" class="button button-primary" type="submit">Créer le compte</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="edit-user-dialog" class="dialog">
+      <form id="edit-user-form" class="dialog-card">
+        <div class="dialog-header">
+          <div>
+            <p id="edit-user-eyebrow" class="eyebrow">Compte</p>
+            <h2>Modifier l’utilisateur</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-dialog="edit-user-dialog" aria-label="Fermer">×</button>
+        </div>
+        <input id="edit-user-id" type="hidden">
+        <div class="dialog-body form-grid">
+          <label class="field field-full">
+            <span>Nom affiché</span>
+            <input id="edit-display-name" type="text" maxlength="120" required>
+          </label>
+          <label class="field">
+            <span>Rôle</span>
+            <select id="edit-role" required>
+              <option value="operator">Opérateur</option>
+              <option value="admin">Administrateur</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Statut</span>
+            <select id="edit-active" required>
+              <option value="true">Actif</option>
+              <option value="false">Désactivé</option>
+            </select>
+          </label>
+          <label class="field field-full">
+            <span>Magasin</span>
+            <select id="edit-store-code">
+              <option value="">Aucun magasin</option>
+            </select>
+          </label>
+          <label class="field field-full">
+            <span>Nouveau mot de passe <em>— facultatif</em></span>
+            <input id="edit-password" type="password" autocomplete="new-password">
+            <small>Laissez vide pour conserver le mot de passe actuel.</small>
+          </label>
+          <p id="self-account-note" class="self-account-note field-full" hidden>
+            Vous pouvez modifier votre nom ou votre mot de passe, mais pas retirer votre propre accès administrateur.
+          </p>
+        </div>
+        <div class="dialog-actions">
+          <button class="button button-secondary" type="button" data-close-dialog="edit-user-dialog">Annuler</button>
+          <button id="edit-user-submit" class="button button-primary" type="submit">Enregistrer</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="stores-dialog" class="dialog dialog-wide">
+      <div class="dialog-card">
+        <div class="dialog-header">
+          <div>
+            <p class="eyebrow">Référentiel</p>
+            <h2>Magasins</h2>
+          </div>
+          <button class="icon-button" type="button" data-close-dialog="stores-dialog" aria-label="Fermer">×</button>
+        </div>
+        <div class="dialog-body">
+          <div id="stores-error" class="notice notice-error" role="alert" hidden></div>
+          <div id="stores-success" class="notice notice-success" role="status" hidden></div>
+          <form id="create-store-form" class="store-create-form">
+            <label class="field">
+              <span>Code magasin</span>
+              <input id="create-store-code-value" type="text" placeholder="PARIS-01" autocomplete="off" required>
+            </label>
+            <label class="field">
+              <span>Nom</span>
+              <input id="create-store-name" type="text" placeholder="Paris Centre" required>
+            </label>
+            <button id="create-store-submit" class="button button-primary" type="submit">
+              Ajouter
+            </button>
+          </form>
+          <div class="store-list">
+            <table>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Nom</th>
+                  <th>Statut</th>
+                  <th><span class="sr-only">Actions</span></th>
+                </tr>
+              </thead>
+              <tbody id="stores-table-body">
+                <tr><td colspan="4" class="empty-cell">Chargement des magasins…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </dialog>
+
+    <script src="./app.js"></script>
+  </body>
+</html>

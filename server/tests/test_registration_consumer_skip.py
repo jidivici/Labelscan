@@ -36,10 +36,17 @@ def _batch_count(engine) -> int:
 
 
 class _Msg:
-    def __init__(self, payload, correlation_id="c", trace_id="t"):
+    def __init__(
+        self,
+        payload,
+        correlation_id="c",
+        trace_id="t",
+        event_type="extraction.completed",
+    ):
         self.payload = payload
         self.correlation_id = correlation_id
         self.trace_id = trace_id
+        self.event_type = event_type
         self.id = "00000000-0000-0000-0000-000000000000"
 
 

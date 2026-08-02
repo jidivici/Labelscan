@@ -1,4 +1,4 @@
-"""Traceability registration consumer (adapter) for `extraction.completed`.
+"""Traceability registration consumer for extracted or human-reviewed labels.
 
 Consumes ONLY validated extractions (outcome == 'extracted'); needs_review or
 failed runs never produce a batch. Applies the domain-truth consistency checks,
@@ -40,17 +40,34 @@ def _to_date(s: str | None) -> date | None:
 class RegistrationConsumer:
     consumer_name = "traceability"
     event_type = "extraction.completed"
+    review_event_type = "review.finalized"
 
     def __init__(self, *, engine: Engine) -> None:
         self._engine = engine
 
     def __call__(self, msg, conn: Connection) -> None:
-        if msg.payload.get("outcome") != "extracted":
+        # An automatic run may be trusted immediately only when its extracted
+        # outcome passed the gate. A human final review produces a new extracted
+        # run, but intentionally emits ``review.finalized`` (so the audit trail
+        # distinguishes a human decision from an automatic result). Both are
+        # valid sources for registering a batch.
+        if msg.event_type == self.event_type:
+            if msg.payload.get("outcome") != "extracted":
+                return
+        elif msg.event_type != self.review_event_type:
             return
 
         ingestion_id = msg.payload["ingestion_id"]
         run_id = msg.payload["run_id"]
         corr, trace = msg.correlation_id, msg.trace_id
+        tenant = conn.execute(
+            text(
+                "SELECT organization_id::text AS organization_id, "
+                "store_id::text AS store_id, store_code "
+                "FROM ingestion.ingestion WHERE id = :ingestion_id"
+            ),
+            {"ingestion_id": ingestion_id},
+        ).mappings().one()
 
         vals = {
             r["field_name"]: r["value"]
@@ -63,6 +80,25 @@ class RegistrationConsumer:
             .mappings()
             .all()
         }
+
+        # The usual path is: automatic extraction -> one registration. If an
+        # operator later finalizes an already extracted item, the separate review
+        # projection consumer refreshes its fields. Never create a second batch
+        # for that same ingestion.
+        already_registered = conn.execute(
+            text(
+                "SELECT 1 FROM traceability.batch "
+                "WHERE organization_id = :organization_id "
+                "AND source_ingestion_id = :ingestion_id LIMIT 1"
+            ),
+            {
+                "organization_id": tenant["organization_id"],
+                "ingestion_id": ingestion_id,
+            },
+        ).scalar_one_or_none()
+        if already_registered is not None:
+            return
+
         candidate = BatchCandidate(
             lot_code=vals.get("batch_number"),
             scientific_name=vals.get("scientific_name"),
@@ -85,19 +121,106 @@ class RegistrationConsumer:
             conflicting = conn.execute(
                 text(
                     "SELECT s.name FROM traceability.batch b JOIN traceability.supplier s ON s.id = b.supplier_id "
-                    "WHERE b.lot_code = :lot AND s.name <> COALESCE(:sup, '') LIMIT 1"
+                    "WHERE b.organization_id = :organization_id "
+                    "AND b.lot_code = :lot AND s.name <> COALESCE(:sup, '') LIMIT 1"
                 ),
-                {"lot": candidate.lot_code, "sup": candidate.supplier_name},
+                {
+                    "organization_id": tenant["organization_id"],
+                    "lot": candidate.lot_code,
+                    "sup": candidate.supplier_name,
+                },
             ).scalar_one_or_none()
 
         issues = check_consistency(candidate, conflicting_supplier_for_lot=conflicting)
         if issues:
-            self._flag(conn, ingestion_id, run_id, candidate, issues, corr, trace)
+            # A repeated scan of an already-flagged physical lot must not poison
+            # the outbox on the batch uniqueness constraint. It is still retained
+            # as an ingestion/audit record; the catalogue deliberately keeps one
+            # flagged batch per lot rather than inventing duplicate stock.
+            if self._has_flagged_lot(
+                conn, tenant["organization_id"], candidate.lot_code
+            ):
+                return
+            self._flag(
+                conn,
+                ingestion_id,
+                run_id,
+                tenant,
+                candidate,
+                issues,
+                corr,
+                trace,
+            )
         else:
-            self._register(conn, ingestion_id, run_id, candidate, vals, corr, trace)
+            # Same physical lot scanned twice: keep the second capture in the
+            # immutable ingestion history, but do not create a duplicate batch
+            # card (the database enforces one supplier/product/lot identity).
+            if self._has_registered_batch(conn, tenant["organization_id"], candidate, vals):
+                return
+            self._register(
+                conn,
+                ingestion_id,
+                run_id,
+                tenant,
+                candidate,
+                vals,
+                corr,
+                trace,
+            )
+
+    @staticmethod
+    def _has_flagged_lot(conn, organization_id, lot_code) -> bool:
+        return (
+            conn.execute(
+                text(
+                    "SELECT 1 FROM traceability.batch "
+                    "WHERE organization_id = :organization_id "
+                    "AND status = 'flagged' "
+                    "AND lot_code IS NOT DISTINCT FROM :lot_code LIMIT 1"
+                ),
+                {"organization_id": organization_id, "lot_code": lot_code},
+            ).scalar_one_or_none()
+            is not None
+        )
+
+    @staticmethod
+    def _has_registered_batch(conn, organization_id, candidate, values) -> bool:
+        return (
+            conn.execute(
+                text(
+                    "SELECT 1 FROM traceability.batch AS batch "
+                    "LEFT JOIN traceability.supplier AS supplier ON supplier.id = batch.supplier_id "
+                    "LEFT JOIN traceability.product AS product ON product.id = batch.product_id "
+                    "WHERE batch.organization_id = :organization_id "
+                    "AND batch.status = 'registered' "
+                    "AND batch.lot_code IS NOT DISTINCT FROM :lot_code "
+                    "AND COALESCE(supplier.name, '') = COALESCE(:supplier_name, '') "
+                    "AND COALESCE(product.common_name, '') = COALESCE(:common_name, '') "
+                    "AND COALESCE(product.scientific_name, '') = COALESCE(:scientific_name, '') "
+                    "LIMIT 1"
+                ),
+                {
+                    "organization_id": organization_id,
+                    "lot_code": candidate.lot_code,
+                    "supplier_name": candidate.supplier_name,
+                    "common_name": values.get("commercial_designation")
+                    or values.get("product_name"),
+                    "scientific_name": candidate.scientific_name,
+                },
+            ).scalar_one_or_none()
+            is not None
+        )
 
     def _register(
-        self, conn, ingestion_id, run_id, c: BatchCandidate, vals, corr, trace
+        self,
+        conn,
+        ingestion_id,
+        run_id,
+        tenant,
+        c: BatchCandidate,
+        vals,
+        corr,
+        trace,
     ) -> None:
         set_audit_context(
             conn,
@@ -119,14 +242,19 @@ class RegistrationConsumer:
         batch_id = conn.execute(
             text(
                 "INSERT INTO traceability.batch "
-                "(lot_code, product_id, supplier_id, species_scientific, fao_area_code, production_method, "
+                "(organization_id, store_id, lot_code, product_id, supplier_id, store_code, "
+                " species_scientific, fao_area_code, production_method, "
                 " use_by, packaging_date, status, source_ingestion_id, source_extraction_run_id, correlation_id, trace_id) "
-                "VALUES (:lot, :pid, :sid, :sci, :fao, :pm, :ub, :pkg, 'registered', :iid, :rid, :corr, :trace) RETURNING id"
+                "VALUES (:org, :store_id, :lot, :pid, :sid, :store, :sci, :fao, :pm, "
+                " :ub, :pkg, 'registered', :iid, :rid, :corr, :trace) RETURNING id"
             ),
             {
+                "org": tenant["organization_id"],
+                "store_id": tenant["store_id"],
                 "lot": c.lot_code,
                 "pid": product_id,
                 "sid": supplier_id,
+                "store": tenant["store_code"],
                 "sci": c.scientific_name,
                 "fao": c.fao_area,
                 "pm": c.production_method,
@@ -138,6 +266,14 @@ class RegistrationConsumer:
                 "trace": trace,
             },
         ).scalar_one()
+        self._write_projection(
+            conn,
+            batch_id=batch_id,
+            ingestion_id=ingestion_id,
+            organization_id=tenant["organization_id"],
+            store_id=tenant["store_id"],
+            store_code=tenant["store_code"],
+        )
         self._emit(
             conn,
             "batch.registered",
@@ -150,7 +286,15 @@ class RegistrationConsumer:
         )
 
     def _flag(
-        self, conn, ingestion_id, run_id, c: BatchCandidate, issues, corr, trace
+        self,
+        conn,
+        ingestion_id,
+        run_id,
+        tenant,
+        c: BatchCandidate,
+        issues,
+        corr,
+        trace,
     ) -> None:
         set_audit_context(
             conn,
@@ -162,12 +306,17 @@ class RegistrationConsumer:
         batch_id = conn.execute(
             text(
                 "INSERT INTO traceability.batch "
-                "(lot_code, species_scientific, fao_area_code, production_method, use_by, packaging_date, "
+                "(organization_id, store_id, lot_code, store_code, species_scientific, "
+                " fao_area_code, production_method, use_by, packaging_date, "
                 " status, source_ingestion_id, source_extraction_run_id, correlation_id, trace_id) "
-                "VALUES (:lot, :sci, :fao, :pm, :ub, :pkg, 'flagged', :iid, :rid, :corr, :trace) RETURNING id"
+                "VALUES (:org, :store_id, :lot, :store, :sci, :fao, :pm, :ub, :pkg, "
+                " 'flagged', :iid, :rid, :corr, :trace) RETURNING id"
             ),
             {
+                "org": tenant["organization_id"],
+                "store_id": tenant["store_id"],
                 "lot": c.lot_code,
+                "store": tenant["store_code"],
                 "sci": c.scientific_name,
                 "fao": c.fao_area,
                 "pm": c.production_method,
@@ -179,12 +328,79 @@ class RegistrationConsumer:
                 "trace": trace,
             },
         ).scalar_one()
+        self._write_projection(
+            conn,
+            batch_id=batch_id,
+            ingestion_id=ingestion_id,
+            organization_id=tenant["organization_id"],
+            store_id=tenant["store_id"],
+            store_code=tenant["store_code"],
+        )
         self._emit(
             conn,
             "batch.flagged",
             {"batch_id": str(batch_id), "issues": list(issues)},
             corr,
             trace,
+        )
+
+    @staticmethod
+    def _write_projection(
+        conn,
+        *,
+        batch_id,
+        ingestion_id,
+        organization_id,
+        store_id,
+        store_code,
+    ) -> None:
+        """Publish the latest immutable revision into the mutable read model.
+
+        If a mobile review raced ahead of this consumer, selecting the latest run
+        here guarantees that the first catalogue row already shows the human
+        revision rather than the stale machine extraction.
+        """
+        conn.execute(
+            text(
+                """
+                INSERT INTO traceability.arrival_projection (
+                    batch_id, organization_id, store_id, store_code, ingestion_id,
+                    extraction_run_id, fields, image_ref, image_checksum, recorded_at
+                )
+                SELECT
+                    :batch_id, :organization_id, :store_id, :store_code, i.id,
+                    latest.id,
+                    COALESCE((
+                        SELECT jsonb_object_agg(f.field_name, f.value)
+                        FROM ingestion.extracted_field AS f
+                        WHERE f.extraction_run_id = latest.id
+                    ), '{}'::jsonb),
+                    i.image_ref, i.checksum_sha256, i.server_received_at
+                FROM ingestion.ingestion AS i
+                JOIN LATERAL (
+                    SELECT r.id
+                    FROM ingestion.extraction_run AS r
+                    WHERE r.ingestion_id = i.id
+                    ORDER BY r.attempt_no DESC
+                    LIMIT 1
+                ) AS latest ON true
+                WHERE i.id = :ingestion_id
+                ON CONFLICT (batch_id) DO UPDATE
+                SET extraction_run_id = EXCLUDED.extraction_run_id,
+                    fields = EXCLUDED.fields,
+                    revision_no = traceability.arrival_projection.revision_no + 1,
+                    image_ref = EXCLUDED.image_ref,
+                    image_checksum = EXCLUDED.image_checksum,
+                    updated_at = clock_timestamp()
+                """
+            ),
+            {
+                "batch_id": batch_id,
+                "organization_id": organization_id,
+                "store_id": store_id,
+                "store_code": store_code,
+                "ingestion_id": ingestion_id,
+            },
         )
 
     def _emit(self, conn, event_type, payload, corr, trace) -> None:

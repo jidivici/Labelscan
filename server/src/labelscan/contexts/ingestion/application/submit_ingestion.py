@@ -39,6 +39,9 @@ class SubmitIngestionCommand:
     principal: str  # idempotency scope (e.g. device id); usually == actor_id
     barcode_raw: str | None = None
     client_captured_at: str | None = None
+    store_code: str | None = None
+    organization_id: str | None = None
+    store_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -69,7 +72,11 @@ class SubmitIngestion:
         checksum = hashlib.sha256(cmd.image_bytes).hexdigest()
 
         # (2) DURABLE raw store FIRST — bytes are safe before any DB row exists.
-        storage_ref = self._raw_store.put(cmd.image_bytes, checksum=checksum)
+        storage_ref = self._raw_store.put(
+            cmd.image_bytes,
+            checksum=checksum,
+            organization_id=cmd.organization_id,
+        )
 
         # (3) atomic, audited, idempotent DB write.
         result = self._repository.persist(
@@ -77,6 +84,9 @@ class SubmitIngestion:
             storage_ref=storage_ref,
             barcode_raw=cmd.barcode_raw,
             client_captured_at=cmd.client_captured_at,
+            store_code=cmd.store_code,
+            organization_id=cmd.organization_id,
+            store_id=cmd.store_id,
             principal=cmd.principal,
             route=_ROUTE,
             audit=AuditContext(

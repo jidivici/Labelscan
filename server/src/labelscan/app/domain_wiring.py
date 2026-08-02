@@ -1,7 +1,7 @@
 """Composition root for the traceability + HACCP consumers.
 
 Registers the event-driven chain onto the relay worker:
-    extraction.completed -> traceability (RegistrationConsumer)
+    extraction.completed / review.finalized -> traceability (RegistrationConsumer)
     batch.registered / batch.flagged -> haccp (AlertingConsumer)
 Each consumer imports only its own context; integration is via events.
 """
@@ -14,6 +14,9 @@ from labelscan.contexts.haccp.adapters.alerting_consumer import AlertingConsumer
 from labelscan.contexts.traceability.adapters.registration_consumer import (
     RegistrationConsumer,
 )
+from labelscan.contexts.traceability.adapters.review_projection_consumer import (
+    ReviewProjectionConsumer,
+)
 from labelscan.platform.db.engine import make_engine
 from labelscan.platform.outbox.worker import OutboxWorker
 
@@ -25,6 +28,18 @@ def register_domain_consumers(
 
     registration = RegistrationConsumer(engine=engine)
     worker.register(registration.event_type, registration.consumer_name, registration)
+    worker.register(
+        registration.review_event_type,
+        registration.consumer_name,
+        registration,
+    )
+
+    review_projection = ReviewProjectionConsumer()
+    worker.register(
+        review_projection.event_type,
+        review_projection.consumer_name,
+        review_projection,
+    )
 
     alerting = AlertingConsumer(engine=engine, today=today)
     for event_type in alerting.event_types:

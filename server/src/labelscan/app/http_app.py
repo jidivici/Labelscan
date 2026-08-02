@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 from fastapi import FastAPI
 
 from labelscan.app.ops_router import router as ops_router
@@ -11,17 +14,44 @@ from labelscan.contexts.haccp.adapters.http.lifecycle_router import (
 from labelscan.contexts.haccp.adapters.http.read_router import (
     router as alerts_read_router,
 )
+from labelscan.contexts.identity.adapters.http.admin_router import (
+    router as user_admin_router,
+)
 from labelscan.contexts.identity.adapters.http.router import router as auth_router
+from labelscan.contexts.identity.adapters.http.store_admin_router import (
+    router as store_admin_router,
+)
 from labelscan.contexts.ingestion.adapters.http.read_router import (
     router as ingestion_read_router,
 )
 from labelscan.contexts.ingestion.adapters.http.router import router as ingestion_router
+from labelscan.contexts.traceability.adapters.http.catalog_router import (
+    router as catalog_router,
+)
 from labelscan.contexts.traceability.adapters.http.read_router import (
     router as batches_read_router,
 )
 from labelscan.platform.http.errors import install_error_handlers
 from labelscan.platform.http.middleware import CorrelationMiddleware
+from labelscan.platform.http.spa_static import SpaStaticFiles
 from labelscan.platform.observability import configure_logging
+
+
+def _backoffice_static_dir() -> Path:
+    candidates: list[Path] = []
+    configured_dir = os.environ.get("LABELSCAN_STATIC_DIR")
+    if configured_dir:
+        candidates.append(Path(configured_dir).expanduser())
+    candidates.extend(
+        [
+            Path.cwd() / "static",
+            Path(__file__).resolve().parents[3] / "static",
+        ]
+    )
+    for candidate in candidates:
+        if candidate.is_dir():
+            return candidate
+    raise RuntimeError("LabelScan backoffice static directory was not found")
 
 
 def create_app() -> FastAPI:
@@ -30,14 +60,22 @@ def create_app() -> FastAPI:
     app.add_middleware(CorrelationMiddleware)
     install_error_handlers(app)
     app.include_router(auth_router)  # auth: POST /v1/auth/login (unauthenticated)
+    app.include_router(user_admin_router)  # admin: POST/GET/PATCH /v1/users
+    app.include_router(store_admin_router)  # admin: POST/GET/PATCH /v1/stores
     app.include_router(ingestion_router)  # write: POST /v1/ingestions
     app.include_router(
         ingestion_read_router
     )  # read: GET /v1/ingestions/{id}, /v1/extraction-runs/{id}
     app.include_router(batches_read_router)  # read: GET /v1/batches/{id}
+    app.include_router(catalog_router)  # store-scoped: GET /v1/arrivals
     app.include_router(alerts_read_router)  # read: GET /v1/alerts
     app.include_router(
         alerts_lifecycle_router
     )  # write: POST /v1/alerts/{id}/acknowledge|resolve
     app.include_router(ops_router)  # ops: GET /v1/health/live|ready, /v1/version
+    app.mount(
+        "/backoffice",
+        SpaStaticFiles(directory=_backoffice_static_dir(), html=True),
+        name="backoffice",
+    )
     return app
