@@ -17,9 +17,20 @@ from sqlalchemy.engine import Engine
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.read_models import AuditEntry, audit_entries
-from labelscan.platform.http.security import require_scope
+from labelscan.platform.http.security import Principal, require_scope
+from labelscan.platform.db.tenant_context import set_tenant_context
 
 router = APIRouter()
+
+
+def _organization_id(conn, principal: Principal) -> str:
+    if principal.organization_id:
+        return principal.organization_id
+    return str(
+        conn.execute(
+            text("SELECT id FROM identity.organization WHERE slug = 'labelscan'")
+        ).scalar_one()
+    )
 
 
 class BatchAlert(BaseModel):
@@ -57,10 +68,12 @@ class BatchView(BaseModel):
 def get_batch(
     batch_id: str,
     request: Request,
-    _principal=Depends(require_scope("traceability:read")),
+    principal: Principal = Depends(require_scope("traceability:read")),
     engine: Engine = Depends(get_engine),
 ) -> BatchView:
     with engine.connect() as c:
+        organization_id = _organization_id(c, principal)
+        set_tenant_context(c, organization_id)
         row = (
             c.execute(
                 text(
@@ -73,9 +86,15 @@ def get_batch(
                     "FROM traceability.batch b "
                     "LEFT JOIN traceability.supplier s ON s.id = b.supplier_id "
                     "LEFT JOIN traceability.product p ON p.id = b.product_id "
-                    "WHERE b.id = :id"
+                    "WHERE b.id = :id AND b.organization_id = :organization_id "
+                    "AND (:all_stores OR b.store_id::text = :store_id)"
                 ),
-                {"id": batch_id},
+                {
+                    "id": batch_id,
+                    "organization_id": organization_id,
+                    "all_stores": principal.role == "admin",
+                    "store_id": principal.store_id or "",
+                },
             )
             .mappings()
             .first()

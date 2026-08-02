@@ -1,0 +1,1 @@
+"""Shared durable storage adapters."""

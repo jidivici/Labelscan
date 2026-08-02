@@ -31,6 +31,11 @@ class Principal:
     actor_id: str  # uuid of the authenticated actor (recorded in the audit context)
     principal: str  # logical principal (e.g. device id) — the idempotency scope
     scopes: frozenset[str]
+    role: str = "operator"
+    store_code: str | None = None
+    organization_id: str | None = None
+    organization_slug: str = "labelscan"
+    store_id: str | None = None
 
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -56,7 +61,21 @@ def _principal_from_bearer(token: str) -> Principal:
         scopes = frozenset(raw_scopes.split())
     else:
         scopes = frozenset(str(s) for s in raw_scopes)
-    return Principal(actor_id=str(actor_id), principal=str(principal), scopes=scopes)
+    raw_store_code = claims.get("store_code")
+    raw_organization_id = claims.get("organization_id")
+    raw_store_id = claims.get("store_id")
+    return Principal(
+        actor_id=str(actor_id),
+        principal=str(principal),
+        scopes=scopes,
+        role=str(claims.get("role") or "operator"),
+        store_code=str(raw_store_code) if raw_store_code else None,
+        organization_id=(
+            str(raw_organization_id) if raw_organization_id else None
+        ),
+        organization_slug=str(claims.get("organization_slug") or "labelscan"),
+        store_id=str(raw_store_id) if raw_store_id else None,
+    )
 
 
 def _principal_from_headers(request: Request) -> Principal:
@@ -65,7 +84,16 @@ def _principal_from_headers(request: Request) -> Principal:
         raise ApiError("UNAUTHENTICATED", "No authenticated principal")
     principal = request.headers.get("X-Principal") or actor_id
     scopes = frozenset((request.headers.get("X-Scopes") or "").split())
-    return Principal(actor_id=actor_id, principal=principal, scopes=scopes)
+    return Principal(
+        actor_id=actor_id,
+        principal=principal,
+        scopes=scopes,
+        role=request.headers.get("X-Role") or "operator",
+        store_code=request.headers.get("X-Store-Code"),
+        organization_id=request.headers.get("X-Organization-Id"),
+        organization_slug=request.headers.get("X-Organization-Slug") or "labelscan",
+        store_id=request.headers.get("X-Store-Id"),
+    )
 
 
 def resolve_principal(request: Request) -> Principal:
@@ -73,10 +101,14 @@ def resolve_principal(request: Request) -> Principal:
     if authorization:
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() == "bearer" and token.strip():
-            return _principal_from_bearer(token.strip())
+            principal = _principal_from_bearer(token.strip())
+            request.state.organization_id = principal.organization_id
+            return principal
         raise ApiError("UNAUTHENTICATED", "unsupported Authorization scheme")
     if _header_auth_enabled():
-        return _principal_from_headers(request)
+        principal = _principal_from_headers(request)
+        request.state.organization_id = principal.organization_id
+        return principal
     raise ApiError("UNAUTHENTICATED", "No authenticated principal")
 
 

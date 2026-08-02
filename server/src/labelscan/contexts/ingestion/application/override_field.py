@@ -95,6 +95,7 @@ class OverrideFieldCommand:
     actor_id: str  # authenticated reviewer (recorded as the human provenance + audit actor)
     correlation_id: str
     trace_id: str
+    organization_id: str | None = None
     # Optional client retry key (stable per outbox operation): a repeat replays the
     # run the original request produced — never a second append (migration 0013).
     idempotency_key: str | None = None
@@ -127,6 +128,7 @@ class OverrideField:
                 actor_id=cmd.actor_id,
                 correlation_id=cmd.correlation_id,
                 trace_id=cmd.trace_id,
+                organization_id=cmd.organization_id,
             ),
             action=_ACTION_GS1 if gs1_owned else _ACTION,
             idempotency_key=cmd.idempotency_key,

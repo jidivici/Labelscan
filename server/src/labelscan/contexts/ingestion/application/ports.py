@@ -13,13 +13,25 @@ from typing import Protocol
 class RawStore(Protocol):
     """Durable object store for raw payload bytes (content-addressed)."""
 
-    def put(self, content: bytes, *, checksum: str) -> str:
+    def put(
+        self,
+        content: bytes,
+        *,
+        checksum: str,
+        organization_id: str | None = None,
+    ) -> str:
         """Persist bytes durably (fsync) under a content-addressed key and return
         the storage ref. MUST be durable before it returns, and idempotent:
         putting identical content twice is a no-op that returns the same ref."""
         ...
 
-    def exists(self, *, checksum: str) -> bool: ...
+    def exists(
+        self, *, checksum: str, organization_id: str | None = None
+    ) -> bool: ...
+
+    def read(
+        self, *, checksum: str, organization_id: str | None = None
+    ) -> bytes: ...
 
 
 @dataclass(frozen=True)
@@ -33,6 +45,7 @@ class AuditContext:
     actor_id: str
     correlation_id: str
     trace_id: str
+    organization_id: str | None = None
 
 
 class IngestionWriteRepository(Protocol):
@@ -47,6 +60,9 @@ class IngestionWriteRepository(Protocol):
         storage_ref: str,
         barcode_raw: str | None,
         client_captured_at: str | None,
+        store_code: str | None = None,
+        organization_id: str | None = None,
+        store_id: str | None = None,
         principal: str,
         route: str,
         audit: AuditContext,
@@ -65,7 +81,9 @@ class OverriddenField:
     source: str  # always 'human' here
     combined_confidence: float
     confidence_band: str
-    replayed: bool  # True => the latest run already carried this human value (no new run)
+    replayed: (
+        bool  # True => the latest run already carried this human value (no new run)
+    )
 
 
 class FieldOverrideRepository(Protocol):
@@ -121,3 +139,29 @@ class ConfirmIngestionRepository(Protocol):
     def confirm(
         self, *, ingestion_id: str, audit: AuditContext, action: str
     ) -> ConfirmedIngestion | None: ...
+
+
+@dataclass(frozen=True)
+class FinalizedReview:
+    """Result of the atomic, complete human review write."""
+
+    ingestion_id: str
+    run_id: str
+    status: str
+    replayed: bool
+
+
+class ReviewRepository(Protocol):
+    """Persists all final fields and confirms the ingestion in one transaction."""
+
+    def finalize(
+        self,
+        *,
+        ingestion_id: str,
+        organization_id: str,
+        fields: dict[str, str | None],
+        note: str | None,
+        idempotency_key: str,
+        audit: AuditContext,
+        action: str,
+    ) -> FinalizedReview | None: ...

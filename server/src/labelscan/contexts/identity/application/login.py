@@ -26,8 +26,14 @@ class Login:
     def __init__(self, users: UserRepository) -> None:
         self._users = users
 
-    def __call__(self, username: str, password: str) -> AuthenticatedUser:
-        user = self._users.find_active_by_username(username)
+    def __call__(
+        self, username: str, password: str, organization_slug: str = "labelscan"
+    ) -> AuthenticatedUser:
+        try:
+            user = self._users.find_active_by_username(username, organization_slug)
+        except TypeError:
+            # Additive rollout compatibility for an in-process legacy adapter.
+            user = self._users.find_active_by_username(username)  # type: ignore[call-arg]
         stored_hash = user.password_hash if user else _DUMMY_HASH
         password_ok = verify_password(password, stored_hash)
         if not user or not password_ok:
@@ -35,6 +41,11 @@ class Login:
         return AuthenticatedUser(
             actor_id=user.id,
             username=user.username,
+            display_name=user.display_name,
             role=user.role,
             scopes=scopes_for_role(user.role),
+            store_code=user.store_code,
+            organization_id=user.organization_id,
+            organization_slug=user.organization_slug,
+            store_id=user.store_id,
         )

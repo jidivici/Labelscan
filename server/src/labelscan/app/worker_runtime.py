@@ -18,24 +18,17 @@ import time
 from labelscan.app.domain_wiring import register_domain_consumers
 from labelscan.app.extraction_wiring import register_extraction_consumer
 from labelscan.app.ocr_wiring import build_ocr_provider
-from labelscan.contexts.ingestion.adapters.filesystem_raw_store import (
-    FilesystemRawStore,
-)
 from labelscan.platform.db.engine import make_engine
 from labelscan.platform.observability import configure_logging
 from labelscan.platform.outbox.worker import OutboxWorker
+from labelscan.platform.storage_factory import build_raw_store
 
 
 def build_outbox_worker() -> OutboxWorker:
     configure_logging()
     worker = OutboxWorker(make_engine())
 
-    raw_dir = os.environ.get("LABELSCAN_RAW_STORE_DIR")
-    if not raw_dir:
-        raise RuntimeError(
-            "LABELSCAN_RAW_STORE_DIR is not set (object-store base dir)."
-        )
-    raw_store = FilesystemRawStore(raw_dir)
+    raw_store = build_raw_store()
 
     register_extraction_consumer(
         worker, ocr_provider=build_ocr_provider(), raw_store=raw_store

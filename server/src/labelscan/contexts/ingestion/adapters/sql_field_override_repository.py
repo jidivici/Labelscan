@@ -36,10 +36,16 @@ from labelscan.contexts.ingestion.application.ports import (
     OverriddenField,
 )
 from labelscan.platform.db.audit_context import set_audit_context
+from labelscan.platform.db.tenant_context import set_tenant_context
 
 _LATEST_RUN = text(
-    "SELECT id::text AS id, attempt_no FROM ingestion.extraction_run "
-    "WHERE ingestion_id = :iid ORDER BY attempt_no DESC LIMIT 1"
+    "SELECT run.id::text AS id, run.attempt_no "
+    "FROM ingestion.extraction_run AS run "
+    "JOIN ingestion.ingestion AS ingestion ON ingestion.id = run.ingestion_id "
+    "WHERE run.ingestion_id = :iid "
+    "AND (CAST(:organization_id AS text) IS NULL "
+    "OR ingestion.organization_id::text = :organization_id) "
+    "ORDER BY run.attempt_no DESC LIMIT 1"
 )
 _CURRENT_FIELD = text(
     "SELECT value, source, validation_status, combined_confidence, confidence_band "
@@ -47,7 +53,10 @@ _CURRENT_FIELD = text(
 )
 _IMAGE_ARTIFACT = text(
     "SELECT id::text FROM ingestion.raw_artifact "
-    "WHERE ingestion_id = :iid AND artifact_kind = 'image' ORDER BY occurred_at LIMIT 1"
+    "WHERE ingestion_id = :iid AND artifact_kind = 'image' "
+    "AND (CAST(:organization_id AS text) IS NULL "
+    "OR organization_id::text = :organization_id) "
+    "ORDER BY occurred_at LIMIT 1"
 )
 # New run = a COPY of the parent row (outcome/versions/providers/escalation/ocr_ref
 # preserved — the override records a value, not a new machine verdict), with a fresh
@@ -117,6 +126,8 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
         idempotency_key: str | None = None,
     ) -> OverriddenField | None:
         with self._engine.begin() as conn:
+            if audit.organization_id:
+                set_tenant_context(conn, audit.organization_id)
             # REQUIRED — the extraction_run AFTER INSERT audit trigger aborts otherwise.
             set_audit_context(
                 conn,
@@ -158,7 +169,13 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                         replayed=True,
                     )
 
-            latest = conn.execute(_LATEST_RUN, {"iid": ingestion_id}).mappings().first()
+            latest = conn.execute(
+                _LATEST_RUN,
+                {
+                    "iid": ingestion_id,
+                    "organization_id": audit.organization_id,
+                },
+            ).mappings().first()
             if latest is None:
                 return None  # no run for this ingestion -> 404
             parent_run_id = latest["id"]
@@ -206,7 +223,11 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
 
             if value is not None:
                 image_id = conn.execute(
-                    _IMAGE_ARTIFACT, {"iid": ingestion_id}
+                    _IMAGE_ARTIFACT,
+                    {
+                        "iid": ingestion_id,
+                        "organization_id": audit.organization_id,
+                    },
                 ).scalar_one_or_none()
                 conn.execute(
                     _INSERT_HUMAN_VALUE,
@@ -224,6 +245,9 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 self._record_key(
                     conn, idempotency_key, audit, ingestion_id, new_run_id, field_name
                 )
+                self._emit_projection_update(
+                    conn, ingestion_id, new_run_id, audit
+                )
                 return OverriddenField(
                     run_id=str(new_run_id),
                     field_name=field_name,
@@ -239,6 +263,7 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
             self._record_key(
                 conn, idempotency_key, audit, ingestion_id, new_run_id, field_name
             )
+            self._emit_projection_update(conn, ingestion_id, new_run_id, audit)
             return OverriddenField(
                 run_id=str(new_run_id),
                 field_name=field_name,
@@ -266,5 +291,31 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 "iid": ingestion_id,
                 "rid": run_id,
                 "fn": field_name,
+            },
+        )
+
+    @staticmethod
+    def _emit_projection_update(conn, ingestion_id, run_id, audit: AuditContext) -> None:
+        organization_id = audit.organization_id or conn.execute(
+            text(
+                "SELECT organization_id::text FROM ingestion.ingestion WHERE id = :id"
+            ),
+            {"id": ingestion_id},
+        ).scalar_one()
+        conn.execute(
+            text(
+                "INSERT INTO platform.outbox "
+                "(event_type, payload, correlation_id, trace_id) "
+                "VALUES ('review.finalized', "
+                "jsonb_build_object('organization_id', CAST(:organization_id AS text), "
+                "'ingestion_id', CAST(:ingestion_id AS text), "
+                "'run_id', CAST(:run_id AS text)), :correlation_id, :trace_id)"
+            ),
+            {
+                "organization_id": organization_id,
+                "ingestion_id": ingestion_id,
+                "run_id": run_id,
+                "correlation_id": audit.correlation_id,
+                "trace_id": audit.trace_id,
             },
         )

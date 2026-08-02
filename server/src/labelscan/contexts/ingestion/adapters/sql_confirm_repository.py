@@ -25,6 +25,7 @@ from labelscan.contexts.ingestion.application.ports import (
     ConfirmNotAllowed,
 )
 from labelscan.platform.db.audit_context import set_audit_context
+from labelscan.platform.db.tenant_context import set_tenant_context
 
 _CONFIRMABLE = ("extracted", "needs_review", "ocr_skipped_garbage")
 
@@ -37,11 +38,16 @@ class SqlConfirmRepository(ConfirmIngestionRepository):
         self, *, ingestion_id: str, audit: AuditContext, action: str
     ) -> ConfirmedIngestion | None:
         with self._engine.begin() as conn:
+            if audit.organization_id:
+                set_tenant_context(conn, audit.organization_id)
             status = conn.execute(
                 text(
-                    "SELECT status FROM ingestion.ingestion WHERE id = :id FOR UPDATE"
+                    "SELECT status FROM ingestion.ingestion WHERE id = :id "
+                    "AND (CAST(:organization_id AS text) IS NULL "
+                    "OR organization_id::text = :organization_id) "
+                    "FOR UPDATE"
                 ),
-                {"id": ingestion_id},
+                {"id": ingestion_id, "organization_id": audit.organization_id},
             ).scalar_one_or_none()
             if status is None:
                 return None
@@ -62,9 +68,11 @@ class SqlConfirmRepository(ConfirmIngestionRepository):
             )
             conn.execute(
                 text(
-                    "UPDATE ingestion.ingestion SET status = 'confirmed' WHERE id = :id"
+                    "UPDATE ingestion.ingestion SET status = 'confirmed' WHERE id = :id "
+                    "AND (CAST(:organization_id AS text) IS NULL "
+                    "OR organization_id::text = :organization_id)"
                 ),
-                {"id": ingestion_id},
+                {"id": ingestion_id, "organization_id": audit.organization_id},
             )
             return ConfirmedIngestion(
                 ingestion_id=ingestion_id, status="confirmed", replayed=False

@@ -27,7 +27,8 @@ from sqlalchemy.engine import Engine
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.read_models import AuditEntry, audit_entries
-from labelscan.platform.http.security import require_scope
+from labelscan.platform.http.security import Principal, require_scope
+from labelscan.platform.db.tenant_context import set_tenant_context
 
 router = APIRouter()
 
@@ -38,6 +39,16 @@ _MAX_WAIT_S = 25.0
 _PROBE_INTERVAL_S = 0.3
 
 
+def _organization_id(conn, principal: Principal) -> str:
+    if principal.organization_id:
+        return principal.organization_id
+    return str(
+        conn.execute(
+            text("SELECT id FROM identity.organization WHERE slug = 'labelscan'")
+        ).scalar_one()
+    )
+
+
 def clamp_wait(wait: float) -> float:
     """Bound the requested long-poll hold to [0, _MAX_WAIT_S] (never negative,
     never unbounded — an absurd `wait` degrades to the cap, not an error)."""
@@ -46,13 +57,26 @@ def clamp_wait(wait: float) -> float:
     return min(wait, _MAX_WAIT_S)
 
 
-def _probe_status(engine: Engine, ingestion_id: str) -> str | None:
+def _probe_status(
+    engine: Engine, ingestion_id: str, principal: Principal
+) -> str | None:
     """Cheap status read on a short-lived connection (indexed PK lookup).
     None = ingestion not found (the full view load raises the 404)."""
     with engine.connect() as c:
+        organization_id = _organization_id(c, principal)
+        set_tenant_context(c, organization_id)
         return c.execute(
-            text("SELECT status FROM ingestion.ingestion WHERE id = :id"),
-            {"id": ingestion_id},
+            text(
+                "SELECT status FROM ingestion.ingestion "
+                "WHERE id = :id AND organization_id = :organization_id "
+                "AND (:all_stores OR store_id::text = :store_id)"
+            ),
+            {
+                "id": ingestion_id,
+                "organization_id": organization_id,
+                "all_stores": principal.role == "admin",
+                "store_id": principal.store_id or "",
+            },
         ).scalar_one_or_none()
 
 
@@ -156,7 +180,7 @@ def get_ingestion(
         default=None,
         description="The status the client last observed (long-poll baseline).",
     ),
-    _principal=Depends(require_scope("ingestion:read")),
+    principal: Principal = Depends(require_scope("ingestion:read")),
     engine: Engine = Depends(get_engine),
 ) -> IngestionView:
     # ── Tier 4 long-poll: bounded server-side wait for a status CHANGE ─────────
@@ -167,7 +191,7 @@ def get_ingestion(
     if wait_s > 0 and last_status:
         deadline = time.monotonic() + wait_s
         while True:
-            current = _probe_status(engine, ingestion_id)
+            current = _probe_status(engine, ingestion_id, principal)
             if current is None or current != last_status:
                 break
             remaining = deadline - time.monotonic()
@@ -176,14 +200,23 @@ def get_ingestion(
             time.sleep(min(_PROBE_INTERVAL_S, remaining))
 
     with engine.connect() as c:
+        organization_id = _organization_id(c, principal)
+        set_tenant_context(c, organization_id)
         row = (
             c.execute(
                 text(
                     "SELECT id::text AS id, status, image_ref, checksum_sha256, barcode_raw, "
                     "client_captured_at::text AS cca, server_received_at::text AS sra, "
-                    "correlation_id, trace_id FROM ingestion.ingestion WHERE id = :id"
+                    "correlation_id, trace_id FROM ingestion.ingestion "
+                    "WHERE id = :id AND organization_id = :organization_id "
+                    "AND (:all_stores OR store_id::text = :store_id)"
                 ),
-                {"id": ingestion_id},
+                {
+                    "id": ingestion_id,
+                    "organization_id": organization_id,
+                    "all_stores": principal.role == "admin",
+                    "store_id": principal.store_id or "",
+                },
             )
             .mappings()
             .first()
@@ -285,19 +318,34 @@ def get_ingestion(
 def get_extraction_run(
     run_id: str,
     request: Request,
-    _principal=Depends(require_scope("ingestion:read")),
+    principal: Principal = Depends(require_scope("ingestion:read")),
     engine: Engine = Depends(get_engine),
 ) -> ExtractionRunView:
     with engine.connect() as c:
+        organization_id = _organization_id(c, principal)
+        set_tenant_context(c, organization_id)
         run = (
             c.execute(
                 text(
-                    "SELECT id::text AS run_id, ingestion_id::text AS ingestion_id, attempt_no, outcome, "
-                    "extractor_version, prompt_version, ocr_provider, llm_model, ocr_raw_ref::text AS ocr_raw_ref, "
-                    "rule_set_version, created_at::text AS created_at "
-                    "FROM ingestion.extraction_run WHERE id = :id"
+                    "SELECT run.id::text AS run_id, "
+                    "run.ingestion_id::text AS ingestion_id, run.attempt_no, "
+                    "run.outcome, run.extractor_version, run.prompt_version, "
+                    "run.ocr_provider, run.llm_model, "
+                    "run.ocr_raw_ref::text AS ocr_raw_ref, "
+                    "run.rule_set_version, run.created_at::text AS created_at "
+                    "FROM ingestion.extraction_run AS run "
+                    "JOIN ingestion.ingestion AS ingestion "
+                    "ON ingestion.id = run.ingestion_id "
+                    "WHERE run.id = :id "
+                    "AND ingestion.organization_id = :organization_id "
+                    "AND (:all_stores OR ingestion.store_id::text = :store_id)"
                 ),
-                {"id": run_id},
+                {
+                    "id": run_id,
+                    "organization_id": organization_id,
+                    "all_stores": principal.role == "admin",
+                    "store_id": principal.store_id or "",
+                },
             )
             .mappings()
             .first()

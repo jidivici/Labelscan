@@ -34,6 +34,7 @@ class ConfirmIngestionCommand:
     actor_id: str  # authenticated reviewer
     correlation_id: str
     trace_id: str
+    organization_id: str | None = None
 
 
 class ConfirmIngestion:
@@ -47,6 +48,7 @@ class ConfirmIngestion:
                 actor_id=cmd.actor_id,
                 correlation_id=cmd.correlation_id,
                 trace_id=cmd.trace_id,
+                organization_id=cmd.organization_id,
             ),
             action=_ACTION,
         )

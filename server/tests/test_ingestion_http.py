@@ -19,7 +19,7 @@ from labelscan.contexts.ingestion.adapters.sql_ingestion_repository import (
 from labelscan.contexts.ingestion.application.submit_ingestion import SubmitIngestion
 from tests.conftest import bearer
 
-AUTH = bearer("ingestion:write")
+AUTH = bearer("ingestion:write", store_code="TEST-MAG-01")
 
 
 @pytest.fixture
@@ -51,10 +51,13 @@ def test_submit_returns_202_after_durable_write(client, engine):
         # raw-before-ack: the row is committed by the time 202 is returned
         assert (
             c.execute(
-                text("SELECT status FROM ingestion.ingestion WHERE id = :i"),
+                text(
+                    "SELECT status, store_code "
+                    "FROM ingestion.ingestion WHERE id = :i"
+                ),
                 {"i": body["ingestion_id"]},
-            ).scalar_one()
-            == "raw_stored"
+            ).one()
+            == ("raw_stored", "TEST-MAG-01")
         )
         # outbox NOT bypassed: the event was enqueued in the same transaction
         assert (

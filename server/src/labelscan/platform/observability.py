@@ -37,15 +37,17 @@ _EXTRA_FIELDS = (
     "status",
     "path",
     "error",
+    "organization_id",
+    "latency_ms",
+    "total",
     # extraction model + prompt-cache + escalation metrics: token counts and a model
     # id / reason enum only — NEVER prompt contents, OCR text, or secrets.
     "model",
     "reason",
     "cache_creation_input_tokens",
     "cache_read_input_tokens",
-    # latency instrumentation (docs/LATENCY-REVIEW.md §6): per-ingestion OCR/LLM durations
-    # and the provider retry count — scalars only, never payloads. Without these allow-listed
-    # the `extraction_timing` event logs but DROPS its numbers (the split stays invisible).
+    # Latency instrumentation (docs/LATENCY-REVIEW.md §6): per-ingestion
+    # OCR/LLM durations and provider retries. Scalars only, never payloads.
     "ocr_ms",
     "llm_ms",
     "attempts",
@@ -53,6 +55,7 @@ _EXTRA_FIELDS = (
     # Tier 3 wave 2: how many deterministic preview fields the interim commit wrote
     # (a count only — never the values).
     "interim_field_count",
+    "next_retry_at",
 )
 
 
@@ -93,5 +96,5 @@ def configure_logging() -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
-    """A namespaced `labelscan.<name>` logger. Use `extra={...}` for structured fields."""
+    """Return a namespaced logger supporting structured ``extra`` fields."""
     return logging.getLogger(f"{_ROOT}.{name}")

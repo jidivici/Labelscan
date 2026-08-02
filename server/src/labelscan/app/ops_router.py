@@ -67,10 +67,13 @@ class ReadinessProbe:
             return "unavailable"
 
     def _object_store(self) -> str:
-        base = os.environ.get("LABELSCAN_RAW_STORE_DIR")
-        if base and os.path.isdir(base) and os.access(base, os.W_OK):
-            return "ok"
-        return "unavailable"
+        try:
+            from labelscan.platform.storage_factory import build_raw_store
+
+            store = build_raw_store()
+            return "ok" if store.healthcheck() else "unavailable"
+        except Exception:
+            return "unavailable"
 
 
 def get_readiness_probe() -> ReadinessProbe:

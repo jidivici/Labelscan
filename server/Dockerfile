@@ -1,9 +1,18 @@
+FROM node:22-alpine AS web-builder
+
+WORKDIR /web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+
 FROM python:3.13-slim AS builder
 
 WORKDIR /build
 
-COPY pyproject.toml ./
-COPY src/ src/
+COPY server/pyproject.toml ./
+COPY server/src/ src/
 
 RUN pip install --no-cache-dir --prefix=/install .
 
@@ -15,9 +24,12 @@ WORKDIR /app
 RUN addgroup --system app && adduser --system --ingroup app app
 
 COPY --from=builder /install /usr/local
-COPY alembic.ini ./
-COPY migrations/ migrations/
-COPY entrypoint.sh ./
+COPY server/alembic.ini ./
+COPY server/migrations/ migrations/
+COPY server/scripts/ scripts/
+COPY --from=web-builder /web/dist/ static/
+COPY server/static/assets/labelscan-logo.png static/assets/labelscan-logo.png
+COPY server/entrypoint.sh ./
 
 RUN mkdir -p /app/data/raw && chown app:app /app/data/raw
 

@@ -47,6 +47,7 @@ def _cmd(content: bytes) -> SubmitIngestionCommand:
         correlation_id="corr-tr",
         trace_id="trace-tr",
         principal="device-01",
+        store_code="TEST-MAG-01",
     )
 
 
@@ -124,7 +125,8 @@ def test_full_chain_registered_and_queryable(submit, engine, raw_store):
         chain = (
             c.execute(
                 text(
-                    "SELECT b.id AS batch_id, b.status, b.lot_code, s.name AS supplier, p.scientific_name AS sci, "
+                    "SELECT b.id AS batch_id, b.status, b.store_code, b.lot_code, "
+                    "s.name AS supplier, p.scientific_name AS sci, "
                     "       r.outcome, i.status AS ing_status, ra.id AS image_id "
                     "FROM traceability.batch b "
                     "JOIN traceability.supplier s ON s.id = b.supplier_id "
@@ -143,6 +145,7 @@ def test_full_chain_registered_and_queryable(submit, engine, raw_store):
     assert len(chain) == 1
     row = chain[0]
     assert row["status"] == "registered"
+    assert row["store_code"] == "TEST-MAG-01"
     assert row["supplier"] == "Nordic Seafood AS"
     assert row["sci"] == "Gadus morhua"
     assert row["outcome"] == "extracted"

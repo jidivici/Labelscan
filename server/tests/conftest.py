@@ -43,9 +43,17 @@ os.environ.setdefault(
 
 
 def bearer(
-    scopes: str | list[str], *, actor_id: str = ACTOR_ID, principal: str = "device-01"
+    scopes: str | list[str],
+    *,
+    actor_id: str = ACTOR_ID,
+    principal: str = "device-01",
+    role: str = "admin",
+    store_code: str | None = None,
+    organization_id: str | None = None,
+    organization_slug: str = "labelscan",
+    store_id: str | None = None,
 ) -> dict[str, str]:
-    """Mint a valid admin JWT carrying the given scopes and return an Authorization header.
+    """Mint a valid JWT carrying the scopes and return an auth header.
 
     Mirrors what POST /v1/auth/login issues, so endpoints are exercised through the
     real JWT gate instead of the (now default-off) identity-header seam.
@@ -59,7 +67,11 @@ def bearer(
             "actor_id": actor_id,
             "principal": principal,
             "scopes": scope_list,
-            "role": "admin",
+            "role": role,
+            "store_code": store_code,
+            "organization_id": organization_id,
+            "organization_slug": organization_slug,
+            "store_id": store_id,
         }
     )
     return {"Authorization": f"Bearer {token}"}
@@ -131,7 +143,8 @@ def insert_raw_artifact(
     }
     sql = text(
         "INSERT INTO ingestion.raw_artifact "
-        "(ingestion_id, artifact_kind, storage_ref, checksum_sha256, correlation_id, trace_id) "
+        "(ingestion_id, artifact_kind, storage_ref, checksum_sha256, "
+        "correlation_id, trace_id) "
         "VALUES (COALESCE(:ing, gen_random_uuid()), 'image', :ref, :ck, :corr, :trace) "
         "RETURNING id"
     )

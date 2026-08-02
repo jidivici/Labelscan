@@ -22,6 +22,22 @@ ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
     "UNAUTHENTICATED": (401, "Missing or invalid credentials", False),
     "FORBIDDEN": (403, "Insufficient scope for this operation", False),
     "NOT_FOUND": (404, "Resource not found", False),
+    "USER_ALREADY_EXISTS": (409, "Username is already in use", False),
+    "STORE_ALREADY_EXISTS": (409, "Store code is already in use", False),
+    "STORE_IN_USE": (409, "Store still has active users", False),
+    "STORE_NOT_FOUND": (400, "Store code does not exist", False),
+    "STORE_INACTIVE": (409, "Store is disabled", False),
+    "STORE_REQUIRED": (400, "Operator store assignment is required", False),
+    "LAST_ACTIVE_ADMIN": (
+        409,
+        "At least one active administrator must remain",
+        False,
+    ),
+    "SELF_ACCESS_CHANGE_NOT_ALLOWED": (
+        409,
+        "Administrators cannot revoke their own access",
+        False,
+    ),
     "IDEMPOTENCY_KEY_CONFLICT": (
         409,
         "Idempotency-Key reused with a different payload",
@@ -102,6 +118,7 @@ def _log_ctx(request: Request) -> dict:
         "path": request.url.path,
         "correlation_id": getattr(request.state, "correlation_id", None),
         "trace_id": getattr(request.state, "trace_id", None),
+        "organization_id": getattr(request.state, "organization_id", None),
     }
 
 

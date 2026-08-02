@@ -38,6 +38,14 @@ from labelscan.contexts.ingestion.application.confirm_ingestion import (
 from labelscan.contexts.ingestion.application.confirm_ingestion import (
     IngestionNotFound as ConfirmIngestionNotFound,
 )
+from labelscan.contexts.ingestion.application.finalize_review import (
+    FinalizeReview,
+    FinalizeReviewCommand,
+    InvalidReviewFields,
+    ReviewIdempotencyConflict,
+    ReviewNotAllowed,
+    ReviewNotFound,
+)
 from labelscan.contexts.ingestion.application.override_field import (
     FieldNotEditable,
     IngestionNotFound,
@@ -74,21 +82,14 @@ def get_submit_ingestion() -> SubmitIngestion:
     if _DEFAULT_USE_CASE is None:
         with _USE_CASE_LOCK:
             if _DEFAULT_USE_CASE is None:
-                import os
-
-                from labelscan.contexts.ingestion.adapters.filesystem_raw_store import (
-                    FilesystemRawStore,
-                )
                 from labelscan.contexts.ingestion.adapters.sql_ingestion_repository import (
                     SqlIngestionRepository,
                 )
                 from labelscan.platform.db.engine import make_engine
+                from labelscan.platform.storage_factory import build_raw_store
 
-                raw_dir = os.environ.get("LABELSCAN_RAW_STORE_DIR")
-                if not raw_dir:
-                    raise RuntimeError("LABELSCAN_RAW_STORE_DIR is not set")
                 _DEFAULT_USE_CASE = SubmitIngestion(
-                    FilesystemRawStore(raw_dir), SqlIngestionRepository(make_engine())
+                    build_raw_store(), SqlIngestionRepository(make_engine())
                 )
     return _DEFAULT_USE_CASE
 
@@ -132,6 +133,9 @@ def submit_ingestion(
         principal=principal.principal,  # idempotency scope
         barcode_raw=barcode_raw,
         client_captured_at=client_captured_at,
+        store_code=principal.store_code,
+        organization_id=principal.organization_id,
+        store_id=principal.store_id,
     )
 
     try:
@@ -221,6 +225,7 @@ def override_field(
         actor_id=principal.actor_id,  # audit context + human provenance: who validated
         correlation_id=request.state.correlation_id,
         trace_id=request.state.trace_id,
+        organization_id=principal.organization_id,
         # Server-side retry dedup (P3): a repeat of this key (per actor) replays the
         # original outcome instead of appending another run.
         idempotency_key=idempotency_key,
@@ -300,6 +305,7 @@ def confirm_ingestion(
         actor_id=principal.actor_id,  # audit: who reviewed
         correlation_id=request.state.correlation_id,
         trace_id=request.state.trace_id,
+        organization_id=principal.organization_id,
     )
     try:
         result = use_case(command)
@@ -317,6 +323,99 @@ def confirm_ingestion(
 
     return ConfirmIngestionResponse(
         ingestion_id=result.ingestion_id,
+        status=result.status,
+        replayed=result.replayed,
+    )
+
+
+# ── Enterprise sync: all 17 final fields + confirmation in one commit ────────────
+
+_DEFAULT_FINALIZE_REVIEW: FinalizeReview | None = None
+_FINALIZE_REVIEW_LOCK = threading.Lock()
+
+
+def get_finalize_review() -> FinalizeReview:
+    global _DEFAULT_FINALIZE_REVIEW
+    if _DEFAULT_FINALIZE_REVIEW is None:
+        with _FINALIZE_REVIEW_LOCK:
+            if _DEFAULT_FINALIZE_REVIEW is None:
+                from labelscan.contexts.ingestion.adapters.sql_review_repository import (
+                    SqlReviewRepository,
+                )
+                from labelscan.platform.db.engine import make_engine
+
+                _DEFAULT_FINALIZE_REVIEW = FinalizeReview(
+                    SqlReviewRepository(make_engine())
+                )
+    return _DEFAULT_FINALIZE_REVIEW
+
+
+class FinalizeReviewRequest(BaseModel):
+    fields: dict[str, str | None]
+    note: str | None = None
+
+
+class FinalizeReviewResponse(BaseModel):
+    ingestion_id: str
+    run_id: str
+    status: str
+    replayed: bool
+
+
+@router.post(
+    "/v1/ingestions/{ingestion_id}/reviews",
+    response_model=FinalizeReviewResponse,
+)
+def finalize_review(
+    ingestion_id: str,
+    request: Request,
+    body: FinalizeReviewRequest,
+    idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
+    principal: Principal = Depends(require_scope("extraction:review")),
+    use_case: FinalizeReview = Depends(get_finalize_review),
+) -> FinalizeReviewResponse:
+    if not idempotency_key:
+        raise ApiError("VALIDATION_ERROR", "Idempotency-Key header is required")
+    if not principal.organization_id:
+        raise ApiError("UNAUTHENTICATED", "organization context is missing")
+    try:
+        result = use_case(
+            FinalizeReviewCommand(
+                ingestion_id=ingestion_id,
+                organization_id=principal.organization_id,
+                fields=body.fields,
+                note=body.note,
+                idempotency_key=idempotency_key,
+                actor_id=principal.actor_id,
+                correlation_id=request.state.correlation_id,
+                trace_id=request.state.trace_id,
+            )
+        )
+    except InvalidReviewFields as exc:
+        detail_parts = []
+        if exc.missing:
+            detail_parts.append(f"missing: {', '.join(sorted(exc.missing))}")
+        if exc.extra:
+            detail_parts.append(f"unknown: {', '.join(sorted(exc.extra))}")
+        raise ApiError("VALIDATION_ERROR", "; ".join(detail_parts))
+    except ReviewNotFound:
+        raise ApiError("NOT_FOUND", f"ingestion {ingestion_id} not found")
+    except ReviewNotAllowed as exc:
+        raise ApiError(
+            "INGESTION_NOT_CONFIRMABLE",
+            f"ingestion is '{exc.status}' — it is not ready for final review",
+        )
+    except ReviewIdempotencyConflict:
+        raise ApiError(
+            "IDEMPOTENCY_KEY_CONFLICT",
+            "Idempotency-Key was already used for a different final review",
+        )
+    except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError, OSError):
+        raise ApiError("DEPENDENCY_UNAVAILABLE", "storage unavailable; retry")
+
+    return FinalizeReviewResponse(
+        ingestion_id=result.ingestion_id,
+        run_id=result.run_id,
         status=result.status,
         replayed=result.replayed,
     )
