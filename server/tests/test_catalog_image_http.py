@@ -39,13 +39,19 @@ def test_operator_can_load_only_its_store_arrival_image() -> None:
         visible = client.get(
             "/v1/arrivals/batch-visible/image",
             headers=bearer(
-                "catalog:read", role="operator", store_code="PARIS-01"
+                "catalog:read",
+                role="operator",
+                store_code="PARIS-01",
+                organization_id="11111111-1111-1111-1111-111111111110",
             ),
         )
         hidden = client.get(
             "/v1/arrivals/batch-visible/image",
             headers=bearer(
-                "catalog:read", role="operator", store_code="LYON-02"
+                "catalog:read",
+                role="operator",
+                store_code="LYON-02",
+                organization_id="11111111-1111-1111-1111-111111111110",
             ),
         )
 

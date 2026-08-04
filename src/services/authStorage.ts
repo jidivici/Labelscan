@@ -13,12 +13,14 @@
 import * as SecureStore from 'expo-secure-store';
 
 const TOKEN_KEY = 'labelscan.access_token';
+const REFRESH_TOKEN_KEY = 'labelscan.refresh_token';
 // The username is NOT a secret, but it shares the token's lifecycle (set on login,
 // cleared on logout) so we keep it in the same store to avoid a second mechanism.
 const USERNAME_KEY = 'labelscan.username';
 
 // undefined = not yet loaded from the keystore; null = loaded, no token.
 let cachedToken: string | null | undefined;
+let cachedRefreshToken: string | null | undefined;
 let cachedUsername: string | null | undefined;
 
 export async function getToken(): Promise<string | null> {
@@ -34,7 +36,29 @@ export async function getToken(): Promise<string | null> {
 
 export async function setToken(token: string): Promise<void> {
   cachedToken = token;
-  await SecureStore.setItemAsync(TOKEN_KEY, token);
+  await SecureStore.setItemAsync(TOKEN_KEY, token, {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+}
+
+export async function getRefreshToken(): Promise<string | null> {
+  if (cachedRefreshToken !== undefined) return cachedRefreshToken;
+  try {
+    cachedRefreshToken = (await SecureStore.getItemAsync(REFRESH_TOKEN_KEY)) ?? null;
+  } catch {
+    cachedRefreshToken = null;
+  }
+  return cachedRefreshToken;
+}
+
+export async function setTokens(accessToken: string, refreshToken: string): Promise<void> {
+  cachedToken = accessToken;
+  cachedRefreshToken = refreshToken;
+  const options = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
+  await Promise.all([
+    SecureStore.setItemAsync(TOKEN_KEY, accessToken, options),
+    SecureStore.setItemAsync(REFRESH_TOKEN_KEY, refreshToken, options),
+  ]);
 }
 
 export async function clearToken(): Promise<void> {
@@ -44,6 +68,15 @@ export async function clearToken(): Promise<void> {
   } catch {
     // Best-effort: the in-memory cache is already cleared.
   }
+}
+
+export async function clearSessionTokens(): Promise<void> {
+  cachedToken = null;
+  cachedRefreshToken = null;
+  await Promise.allSettled([
+    SecureStore.deleteItemAsync(TOKEN_KEY),
+    SecureStore.deleteItemAsync(REFRESH_TOKEN_KEY),
+  ]);
 }
 
 // ── Username (the signed-in user, for stamping saved articles) ───────────────────
@@ -60,7 +93,9 @@ export async function getUsername(): Promise<string | null> {
 
 export async function setUsername(username: string): Promise<void> {
   cachedUsername = username;
-  await SecureStore.setItemAsync(USERNAME_KEY, username);
+  await SecureStore.setItemAsync(USERNAME_KEY, username, {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
 }
 
 export async function clearUsername(): Promise<void> {

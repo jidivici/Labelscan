@@ -7,7 +7,7 @@ single lateral join (no N+1). Returns exactly what exists.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel
@@ -43,10 +43,11 @@ class AlertPage(BaseModel):
 @router.get("/v1/alerts", response_model=AlertPage)
 def list_alerts(
     request: Request,
-    state: str | None = Query(None),
-    alert_type: str | None = Query(None),
-    severity: str | None = Query(None),
-    batch_id: str | None = Query(None),
+    state: Literal["open", "acknowledged", "resolved"] | None = Query(None),
+    alert_type: Literal["expiry", "temperature", "required_field", "inconsistency"]
+    | None = Query(None),
+    severity: Literal["low", "medium", "high", "critical"] | None = Query(None),
+    batch_id: str | None = Query(None, max_length=128),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _principal=Depends(require_scope("haccp:read")),

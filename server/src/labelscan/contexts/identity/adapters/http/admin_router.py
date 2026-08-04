@@ -93,19 +93,19 @@ class UserPage(BaseModel):
 
 
 class CreateUserRequest(BaseModel):
-    username: str = Field(min_length=1)
+    username: str = Field(min_length=1, max_length=254)
     display_name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=1)
+    password: str = Field(min_length=12, max_length=128)
     role: Role = "operator"
-    store_code: str | None = None
+    store_code: str | None = Field(None, max_length=64)
 
 
 class UpdateUserRequest(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=120)
-    password: str | None = Field(None, min_length=1)
+    password: str | None = Field(None, min_length=12, max_length=128)
     role: Role | None = None
     active: bool | None = None
-    store_code: str | None = None
+    store_code: str | None = Field(None, max_length=64)
 
 
 def _map_write_error(exc: Exception) -> None:
@@ -169,8 +169,8 @@ def create_user(
 def list_users(
     role: Role | None = Query(None),
     active: bool | None = Query(None),
-    store_code: str | None = Query(None),
-    q: str | None = Query(None),
+    store_code: str | None = Query(None, max_length=64),
+    q: str | None = Query(None, max_length=120),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     principal: Principal = Depends(require_scope("identity:admin")),

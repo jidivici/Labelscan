@@ -206,7 +206,7 @@ def test_duplicate_username_returns_stable_conflict(client):
     assert response.json()["error_code"] == "USER_ALREADY_EXISTS"
 
 
-def test_username_and_password_have_no_artificial_length_limit(client):
+def test_username_and_password_policy_is_enforced(client):
     username = f"{PREFIX}{'x' * 600}"
     response = client.post(
         "/v1/users",
@@ -219,8 +219,22 @@ def test_username_and_password_have_no_artificial_length_limit(client):
             "store_code": STORE_CODE,
         },
     )
-    assert response.status_code == 201
-    assert response.json()["username"] == username
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+    placeholder = client.post(
+        "/v1/users",
+        headers=_admin_headers(),
+        json={
+            "username": f"{PREFIX}placeholder",
+            "display_name": "Placeholder credentials",
+            "password": "change-me-to-a-strong-password",
+            "role": "operator",
+            "store_code": STORE_CODE,
+        },
+    )
+    assert placeholder.status_code == 400
+    assert placeholder.json()["error_code"] == "VALIDATION_ERROR"
 
 
 def test_admin_can_create_list_and_rename_stores(client):
@@ -325,6 +339,32 @@ def test_admin_can_change_role_deactivate_and_reset_password(client):
         },
     )
     assert login.status_code == 401
+
+
+def test_deactivation_immediately_revokes_an_existing_session(client):
+    created = _create(client, "revoked").json()
+    login = client.post(
+        "/v1/mobile/auth/login",
+        json={
+            "username": f"{PREFIX}revoked",
+            "password": "operator-password-123",
+        },
+    )
+    assert login.status_code == 200
+    access = login.json()["access_token"]
+
+    changed = client.patch(
+        f"/v1/users/{created['id']}",
+        headers=_admin_headers(),
+        json={"active": False},
+    )
+    assert changed.status_code == 200
+
+    rejected = client.get(
+        f"/v1/ingestions/{uuid.uuid4()}",
+        headers={"Authorization": f"Bearer {access}"},
+    )
+    assert rejected.status_code == 401
 
 
 def test_create_and_update_are_audited_with_admin_actor(client, engine):

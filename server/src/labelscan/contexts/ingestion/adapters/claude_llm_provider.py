@@ -17,6 +17,7 @@ import os
 
 from labelscan.contexts.ingestion.application.extraction_ports import LlmResult
 from labelscan.contexts.ingestion.domain.extraction import LlmField
+from labelscan.platform.config import secret_value
 from labelscan.platform.observability import get_logger
 
 _log = get_logger("ingestion.llm")
@@ -568,7 +569,9 @@ class ClaudeLlmExtractor:
             # inject a fake client without anthropic present.
             import anthropic
 
-            client = anthropic.Anthropic()
+            client = anthropic.Anthropic(
+                api_key=secret_value("ANTHROPIC_API_KEY", required=True)
+            )
         self._client = client
         self._model = model or _MODEL
 

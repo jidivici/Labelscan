@@ -29,6 +29,8 @@ def _username(value: str) -> str:
     normalized = value.strip()
     if not normalized:
         raise ValueError("username must not be blank")
+    if len(normalized) > 254:
+        raise ValueError("username must be at most 254 characters")
     return normalized
 
 
@@ -48,8 +50,6 @@ def _role(value: str) -> str:
 
 
 def _password_hash(password: str) -> str:
-    if not password:
-        raise ValueError("password must not be empty")
     return hash_password(password)
 
 

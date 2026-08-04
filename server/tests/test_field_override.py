@@ -31,7 +31,7 @@ from labelscan.contexts.ingestion.domain.extraction import RuleSet
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import OCR_TEXT, FakeLlm, FakeOcr, traceable_fields
-from tests.conftest import bearer
+from tests.conftest import bearer, jpeg_bytes
 
 RULES = RuleSet(version="test", required_fields=frozenset({"scientific_name"}))
 REVIEW = bearer("ingestion:write ingestion:read extraction:review", principal="rev-1")
@@ -62,7 +62,7 @@ def ingestion_id(client, engine, raw_store):
         c.execute(
             text("UPDATE platform.outbox SET published_at = now() WHERE published_at IS NULL")
         )
-    content = b"override-4-2-" + uuid.uuid4().hex.encode()
+    content = jpeg_bytes(b"override-4-2-" + uuid.uuid4().hex.encode())
     r = client.post(
         "/v1/ingestions",
         files={"image": ("l.jpg", content, "image/jpeg")},

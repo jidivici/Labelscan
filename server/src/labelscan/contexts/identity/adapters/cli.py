@@ -74,6 +74,13 @@ def upsert_admin(username: str, password: str) -> str:
                 "r": ADMIN_ROLE,
             },
         ).first()
+        conn.execute(
+            text(
+                "UPDATE identity.auth_session SET revoked_at = COALESCE(revoked_at, clock_timestamp()) "
+                "WHERE user_id = :id"
+            ),
+            {"id": user_id},
+        )
     return row[0]
 
 

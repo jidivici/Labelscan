@@ -20,6 +20,7 @@ from labelscan.contexts.ingestion.adapters.extraction_consumer import Extraction
 from labelscan.contexts.ingestion.application.submit_ingestion import (
     SubmitIngestionCommand,
 )
+from labelscan.contexts.ingestion.domain.extraction import RuleSet
 from labelscan.contexts.traceability.adapters.registration_consumer import (
     RegistrationConsumer,
 )
@@ -27,7 +28,6 @@ from labelscan.contexts.traceability.domain.consistency import (
     BatchCandidate,
     check_consistency,
 )
-from labelscan.contexts.ingestion.domain.extraction import RuleSet
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import FakeLlm, FakeOcr, traceable_fields

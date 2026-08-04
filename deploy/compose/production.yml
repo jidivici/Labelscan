@@ -1,0 +1,108 @@
+name: labelscan-production
+
+x-runtime: &runtime
+  image: ${LABELSCAN_IMAGE:?LABELSCAN_IMAGE must be an immutable image reference}
+  user: "10001:10001"
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: ["ALL"]
+  pids_limit: 256
+  stop_grace_period: 30s
+  networks: [backend]
+
+x-common-environment: &common-environment
+  LABELSCAN_ENV: production
+  LABELSCAN_OBJECT_STORE: s3
+  LABELSCAN_S3_BUCKET: ${LABELSCAN_S3_BUCKET:?required}
+  LABELSCAN_S3_REGION: ${LABELSCAN_S3_REGION:?required}
+  LABELSCAN_S3_ENDPOINT_URL: ${LABELSCAN_S3_ENDPOINT_URL:-}
+  LABELSCAN_S3_ENCRYPTION: aws:kms
+  LABELSCAN_S3_KMS_KEY_ID: ${LABELSCAN_S3_KMS_KEY_ID:?required}
+  DATABASE_URL_FILE: /run/secrets/database_url
+
+services:
+  migrate:
+    <<: *runtime
+    command: ["migrate"]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+    secrets: [database_url]
+    healthcheck:
+      disable: true
+    restart: "no"
+
+  api:
+    <<: *runtime
+    command: ["api"]
+    environment:
+      <<: *common-environment
+      LABELSCAN_JWT_SECRET_FILE: /run/secrets/jwt_secret
+      LABELSCAN_JWT_ISSUER: ${LABELSCAN_JWT_ISSUER:?required}
+      LABELSCAN_JWT_AUDIENCE: ${LABELSCAN_JWT_AUDIENCE:?required}
+      LABELSCAN_VERSION: ${LABELSCAN_VERSION:?required}
+      LABELSCAN_PUBLIC_ORIGIN: ${LABELSCAN_PUBLIC_ORIGIN:?required}
+      LABELSCAN_ALLOWED_HOSTS: ${LABELSCAN_ALLOWED_HOSTS:?required}
+      LABELSCAN_TRUSTED_PROXIES: ${LABELSCAN_TRUSTED_PROXIES:?required}
+      LABELSCAN_ALLOW_HEADER_AUTH: "0"
+    secrets: [database_url, jwt_secret]
+    expose: ["8000"]
+    networks: [edge, backend]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 1.0
+    deploy:
+      replicas: 1
+
+  worker:
+    <<: *runtime
+    command: ["worker"]
+    environment:
+      <<: *common-environment
+      LABELSCAN_OCR_PROVIDER: google
+      LABELSCAN_GOOGLE_VISION_API_KEY_FILE: /run/secrets/google_vision_api_key
+      ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+    secrets:
+      - database_url
+      - google_vision_api_key
+      - anthropic_api_key
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 2.0
+    healthcheck:
+      test: ["CMD", "python", "-m", "labelscan.app.worker_runtime", "--health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  edge:
+    external: true
+    name: ${LABELSCAN_EDGE_NETWORK:?required}
+  backend:
+    external: true
+    name: ${LABELSCAN_BACKEND_NETWORK:?required}
+
+secrets:
+  database_url:
+    external: true
+    name: ${LABELSCAN_DATABASE_URL_SECRET:-labelscan_database_url}
+  jwt_secret:
+    external: true
+    name: ${LABELSCAN_JWT_SECRET_NAME:-labelscan_jwt_secret}
+  google_vision_api_key:
+    external: true
+    name: ${LABELSCAN_GOOGLE_VISION_SECRET:-labelscan_google_vision_api_key}
+  anthropic_api_key:
+    external: true
+    name: ${LABELSCAN_ANTHROPIC_SECRET:-labelscan_anthropic_api_key}

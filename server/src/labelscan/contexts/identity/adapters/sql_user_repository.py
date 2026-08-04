@@ -374,4 +374,21 @@ class SqlUserRepository(UserRepository):
                 if _is_unique_violation(exc):
                     raise UsernameAlreadyExists() from exc
                 raise
+            if any(
+                value is not None
+                for value in (
+                    changes.password_hash,
+                    changes.role,
+                    changes.active,
+                    changes.store_code,
+                )
+            ):
+                conn.execute(
+                    text(
+                        "UPDATE identity.auth_session "
+                        "SET revoked_at = COALESCE(revoked_at, clock_timestamp()) "
+                        "WHERE organization_id = :organization_id AND user_id = :id"
+                    ),
+                    {"organization_id": organization_id, "id": user_id},
+                )
         return _managed(row)

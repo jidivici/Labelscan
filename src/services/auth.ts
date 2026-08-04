@@ -9,9 +9,10 @@
 
 import { apiRequest } from './api';
 import {
-  clearToken,
+  clearSessionTokens,
   clearUsername,
-  setToken,
+  getRefreshToken,
+  setTokens,
   setUsername,
 } from './authStorage';
 
@@ -19,6 +20,8 @@ interface LoginResponse {
   access_token: string;
   token_type: string;
   expires_in: number;
+  refresh_token: string;
+  refresh_expires_in: number;
   user: {
     role: 'admin' | 'operator';
   };
@@ -37,18 +40,53 @@ export async function login(username: string, password: string): Promise<void> {
       skipAuth: true, // the login call must not carry (or react to) a stale token
     },
   );
-  if (!res?.access_token) {
-    throw new Error('Login response did not include an access token');
+  if (!res?.access_token || !res.refresh_token) {
+    throw new Error('Login response did not include session tokens');
   }
   if (res.user.role !== 'operator') {
     throw new Error('MOBILE_OPERATOR_ONLY');
   }
-  await setToken(res.access_token);
+  await setTokens(res.access_token, res.refresh_token);
   // Remember who signed in for the UI. Not a secret; cleared on logout.
   await setUsername(username);
 }
 
 export async function logout(): Promise<void> {
-  await clearToken();
-  await clearUsername();
+  const refreshToken = await getRefreshToken();
+  try {
+    if (refreshToken) {
+      await apiRequest('/v1/mobile/auth/logout', {
+        method: 'POST',
+        body: { refresh_token: refreshToken },
+        skipAuth: true,
+      });
+    }
+  } finally {
+    await clearSessionTokens();
+    await clearUsername();
+  }
+}
+
+export async function restoreAuthentication(): Promise<boolean> {
+  const refreshToken = await getRefreshToken();
+  if (!refreshToken) {
+    await clearSessionTokens();
+    return false;
+  }
+  try {
+    const res = await apiRequest<LoginResponse>('/v1/mobile/auth/refresh', {
+      method: 'POST',
+      body: { refresh_token: refreshToken },
+      skipAuth: true,
+    });
+    if (!res.access_token || !res.refresh_token) {
+      await clearSessionTokens();
+      return false;
+    }
+    await setTokens(res.access_token, res.refresh_token);
+    return true;
+  } catch {
+    await clearSessionTokens();
+    return false;
+  }
 }

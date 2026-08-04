@@ -1,41 +1,71 @@
+x-app-security: &app-security
+  init: true
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: ["ALL"]
+
 services:
   db:
     image: postgres:16
     container_name: labelscan-db
     environment:
-      POSTGRES_DB: labelscan_test
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ${POSTGRES_DB:-labelscan_test}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - labelscan-pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d labelscan_test"]
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 3s
       timeout: 3s
       retries: 10
 
+  migrate:
+    <<: *app-security
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    env_file: ./server/.env
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+    command: ["migrate"]
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
   server:
+    <<: *app-security
     build:
       context: .
       dockerfile: server/Dockerfile
     container_name: labelscan-server
     env_file: ./server/.env
     ports:
+      # Accessible depuis le téléphone sur le réseau local.
+      # PostgreSQL reste volontairement limité à localhost ci-dessus.
       - "8000:8000"
     environment:
-      DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/labelscan_test"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       LABELSCAN_OBJECT_STORE: "filesystem"
       LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
     volumes:
       - labelscan-raw-store:/app/data/raw
     depends_on:
-      db:
-        condition: service_healthy
-    entrypoint: ["bash", "/app/entrypoint.sh"]
+      migrate:
+        condition: service_completed_successfully
+    command: ["api"]
+    restart: unless-stopped
 
   worker:
+    <<: *app-security
     build:
       context: .
       dockerfile: server/Dockerfile
@@ -46,16 +76,16 @@ services:
       replicas: 2
     env_file: ./server/.env
     environment:
-      DATABASE_URL: "postgresql+psycopg://postgres:postgres@db:5432/labelscan_test"
+      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       LABELSCAN_OBJECT_STORE: "filesystem"
       LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
     volumes:
       - labelscan-raw-store:/app/data/raw
     depends_on:
-      db:
-        condition: service_healthy
-    # Remplacer "command:" par "entrypoint:" pour contourner l'entrypoint.sh par défaut
-    entrypoint: [ "python", "-m", "labelscan.app.worker_runtime" ]
+      migrate:
+        condition: service_completed_successfully
+    command: ["worker"]
+    restart: unless-stopped
     # Liveness: the worker refreshes a heartbeat file each poll loop...
     healthcheck:
       test: [ "CMD", "python", "-m", "labelscan.app.worker_runtime", "--health" ]

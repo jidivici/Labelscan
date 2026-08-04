@@ -15,6 +15,7 @@ from fastapi.responses import JSONResponse
 from labelscan.platform.observability import get_logger
 
 _log = get_logger("http.errors")
+_SAFE_RESPONSE_HEADERS = {"retry-after"}
 
 # error_code -> (http_status, stable title, retriable)
 ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
@@ -74,10 +75,16 @@ class ApiError(Exception):
         error_code: str,
         detail: str | None = None,
         errors: list[dict] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         self.error_code = error_code
         self.detail = detail
         self.errors = errors
+        self.headers = {
+            name: value
+            for name, value in (headers or {}).items()
+            if name.lower() in _SAFE_RESPONSE_HEADERS
+        }
         super().__init__(error_code)
 
 
@@ -87,6 +94,7 @@ def problem_response(
     *,
     detail: str | None = None,
     errors: list[dict] | None = None,
+    extra_headers: dict[str, str] | None = None,
 ) -> JSONResponse:
     status, title, retriable = ERROR_CATALOG[error_code]
     correlation_id = getattr(request.state, "correlation_id", None)
@@ -105,6 +113,13 @@ def problem_response(
     if errors:
         body["errors"] = errors
     headers = {"X-Correlation-Id": correlation_id} if correlation_id else {}
+    headers.update(
+        {
+            name: value
+            for name, value in (extra_headers or {}).items()
+            if name.lower() in _SAFE_RESPONSE_HEADERS
+        }
+    )
     return JSONResponse(
         status_code=status,
         content=body,
@@ -137,7 +152,11 @@ def install_error_handlers(app) -> None:
                 },
             )
         return problem_response(
-            request, exc.error_code, detail=exc.detail, errors=exc.errors
+            request,
+            exc.error_code,
+            detail=exc.detail,
+            errors=exc.errors,
+            extra_headers=exc.headers,
         )
 
     @app.exception_handler(RequestValidationError)

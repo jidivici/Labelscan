@@ -9,7 +9,7 @@ missing alerts are mapped to the BACKEND §5.2 problem+json codes.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel
 
 from labelscan.contexts.haccp.application.alert_service import (
@@ -55,8 +55,8 @@ def _audit(request: Request, principal: Principal) -> AuditContext:
 
 @router.post("/v1/alerts/{alert_id}/acknowledge", response_model=AlertStateResponse)
 def acknowledge_alert(
-    alert_id: str,
     request: Request,
+    alert_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("alert:ack")),
     service: AlertLifecycleService = Depends(get_alert_service),
 ) -> AlertStateResponse:
@@ -71,8 +71,8 @@ def acknowledge_alert(
 
 @router.post("/v1/alerts/{alert_id}/resolve", response_model=AlertStateResponse)
 def resolve_alert(
-    alert_id: str,
     request: Request,
+    alert_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("alert:resolve")),
     service: AlertLifecycleService = Depends(get_alert_service),
 ) -> AlertStateResponse:

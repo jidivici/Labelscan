@@ -14,9 +14,12 @@ import React, {
   useState,
 } from 'react';
 
-import { login as apiLogin, logout as apiLogout } from '../services/auth';
 import {
-  getToken,
+  login as apiLogin,
+  logout as apiLogout,
+  restoreAuthentication,
+} from '../services/auth';
+import {
   getUsername,
   onUnauthenticated,
 } from '../services/authStorage';
@@ -41,11 +44,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    // Restore session (token + username) from storage on cold start.
-    Promise.all([getToken(), getUsername()]).then(([token, username]) => {
+    // Validate the persisted refresh credential on every cold start. A stored
+    // access token may already be expired or revoked, so it is never enough on
+    // its own to enter the signed-in state.
+    getUsername().then(async (username) => {
       if (!mounted) return;
-      setStatus(token ? 'signedIn' : 'signedOut');
-      setUser(token ? username : null);
+      const restored = await restoreAuthentication();
+      if (!mounted) return;
+      setStatus(restored ? 'signedIn' : 'signedOut');
+      setUser(restored ? username : null);
     });
 
     // Session expired / token rejected mid-use → back to login.

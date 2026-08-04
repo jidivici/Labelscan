@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from labelscan.app.ops_router import router as ops_router
 from labelscan.contexts.haccp.adapters.http.lifecycle_router import (
@@ -17,6 +18,7 @@ from labelscan.contexts.haccp.adapters.http.read_router import (
 from labelscan.contexts.identity.adapters.http.admin_router import (
     router as user_admin_router,
 )
+from labelscan.contexts.identity.adapters.http.router import get_session_service
 from labelscan.contexts.identity.adapters.http.router import router as auth_router
 from labelscan.contexts.identity.adapters.http.store_admin_router import (
     router as store_admin_router,
@@ -31,8 +33,19 @@ from labelscan.contexts.traceability.adapters.http.catalog_router import (
 from labelscan.contexts.traceability.adapters.http.read_router import (
     router as batches_read_router,
 )
+from labelscan.platform.config import (
+    allowed_hosts,
+    deployment_environment,
+    validate_runtime_configuration,
+)
 from labelscan.platform.http.errors import install_error_handlers
-from labelscan.platform.http.middleware import CorrelationMiddleware
+from labelscan.platform.http.middleware import (
+    CorrelationMiddleware,
+    MutationRateLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
+from labelscan.platform.http.rate_limit import rate_limits
+from labelscan.platform.http.session_validation import configure_session_validator
 from labelscan.platform.http.spa_static import SpaStaticFiles
 from labelscan.platform.observability import configure_logging
 
@@ -56,7 +69,26 @@ def _backoffice_static_dir() -> Path:
 
 def create_app() -> FastAPI:
     configure_logging()
-    app = FastAPI(title="LabelScan API", version="v1")
+    environment = deployment_environment()
+    validate_runtime_configuration("api")
+    configure_session_validator(
+        lambda family_id, actor_id: get_session_service().family_is_active(
+            family_id, actor_id
+        )
+    )
+    rate_limits.reset()
+    production = environment == "production"
+    app = FastAPI(
+        title="LabelScan API",
+        version="v1",
+        docs_url=None if production else "/docs",
+        redoc_url=None if production else "/redoc",
+        openapi_url=None if production else "/openapi.json",
+    )
+    if production:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(MutationRateLimitMiddleware)
     app.add_middleware(CorrelationMiddleware)
     install_error_handlers(app)
     app.include_router(auth_router)  # auth: POST /v1/auth/login (unauthenticated)
