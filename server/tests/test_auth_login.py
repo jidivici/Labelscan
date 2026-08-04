@@ -115,6 +115,10 @@ def test_login_success_returns_bearer_token(client, admin):
         "organization_slug": "labelscan",
         "store_id": None,
         "store_code": None,
+        "business_portal_ids": [],
+        "business_portal_id": None,
+        "trade_code": None,
+        "client_type": "browser",
     }
 
 
@@ -166,7 +170,7 @@ def test_logout_immediately_rejects_existing_access_token(client, admin):
     access = login_response.json()["access_token"]
     logout = client.post("/v1/auth/logout")
     assert logout.status_code == 204
-    assert "labelscan_refresh=\"\"" in logout.headers["set-cookie"]
+    assert 'labelscan_refresh=""' in logout.headers["set-cookie"]
 
     rejected = client.get(
         f"/v1/ingestions/{uuid.uuid4()}",
@@ -195,32 +199,53 @@ def test_concurrent_refresh_detects_replay_and_revokes_winner(client, admin, eng
     assert service.family_is_active(winners[0].family_id, ACTOR_ID) is False
 
 
-def test_mobile_login_accepts_a_store_operator():
-    operator_id = str(uuid.uuid4())
-    operator = AuthenticatedUser(
-        actor_id=operator_id,
-        username="mobile-operator",
+def _mobile_operator(*, portal_count: int = 1) -> AuthenticatedUser:
+    store_id = str(uuid.uuid4())
+    portal_ids = tuple(str(uuid.uuid4()) for _ in range(portal_count))
+    return AuthenticatedUser(
+        actor_id=str(uuid.uuid4()),
+        username=f"mobile-operator-{portal_count}",
         display_name="Mobile Operator",
         role="operator",
         scopes=OPERATOR_SCOPES,
         store_code="PARIS-01",
         organization_id=str(uuid.uuid4()),
         organization_slug="labelscan",
-        store_id=str(uuid.uuid4()),
+        store_id=store_id,
+        business_portal_ids=portal_ids,
+        business_portal_id=portal_ids[0] if portal_ids else None,
+        trade_code="poissonnerie" if portal_ids else None,
+        store_ids=(store_id,) if portal_ids else (),
     )
+
+
+class _MobileSessions:
+    def __init__(self, user: AuthenticatedUser) -> None:
+        self.user = user
+        self.created = False
+        self.revoked_token: str | None = None
+
+    def create(self, user, client_type="browser") -> RefreshSession:
+        self.created = True
+        return RefreshSession("test-family", "r" * 43, 604800, user, client_type)
+
+    def rotate(self, token, expected_client_type="browser") -> RefreshSession:
+        return RefreshSession(
+            "test-family", "n" * 43, 604800, self.user, expected_client_type
+        )
+
+    def revoke(self, token) -> None:
+        self.revoked_token = token
+
+
+def test_mobile_login_accepts_a_store_operator():
+    operator = _mobile_operator()
+    sessions = _MobileSessions(operator)
     app = create_app()
     app.dependency_overrides[get_login] = lambda: (
         lambda username, password, organization_slug: operator
     )
-    app.dependency_overrides[get_session_service] = lambda: type(
-        "Sessions",
-        (),
-        {
-            "create": lambda self, user: RefreshSession(
-                "test-family", "r" * 43, 604800, user
-            )
-        },
-    )()
+    app.dependency_overrides[get_session_service] = lambda: sessions
     response = TestClient(app).post(
         "/v1/mobile/auth/login",
         json={"username": operator.username, "password": "secret"},
@@ -231,6 +256,78 @@ def test_mobile_login_accepts_a_store_operator():
     assert body["user"]["store_code"] == "PARIS-01"
     assert body["refresh_token"] == "r" * 43
     assert body["refresh_expires_in"] == 604800
+    assert sessions.created is True
+
+
+@pytest.mark.parametrize("portal_count", [0, 2])
+def test_mobile_login_rejects_an_operator_without_exactly_one_portal(portal_count):
+    operator = _mobile_operator(portal_count=portal_count)
+    sessions = _MobileSessions(operator)
+    app = create_app()
+    app.dependency_overrides[get_login] = lambda: (
+        lambda username, password, organization_slug: operator
+    )
+    app.dependency_overrides[get_session_service] = lambda: sessions
+
+    response = TestClient(app).post(
+        "/v1/mobile/auth/login",
+        json={"username": operator.username, "password": "secret"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "FORBIDDEN"
+    assert sessions.created is False
+
+
+def test_mobile_refresh_revokes_an_operator_session_without_one_active_portal():
+    operator = _mobile_operator(portal_count=0)
+    sessions = _MobileSessions(operator)
+    app = create_app()
+    app.dependency_overrides[get_session_service] = lambda: sessions
+
+    response = TestClient(app).post(
+        "/v1/mobile/auth/refresh",
+        json={"refresh_token": "r" * 43},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "FORBIDDEN"
+    assert sessions.revoked_token == "n" * 43
+
+
+def test_browser_login_rejects_a_store_operator():
+    operator = AuthenticatedUser(
+        actor_id=str(uuid.uuid4()),
+        username="browser-forbidden-operator",
+        display_name="Browser Forbidden Operator",
+        role="operator",
+        scopes=OPERATOR_SCOPES,
+        store_code="PARIS-01",
+        organization_id=str(uuid.uuid4()),
+        organization_slug="labelscan",
+        store_id=str(uuid.uuid4()),
+        business_portal_ids=(str(uuid.uuid4()),),
+    )
+    app = create_app()
+    app.dependency_overrides[get_login] = lambda: (
+        lambda username, password, organization_slug: operator
+    )
+    response = TestClient(app).post(
+        "/v1/auth/login",
+        json={"username": operator.username, "password": "secret"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error_code"] == "FORBIDDEN"
+
+
+def test_browser_refresh_token_cannot_be_used_on_mobile(client, admin):
+    browser = _login(client, admin, PASSWORD)
+    response = client.post(
+        "/v1/mobile/auth/refresh",
+        json={"refresh_token": browser.cookies["labelscan_refresh"]},
+    )
+    assert response.status_code == 401
+    assert response.json()["error_code"] == "UNAUTHENTICATED"
 
 
 def test_token_authorizes_a_scoped_endpoint(client, admin):

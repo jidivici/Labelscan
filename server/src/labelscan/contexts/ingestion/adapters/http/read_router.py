@@ -25,6 +25,10 @@ from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.http.access import (
+    access_context_for_principal,
+    postgres_scope,
+)
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.rate_limit import LimitExceeded, rate_limits
@@ -68,17 +72,18 @@ def _probe_status(
     with engine.connect() as c:
         organization_id = _organization_id(c, principal)
         set_tenant_context(c, organization_id)
+        access = access_context_for_principal(
+            principal, default_organization_id=organization_id
+        )
+        scope, scope_params = postgres_scope(access, alias="ingestion")
         return c.execute(
             text(
-                "SELECT status FROM ingestion.ingestion "
-                "WHERE id = :id AND organization_id = :organization_id "
-                "AND (:all_stores OR store_id::text = :store_id)"
+                "SELECT ingestion.status FROM ingestion.ingestion AS ingestion "
+                "WHERE ingestion.id = :id AND " + scope
             ),
             {
                 "id": ingestion_id,
-                "organization_id": organization_id,
-                "all_stores": principal.role == "admin",
-                "store_id": principal.store_id or "",
+                **scope_params,
             },
         ).scalar_one_or_none()
 
@@ -226,20 +231,21 @@ def get_ingestion(
     with engine.connect() as c:
         organization_id = _organization_id(c, principal)
         set_tenant_context(c, organization_id)
+        access = access_context_for_principal(
+            principal, default_organization_id=organization_id
+        )
+        scope, scope_params = postgres_scope(access, alias="ingestion")
         row = (
             c.execute(
                 text(
                     "SELECT id::text AS id, status, image_ref, checksum_sha256, barcode_raw, "
                     "client_captured_at::text AS cca, server_received_at::text AS sra, "
-                    "correlation_id, trace_id FROM ingestion.ingestion "
-                    "WHERE id = :id AND organization_id = :organization_id "
-                    "AND (:all_stores OR store_id::text = :store_id)"
+                    "correlation_id, trace_id FROM ingestion.ingestion AS ingestion "
+                    "WHERE ingestion.id = :id AND " + scope
                 ),
                 {
                     "id": ingestion_id,
-                    "organization_id": organization_id,
-                    "all_stores": principal.role == "admin",
-                    "store_id": principal.store_id or "",
+                    **scope_params,
                 },
             )
             .mappings()
@@ -348,6 +354,10 @@ def get_extraction_run(
     with engine.connect() as c:
         organization_id = _organization_id(c, principal)
         set_tenant_context(c, organization_id)
+        access = access_context_for_principal(
+            principal, default_organization_id=organization_id
+        )
+        scope, scope_params = postgres_scope(access, alias="ingestion")
         run = (
             c.execute(
                 text(
@@ -360,15 +370,11 @@ def get_extraction_run(
                     "FROM ingestion.extraction_run AS run "
                     "JOIN ingestion.ingestion AS ingestion "
                     "ON ingestion.id = run.ingestion_id "
-                    "WHERE run.id = :id "
-                    "AND ingestion.organization_id = :organization_id "
-                    "AND (:all_stores OR ingestion.store_id::text = :store_id)"
+                    "WHERE run.id = :id AND " + scope
                 ),
                 {
                     "id": run_id,
-                    "organization_id": organization_id,
-                    "all_stores": principal.role == "admin",
-                    "store_id": principal.store_id or "",
+                    **scope_params,
                 },
             )
             .mappings()

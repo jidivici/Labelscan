@@ -51,9 +51,10 @@ describe('maskDate — DD/MM/YYYY input mask', () => {
 });
 
 describe('isDateField / DATE_FIELDS', () => {
-  it('flags only the two date fields', () => {
+  it('flags the date fields shared by all three V1 profiles', () => {
     expect(isDateField('expiry_date')).toBe(true);
     expect(isDateField('packaging_date')).toBe(true);
+    expect(isDateField('preparation_date')).toBe(true);
     expect(isDateField('weight')).toBe(false);
     expect(isDateField('allergens')).toBe(false);
     expect(isDateField('storage_temperature')).toBe(false);
@@ -61,7 +62,7 @@ describe('isDateField / DATE_FIELDS', () => {
 
   it('exposes the set used by the form', () => {
     expect(DATE_FIELDS.has('expiry_date')).toBe(true);
-    expect(DATE_FIELDS.size).toBe(2);
+    expect(DATE_FIELDS.size).toBe(3);
   });
 });
 

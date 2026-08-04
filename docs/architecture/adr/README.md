@@ -13,6 +13,7 @@ Reversibility**. See the parent [`../ARCHITECTURE.md`](../ARCHITECTURE.md) for t
 | [0005](./0005-confidence-scores-in-the-model.md) | Confidence + provenance on each ExtractedField | **Accepted & Implemented** | Confidence is intrinsic to a field; unknown ⇒ null, never fabricated. |
 | [0006](./0006-ddd-tactical-vs-layered-per-context.md) | Tactical DDD in core contexts, layered elsewhere | **Accepted & Implemented** | Effort proportional to complexity; avoid anemic ceremony on CRUD/reference data. |
 | [0007](./0007-python-fastapi-backend.md) | Python / FastAPI + Pydantic at boundaries, PostgreSQL | **Accepted & Implemented** | Strong OCR/LLM/data ecosystem; accepted trade-off: no type-sharing with the TS client. |
+| [0008](./0008-business-portals-for-multi-trade-ownership.md) | Business portals as the multi-trade ownership boundary | **Accepted & Implemented** | Organization × store × profession is the authorization and historical-ownership unit. |
 
 ## Conventions
 - Filenames: `NNNN-kebab-title.md`, numbered sequentially.

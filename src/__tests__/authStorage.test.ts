@@ -1,6 +1,11 @@
 import * as SecureStore from 'expo-secure-store';
 
-import { clearSessionTokens, setTokens } from '../services/authStorage';
+import {
+  clearSessionTokens,
+  getOperatorContext,
+  setOperatorContext,
+  setTokens,
+} from '../services/authStorage';
 
 describe('secure session token storage', () => {
   beforeEach(() => {
@@ -28,5 +33,23 @@ describe('secure session token storage', () => {
     await clearSessionTokens();
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('labelscan.access_token');
     expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('labelscan.refresh_token');
+    expect(SecureStore.deleteItemAsync).toHaveBeenCalledWith('labelscan.operator_context');
+  });
+
+  it('persists and restores the server-assigned operator context in SecureStore', async () => {
+    await setOperatorContext({
+      businessPortalId: 'portal-42',
+      tradeCode: 'boucherie',
+    });
+
+    expect(SecureStore.setItemAsync).toHaveBeenCalledWith(
+      'labelscan.operator_context',
+      JSON.stringify({ businessPortalId: 'portal-42', tradeCode: 'boucherie' }),
+      { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY },
+    );
+    await expect(getOperatorContext()).resolves.toEqual({
+      businessPortalId: 'portal-42',
+      tradeCode: 'boucherie',
+    });
   });
 });

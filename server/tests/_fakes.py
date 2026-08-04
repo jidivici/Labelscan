@@ -44,8 +44,19 @@ class FakeLlm:
         self._fields = tuple(fields)
         self._model = model
         self.calls = 0
+        self.last_trade_code: str | None = None
+        self.last_trade_profile_version: str | None = None
 
-    def run(self, ocr_text: str, known_field_names: tuple[str, ...] = ()) -> LlmResult:
+    def run(
+        self,
+        ocr_text: str,
+        known_field_names: tuple[str, ...] = (),
+        *,
+        trade_code: str = "poissonnerie",
+        trade_profile_version: str = "1",
+    ) -> LlmResult:
+        self.last_trade_code = trade_code
+        self.last_trade_profile_version = trade_profile_version
         self.calls += 1
         raw = json.dumps({"fields": [f.name for f in self._fields]}).encode()
         return LlmResult(
@@ -109,7 +120,15 @@ class RaisingLlm:
     def __init__(self) -> None:
         self.calls = 0
 
-    def run(self, ocr_text: str, known_field_names: tuple[str, ...] = ()):
+    def run(
+        self,
+        ocr_text: str,
+        known_field_names: tuple[str, ...] = (),
+        *,
+        trade_code: str = "poissonnerie",
+        trade_profile_version: str = "1",
+    ):
+        del trade_code, trade_profile_version
         self.calls += 1
         raise RuntimeError("LLM provider unavailable")
 

@@ -48,4 +48,8 @@ class Login:
             organization_id=user.organization_id,
             organization_slug=user.organization_slug,
             store_id=user.store_id,
+            business_portal_ids=user.business_portal_ids,
+            business_portal_id=user.business_portal_id,
+            trade_code=user.trade_code,
+            store_ids=user.store_ids,
         )

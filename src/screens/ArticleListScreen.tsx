@@ -51,6 +51,7 @@ import {
 import { sortArticlesByName } from '../services/articleGrouping';
 import { countByDay, dayKey, formatDayKey, todayKey } from '../services/calendar';
 import { useAuth } from '../context/AuthContext';
+import { businessProfileFor } from '../services/businessProfiles';
 import { colors, spacing, radius, typography } from '../theme';
 
 // Each card has a FIXED height (CARD_HEIGHT) + its marginBottom, so FlatList can place
@@ -66,7 +67,7 @@ const SEARCH_OPEN_HEIGHT = 44 + spacing.sm * 2;
 export function ArticleListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
-  const { signOut } = useAuth();
+  const { signOut, businessPortalId, tradeCode, businessProfile } = useAuth();
   const { data: articles = [], refetch, isRefetching } = useCatalogArticles();
   const [exporting, setExporting] = useState(false);
   // Omni-search: lot, espèce, zone FAO, élevage, fournisseur… (services/articleSearch).
@@ -90,6 +91,13 @@ export function ArticleListScreen() {
   // below it (audit §7.1 — O(1) scroll). The full snapshot (results + interim) drives
   // the "n/17 champs" text + the "name known" highlight on each card.
   const { scans: pendingScans, results: scanResults, interim: scanInterim } = useScanQueue();
+  const visiblePendingScans = useMemo(
+    () =>
+      pendingScans.filter(
+        (scan) => !scan.businessPortalId || scan.businessPortalId === businessPortalId,
+      ),
+    [businessPortalId, pendingScans],
+  );
   const [listHeaderHeight, setListHeaderHeight] = useState(0);
   const handleListHeaderLayout = useCallback((e: LayoutChangeEvent) => {
     setListHeaderHeight(e.nativeEvent.layout.height);
@@ -120,21 +128,22 @@ export function ArticleListScreen() {
   const listHeader = useMemo(() => {
     return (
       <View onLayout={handleListHeaderLayout}>
-        {pendingScans.length > 0 && (
+        {visiblePendingScans.length > 0 && (
           <Text style={[typography.titleLarge, styles.pendingTitle]}>
-            {`En cours (${pendingScans.length})`}
+            {`En cours (${visiblePendingScans.length})`}
           </Text>
         )}
-        {pendingScans.map((scan) => {
+        {visiblePendingScans.map((scan) => {
           // /17 score + name-known probe: prefer the FINAL run when ready, else the
           // Tier-3 interim preview (while extracting); submitting scans show 0/17.
           // The scan's persisted review draft (edits) OVERLAYS both, so the gauge
           // advances live as the operator fills fields across review sessions.
           const result = scanResults[scan.id];
           const interimValues = scanInterim[scan.id];
+          const scanProfile = businessProfileFor(scan.tradeCode ?? tradeCode);
           const filledCount = result?.run
-            ? filledCountFromRun(result.run.fields, scan.edits)
-            : filledCountFromInterim(interimValues, scan.edits);
+            ? filledCountFromRun(result.run.fields, scan.edits, scanProfile.code)
+            : filledCountFromInterim(interimValues, scan.edits, scanProfile.code);
           const nameKnown = result?.run
             ? isProductNameKnownFromRun(result.run.fields, scan.edits)
             : isProductNameKnownFromInterim(interimValues, scan.edits);
@@ -143,6 +152,7 @@ export function ArticleListScreen() {
               key={scan.id}
               scan={scan}
               filledCount={filledCount}
+              totalFieldCount={scanProfile.fields.length}
               nameKnown={nameKnown}
               onOpen={handleOpenScan}
               onRetry={handleRetryScan}
@@ -181,7 +191,7 @@ export function ArticleListScreen() {
       </View>
     );
   }, [
-    pendingScans,
+    visiblePendingScans,
     scanResults,
     scanInterim,
     searching,
@@ -191,6 +201,7 @@ export function ArticleListScreen() {
     handleOpenScan,
     handleRetryScan,
     handleDiscardScan,
+    tradeCode,
   ]);
 
   // Search and calendar both slide open from the header (homogeneous actions);
@@ -352,7 +363,9 @@ export function ArticleListScreen() {
           />
           <View style={styles.brandText}>
             <Text style={[typography.titleLarge, styles.brandTitle]}>LabelScan</Text>
-            <Text style={[typography.labelSmall, styles.brandSubtitle]}>Traçabilité</Text>
+            <Text style={[typography.labelSmall, styles.brandSubtitle]} numberOfLines={1}>
+              {businessProfile.displayName}
+            </Text>
           </View>
         </View>
 
@@ -465,7 +478,7 @@ export function ArticleListScreen() {
                 ref={searchInputRef}
                 value={query}
                 onChangeText={setQuery}
-                placeholder="Rechercher : lot, espèce, zone FAO…"
+                placeholder="Rechercher : produit, lot, origine…"
                 placeholderTextColor={colors.onSurfaceVariant}
                 style={[typography.bodyMedium, styles.searchInput]}
                 autoCapitalize="none"
@@ -523,7 +536,7 @@ export function ArticleListScreen() {
                 Aucun résultat pour « {query.trim()} ».
               </Text>
             </View>
-          ) : pendingScans.length === 0 ? (
+          ) : visiblePendingScans.length === 0 ? (
             selectedDay === todayKey() ? (
               <EmptyState onAction={openCapture} />
             ) : (

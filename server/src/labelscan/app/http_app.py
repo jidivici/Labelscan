@@ -15,8 +15,8 @@ from labelscan.contexts.haccp.adapters.http.lifecycle_router import (
 from labelscan.contexts.haccp.adapters.http.read_router import (
     router as alerts_read_router,
 )
-from labelscan.contexts.identity.adapters.http.admin_router import (
-    router as user_admin_router,
+from labelscan.contexts.identity.adapters.http.access_router import (
+    router as identity_access_router,
 )
 from labelscan.contexts.identity.adapters.http.router import get_session_service
 from labelscan.contexts.identity.adapters.http.router import router as auth_router
@@ -92,7 +92,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CorrelationMiddleware)
     install_error_handlers(app)
     app.include_router(auth_router)  # auth: POST /v1/auth/login (unauthenticated)
-    app.include_router(user_admin_router)  # admin: POST/GET/PATCH /v1/users
+    app.include_router(identity_access_router)  # role-specific IAM + activation
     app.include_router(store_admin_router)  # admin: POST/GET/PATCH /v1/stores
     app.include_router(ingestion_router)  # write: POST /v1/ingestions
     app.include_router(

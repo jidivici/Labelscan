@@ -21,6 +21,8 @@ from labelscan.contexts.haccp.application.alert_service import (
 )
 from labelscan.contexts.haccp.domain.alert import AlertState
 from labelscan.platform.db.audit_context import set_audit_context
+from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.http.access import postgres_scope
 
 
 class SqlAlertRepository(AlertRepository):
@@ -36,9 +38,19 @@ class SqlAlertRepository(AlertRepository):
         audit: AuditContext,
     ) -> AlertState:
         with self._engine.begin() as conn:
+            params: dict[str, object] = {"id": alert_id}
+            conditions = ["alert.id = :id"]
+            if audit.access is not None and audit.access.organization_id:
+                set_tenant_context(conn, audit.access.organization_id)
+                predicate, access_params = postgres_scope(audit.access, alias="alert")
+                conditions.append(predicate)
+                params.update(access_params)
             row = conn.execute(
-                text("SELECT state FROM haccp.alert WHERE id = :id FOR UPDATE"),
-                {"id": alert_id},
+                text(
+                    "SELECT alert.state FROM haccp.alert AS alert WHERE "
+                    f"{' AND '.join(conditions)} FOR UPDATE"
+                ),
+                params,
             ).first()
             if row is None:
                 raise AlertNotFound(alert_id)
@@ -56,8 +68,10 @@ class SqlAlertRepository(AlertRepository):
             )
             conn.execute(
                 text(
-                    "UPDATE haccp.alert SET state = :s, updated_at = clock_timestamp() WHERE id = :id"
+                    "UPDATE haccp.alert SET state = :s, updated_at = clock_timestamp() "
+                    "WHERE id = :id AND id IN (SELECT alert.id FROM haccp.alert AS alert "
+                    f"WHERE {' AND '.join(conditions)})"
                 ),
-                {"s": new_state.value, "id": alert_id},
+                {**params, "s": new_state.value},
             )
         return new_state

@@ -42,9 +42,13 @@ _FIND_EXISTING = text(
 _INSERT_INGESTION = text(
     "INSERT INTO ingestion.ingestion "
     "(id, status, image_ref, checksum_sha256, barcode_raw, client_captured_at, "
-    "organization_id, store_id, store_code, correlation_id, trace_id) "
+    "organization_id, store_id, store_code, business_portal_id, "
+    "trade_code_snapshot, trade_profile_version, captured_by_user_id, "
+    "correlation_id, trace_id) "
     "VALUES (:iid, 'raw_stored', :ref, :ck, :bc, :cca, "
-    ":organization_id, :store_id, :store, :corr, :trace)"
+    ":organization_id, :store_id, :store, :business_portal_id, "
+    ":trade_code_snapshot, :trade_profile_version, :captured_by_user_id, "
+    ":corr, :trace)"
 )
 _INSERT_RAW = text(
     "INSERT INTO ingestion.raw_artifact "
@@ -70,9 +74,11 @@ class SqlIngestionRepository(IngestionWriteRepository):
         route: str,
         content_sha256: str,
         store_code: str | None,
+        business_portal_id: str | None,
     ) -> str:
         return hashlib.sha256(
-            f"{principal}:{store_code or '-'}:{route}:{content_sha256}".encode()
+            f"{principal}:{business_portal_id or store_code or '-'}:{route}:"
+            f"{content_sha256}".encode()
         ).hexdigest()
 
     def persist(
@@ -85,12 +91,18 @@ class SqlIngestionRepository(IngestionWriteRepository):
         store_code: str | None = None,
         organization_id: str | None = None,
         store_id: str | None = None,
+        business_portal_id: str | None = None,
+        trade_code_snapshot: str = "poissonnerie",
+        trade_profile_version: str = "1",
+        captured_by_user_id: str | None = None,
         principal: str,
         route: str,
         audit: AuditContext,
         action: str,
     ) -> PersistResult:
-        scope_hash = self._scope_hash(principal, route, content_sha256, store_code)
+        scope_hash = self._scope_hash(
+            principal, route, content_sha256, store_code, business_portal_id
+        )
         ingestion_id = str(uuid.uuid4())
 
         with self._engine.begin() as conn:
@@ -112,6 +124,21 @@ class SqlIngestionRepository(IngestionWriteRepository):
                 correlation_id=audit.correlation_id,
                 trace_id=audit.trace_id,
             )
+
+            # Production JWTs always name an identity.app_user.  Legacy local
+            # test/header principals may predate that identity row; preserve
+            # ingestion compatibility without weakening the tenant-qualified FK.
+            if captured_by_user_id is not None:
+                captured_by_user_id = conn.execute(
+                    text(
+                        "SELECT id::text FROM identity.app_user "
+                        "WHERE organization_id = :organization_id AND id = :actor_id"
+                    ),
+                    {
+                        "organization_id": organization_id,
+                        "actor_id": captured_by_user_id,
+                    },
+                ).scalar_one_or_none()
 
             claimed = conn.execute(
                 _CLAIM,
@@ -139,6 +166,10 @@ class SqlIngestionRepository(IngestionWriteRepository):
                     "cca": client_captured_at,
                     "store": store_code,
                     "store_id": store_id,
+                    "business_portal_id": business_portal_id,
+                    "trade_code_snapshot": trade_code_snapshot,
+                    "trade_profile_version": trade_profile_version,
+                    "captured_by_user_id": captured_by_user_id,
                 },
             )
             conn.execute(_INSERT_RAW, params)
@@ -152,6 +183,10 @@ class SqlIngestionRepository(IngestionWriteRepository):
                             "image_ref": storage_ref,
                             "organization_id": organization_id,
                             "store_id": store_id,
+                            "business_portal_id": business_portal_id,
+                            "trade_code_snapshot": trade_code_snapshot,
+                            "trade_profile_version": trade_profile_version,
+                            "captured_by_user_id": captured_by_user_id,
                         }
                     ),
                     "corr": audit.correlation_id,

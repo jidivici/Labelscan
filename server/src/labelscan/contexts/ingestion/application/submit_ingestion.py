@@ -42,6 +42,9 @@ class SubmitIngestionCommand:
     store_code: str | None = None
     organization_id: str | None = None
     store_id: str | None = None
+    business_portal_id: str | None = None
+    trade_code_snapshot: str = "poissonnerie"
+    trade_profile_version: str = "1"
 
 
 @dataclass(frozen=True)
@@ -87,6 +90,10 @@ class SubmitIngestion:
             store_code=cmd.store_code,
             organization_id=cmd.organization_id,
             store_id=cmd.store_id,
+            business_portal_id=cmd.business_portal_id,
+            trade_code_snapshot=cmd.trade_code_snapshot,
+            trade_profile_version=cmd.trade_profile_version,
+            captured_by_user_id=cmd.actor_id,
             principal=cmd.principal,
             route=_ROUTE,
             audit=AuditContext(

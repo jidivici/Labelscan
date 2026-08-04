@@ -23,6 +23,7 @@ import { v4 as uuidv4 } from 'uuid';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { UploadFilePart } from './api';
+import { getOperatorContext, type OperatorContext } from './authStorage';
 
 const OUTBOX_KEY = '@labelscan:outbox';
 
@@ -95,6 +96,9 @@ interface OutboxOperationBase {
   result: OutboxResult | null; // set on success; carries the ingestion_id for the next batch
   created_at: string;
   updated_at: string;
+  /** Local replay owner. Never serialized into an HTTP request body. */
+  owner_business_portal_id?: string;
+  owner_trade_code?: string;
 }
 
 export interface CreateIngestionOperation extends OutboxOperationBase {
@@ -250,6 +254,7 @@ async function enqueue(
   opts: EnqueueOptions,
 ): Promise<OutboxOperation> {
   const ts = isoAt(opts.now ?? Date.now());
+  const owner = await getOperatorContext();
   const op = {
     id: opts.id ?? uuidv4(),
     idempotencyKey: opts.idempotencyKey ?? uuidv4(),
@@ -262,10 +267,29 @@ async function enqueue(
     result: null,
     created_at: ts,
     updated_at: ts,
+    ...(owner
+      ? {
+          owner_business_portal_id: owner.businessPortalId,
+          owner_trade_code: owner.tradeCode,
+        }
+      : {}),
     ...fields,
   } as OutboxOperation;
   await mutate((ops) => ({ ops: [...ops, op], result: undefined }));
   return op;
+}
+
+/** Unowned legacy operations remain replayable; new owned writes require an exact context. */
+export function operationMatchesOperatorContext(
+  operation: OutboxOperation,
+  context: OperatorContext | null,
+): boolean {
+  if (!operation.owner_business_portal_id && !operation.owner_trade_code) return true;
+  return (
+    context != null &&
+    operation.owner_business_portal_id === context.businessPortalId &&
+    operation.owner_trade_code === context.tradeCode
+  );
 }
 
 export function enqueueCreateIngestion(

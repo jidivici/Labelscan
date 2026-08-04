@@ -35,8 +35,8 @@ class _Login:
 
 
 class _Sessions:
-    def create(self, user):
-        return RefreshSession(str(uuid.uuid4()), "r" * 43, 604800, user)
+    def create(self, user, client_type="browser"):
+        return RefreshSession(str(uuid.uuid4()), "r" * 43, 604800, user, client_type)
 
 
 def _client() -> TestClient:
@@ -91,7 +91,10 @@ def test_forwarded_ip_is_ignored_for_untrusted_peer(monkeypatch):
     monkeypatch.delenv("LABELSCAN_TRUSTED_PROXIES", raising=False)
     client = _client()
     for index in range(5):
-        assert _login(client, f"user-{index}", "wrong", f"203.0.113.{index}").status_code == 401
+        assert (
+            _login(client, f"user-{index}", "wrong", f"203.0.113.{index}").status_code
+            == 401
+        )
     limited = _login(client, "another-account", "wrong", "192.0.2.55")
     assert limited.status_code == 429
     assert limited.json()["error_code"] == "RATE_LIMITED"

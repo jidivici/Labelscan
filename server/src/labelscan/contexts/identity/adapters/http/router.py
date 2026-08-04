@@ -24,7 +24,13 @@ from labelscan.contexts.identity.application.sessions import (
     RefreshSession,
     SessionService,
 )
-from labelscan.contexts.identity.domain.user import OPERATOR_ROLE, AuthenticatedUser
+from labelscan.contexts.identity.domain.user import (
+    ADMIN_ROLE,
+    MANAGER_ROLE,
+    OPERATOR_ROLE,
+    SUPER_ADMIN_ROLE,
+    AuthenticatedUser,
+)
 from labelscan.platform.config import is_production, public_origin
 from labelscan.platform.http import jwt as jwt_codec
 from labelscan.platform.http.errors import ApiError
@@ -52,6 +58,10 @@ class CurrentUserResponse(BaseModel):
     organization_id: str | None = None
     organization_slug: str = "labelscan"
     store_id: str | None = None
+    business_portal_ids: list[str] = Field(default_factory=list)
+    business_portal_id: str | None = None
+    trade_code: str | None = None
+    client_type: str
 
 
 class LoginResponse(BaseModel):
@@ -73,6 +83,7 @@ _SESSIONS_LOCK = threading.Lock()
 _REFRESH_COOKIE = "labelscan_refresh"
 _REFRESH_COOKIE_PATH = "/v1/auth"
 _log = get_logger("http.security")
+_BROWSER_ROLES = frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE})
 
 
 def get_login() -> Login:
@@ -173,7 +184,7 @@ def _authenticated_user(
     return user
 
 
-def _current_user(user: AuthenticatedUser) -> CurrentUserResponse:
+def _current_user(user: AuthenticatedUser, client_type: str) -> CurrentUserResponse:
     return CurrentUserResponse(
         id=user.actor_id,
         username=user.username,
@@ -183,6 +194,31 @@ def _current_user(user: AuthenticatedUser) -> CurrentUserResponse:
         organization_id=user.organization_id,
         organization_slug=user.organization_slug,
         store_id=user.store_id,
+        business_portal_ids=list(user.business_portal_ids),
+        business_portal_id=user.business_portal_id,
+        trade_code=user.trade_code,
+        client_type=client_type,
+    )
+
+
+def _is_authorized_mobile_operator(user: AuthenticatedUser) -> bool:
+    """Fail closed unless canonical claims describe one active portal and store.
+
+    SQL-backed identities only receive portal/store claims after the repository has
+    joined active assignments to an active portal and active store.  Rechecking the
+    one-to-one shape here also protects alternate adapters and refresh responses.
+    """
+
+    portal_ids = tuple(dict.fromkeys(user.business_portal_ids))
+    store_ids = tuple(dict.fromkeys(user.store_ids))
+    return bool(
+        user.role == OPERATOR_ROLE
+        and len(portal_ids) == 1
+        and user.business_portal_id == portal_ids[0]
+        and user.trade_code
+        and user.store_id
+        and len(store_ids) == 1
+        and user.store_id == store_ids[0]
     )
 
 
@@ -200,6 +236,11 @@ def _access_token(session: RefreshSession) -> tuple[str, int]:
             "organization_id": user.organization_id,
             "organization_slug": user.organization_slug,
             "store_id": user.store_id,
+            "business_portal_ids": list(user.business_portal_ids),
+            "business_portal_id": user.business_portal_id,
+            "trade_code": user.trade_code,
+            "store_ids": list(user.store_ids),
+            "client_type": session.client_type,
             "sid": session.family_id,
         },
         ttl_seconds=ttl,
@@ -213,7 +254,7 @@ def _login_response(session: RefreshSession) -> LoginResponse:
         access_token=token,
         token_type="bearer",
         expires_in=ttl,
-        user=_current_user(session.user),
+        user=_current_user(session.user, session.client_type),
     )
 
 
@@ -258,9 +299,10 @@ def _browser_login(
     sessions: SessionService,
 ) -> LoginResponse:
     _require_browser_origin(request)
-    session = sessions.create(
-        _authenticated_user(body, organization_slug, login_uc, request)
-    )
+    user = _authenticated_user(body, organization_slug, login_uc, request)
+    if user.role not in _BROWSER_ROLES:
+        raise ApiError("FORBIDDEN", "this account cannot access the web portal")
+    session = sessions.create(user, "browser")
     _set_refresh_cookie(response, session)
     return _login_response(session)
 
@@ -314,12 +356,12 @@ def mobile_login(
     sessions: SessionService = Depends(get_session_service),
 ) -> MobileLoginResponse:
     user = _authenticated_user(body, "labelscan", login_uc, request)
-    if user.role != OPERATOR_ROLE:
+    if not _is_authorized_mobile_operator(user):
         raise ApiError(
             "FORBIDDEN",
-            "the mobile application is reserved for store operators",
+            "the mobile application requires one active operator portal",
         )
-    return _mobile_response(sessions.create(user))
+    return _mobile_response(sessions.create(user, "mobile"))
 
 
 @router.post("/v1/mobile/auth/refresh", response_model=MobileLoginResponse)
@@ -328,9 +370,13 @@ def mobile_refresh(
     sessions: SessionService = Depends(get_session_service),
 ) -> MobileLoginResponse:
     try:
-        return _mobile_response(sessions.rotate(body.refresh_token))
+        session = sessions.rotate(body.refresh_token, "mobile")
     except InvalidRefreshToken:
         raise ApiError("UNAUTHENTICATED", "invalid or expired refresh token")
+    if not _is_authorized_mobile_operator(session.user):
+        sessions.revoke(session.refresh_token)
+        raise ApiError("FORBIDDEN", "this account has no active mobile operator portal")
+    return _mobile_response(session)
 
 
 @router.post("/v1/mobile/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
@@ -351,10 +397,14 @@ def browser_refresh(
 ) -> LoginResponse:
     _require_browser_origin(request)
     try:
-        session = sessions.rotate(refresh_token or "")
+        session = sessions.rotate(refresh_token or "", "browser")
     except InvalidRefreshToken:
         _clear_refresh_cookie(response)
         raise ApiError("UNAUTHENTICATED", "invalid or expired refresh token")
+    if session.user.role not in _BROWSER_ROLES:
+        sessions.revoke(session.refresh_token)
+        _clear_refresh_cookie(response)
+        raise ApiError("FORBIDDEN", "this account cannot access the web portal")
     _set_refresh_cookie(response, session)
     return _login_response(session)
 

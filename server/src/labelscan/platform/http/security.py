@@ -34,6 +34,11 @@ class Principal:
     organization_id: str | None = None
     organization_slug: str = "labelscan"
     store_id: str | None = None
+    business_portal_ids: tuple[str, ...] = ()
+    business_portal_id: str | None = None
+    trade_code: str | None = None
+    store_ids: tuple[str, ...] = ()
+    client_type: str = "browser"
 
 
 def _header_auth_enabled() -> bool:
@@ -62,6 +67,15 @@ def _principal_from_bearer(token: str) -> Principal:
     raw_organization_id = claims.get("organization_id")
     raw_organization_slug = claims.get("organization_slug")
     raw_store_id = claims.get("store_id")
+    raw_portal_ids = claims.get("business_portal_ids") or []
+    raw_primary_portal_id = claims.get("business_portal_id")
+    raw_trade_code = claims.get("trade_code")
+    raw_store_ids = claims.get("store_ids") or []
+    raw_client_type = str(claims.get("client_type") or "browser")
+    if not isinstance(raw_portal_ids, list) or not isinstance(raw_store_ids, list):
+        raise ApiError("UNAUTHENTICATED", "token has invalid access claims")
+    if raw_client_type not in {"browser", "mobile"}:
+        raise ApiError("UNAUTHENTICATED", "token has invalid client claim")
     if is_production() and (not raw_organization_id or not raw_organization_slug):
         raise ApiError("UNAUTHENTICATED", "token is missing the tenant claim")
     session_id = claims.get("sid")
@@ -78,11 +92,16 @@ def _principal_from_bearer(token: str) -> Principal:
         scopes=scopes,
         role=str(claims.get("role") or "operator"),
         store_code=str(raw_store_code) if raw_store_code else None,
-        organization_id=(
-            str(raw_organization_id) if raw_organization_id else None
-        ),
+        organization_id=(str(raw_organization_id) if raw_organization_id else None),
         organization_slug=str(raw_organization_slug or "labelscan"),
         store_id=str(raw_store_id) if raw_store_id else None,
+        business_portal_ids=tuple(str(value) for value in raw_portal_ids),
+        business_portal_id=(
+            str(raw_primary_portal_id) if raw_primary_portal_id else None
+        ),
+        trade_code=str(raw_trade_code) if raw_trade_code else None,
+        store_ids=tuple(str(value) for value in raw_store_ids),
+        client_type=raw_client_type,
     )
 
 
@@ -101,6 +120,19 @@ def _principal_from_headers(request: Request) -> Principal:
         organization_id=request.headers.get("X-Organization-Id"),
         organization_slug=request.headers.get("X-Organization-Slug") or "labelscan",
         store_id=request.headers.get("X-Store-Id"),
+        business_portal_ids=tuple(
+            value
+            for value in (request.headers.get("X-Business-Portal-Ids") or "").split()
+            if value
+        ),
+        business_portal_id=request.headers.get("X-Business-Portal-Id"),
+        trade_code=request.headers.get("X-Trade-Code"),
+        store_ids=tuple(
+            value
+            for value in (request.headers.get("X-Store-Ids") or "").split()
+            if value
+        ),
+        client_type=request.headers.get("X-Client-Type") or "browser",
     )
 
 

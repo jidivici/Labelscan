@@ -41,9 +41,10 @@ l'audit trail non contournable, scopes déjà vérifiés par `require_scope` sur
    - `operator` : `ingestion:write ingestion:read extraction:review` (scan + revue + confirm) ;
    - `admin` : tous les scopes métier + gestion des utilisateurs.
    Aucune modification des endpoints : `require_scope` fait déjà le travail.
-3. [x] **Endpoints de gestion** (`identity/adapters/http`) : `POST/GET /v1/users`,
-   `PATCH /v1/users/{id}` (désactivation, reset mot de passe), scope `identity:admin`,
-   audités. Provisioning simple maintenant, SCIM/SSO en phase 5.
+3. [x] **Endpoints de gestion typés** (`identity/adapters/http`) : `/v1/admins`,
+   `/v1/managers` et `/v1/portals/{id}/operators`. Le routeur générique
+   `/v1/users` n'est plus enregistré; les credentials opérateur restent sous le
+   contrôle exclusif du manager et l'administration des admins du super-admin.
 4. [x] **Mobile** : access/refresh dans SecureStore, restauration à froid, refresh sérialisé,
    retry unique et nettoyage en `finally`. Le PIN/kiosque reste un suivi MDM.
 5. [x] **Tests** : chaque rôle sur chaque endpoint clé (matrice), audit `actor_id` distinct

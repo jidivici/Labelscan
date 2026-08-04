@@ -12,9 +12,12 @@ import {
   clearSessionTokens,
   clearUsername,
   getRefreshToken,
+  setOperatorContext,
   setTokens,
   setUsername,
+  type OperatorContext,
 } from './authStorage';
+import { isTradeCode } from './businessProfiles';
 
 interface LoginResponse {
   access_token: string;
@@ -24,14 +27,73 @@ interface LoginResponse {
   refresh_expires_in: number;
   user: {
     role: 'admin' | 'operator';
+    username: string;
+    business_portal_id: string | null;
+    trade_code: string | null;
   };
+}
+
+interface ActivationResponse {
+  username: string;
+  role: string;
+  active: boolean;
+}
+
+export interface OperatorSession extends OperatorContext {
+  username: string;
+}
+
+function operatorSession(response: LoginResponse): OperatorSession {
+  if (response.user.role !== 'operator') {
+    throw new Error('MOBILE_OPERATOR_ONLY');
+  }
+  if (
+    typeof response.user.username !== 'string' ||
+    response.user.username.trim() === '' ||
+    typeof response.user.business_portal_id !== 'string' ||
+    response.user.business_portal_id.trim() === '' ||
+    !isTradeCode(response.user.trade_code)
+  ) {
+    throw new Error('MOBILE_CONTEXT_MISSING');
+  }
+  return {
+    username: response.user.username,
+    businessPortalId: response.user.business_portal_id,
+    tradeCode: response.user.trade_code,
+  };
+}
+
+async function persistSession(
+  response: LoginResponse,
+  fallbackUsername?: string,
+): Promise<OperatorSession> {
+  if (!response?.access_token || !response.refresh_token) {
+    throw new Error('Login response did not include session tokens');
+  }
+  const session = operatorSession(response);
+  try {
+    await Promise.all([
+      setTokens(response.access_token, response.refresh_token),
+      setUsername(session.username || fallbackUsername || ''),
+      setOperatorContext({
+        businessPortalId: session.businessPortalId,
+        tradeCode: session.tradeCode,
+      }),
+    ]);
+  } catch (error) {
+    // SecureStore writes are independent native calls: fail closed if only part of
+    // the session landed, otherwise a token could survive without its portal context.
+    await Promise.allSettled([clearSessionTokens(), clearUsername()]);
+    throw error;
+  }
+  return session;
 }
 
 /**
  * Exchange credentials for a token and store it. Throws (ApiError) on failure —
  * e.g. UNAUTHENTICATED for bad credentials — so the caller can show a message.
  */
-export async function login(username: string, password: string): Promise<void> {
+export async function login(username: string, password: string): Promise<OperatorSession> {
   const res = await apiRequest<LoginResponse>(
     '/v1/mobile/auth/login',
     {
@@ -40,15 +102,24 @@ export async function login(username: string, password: string): Promise<void> {
       skipAuth: true, // the login call must not carry (or react to) a stale token
     },
   );
-  if (!res?.access_token || !res.refresh_token) {
-    throw new Error('Login response did not include session tokens');
-  }
-  if (res.user.role !== 'operator') {
-    throw new Error('MOBILE_OPERATOR_ONLY');
-  }
-  await setTokens(res.access_token, res.refresh_token);
-  // Remember who signed in for the UI. Not a secret; cleared on logout.
-  await setUsername(username);
+  return persistSession(res, username);
+}
+
+/**
+ * Consume the one-use activation token, set the first password, then establish the
+ * mobile session so its portal/trade context comes from the normal login response.
+ */
+export async function activateOperator(
+  token: string,
+  newPassword: string,
+): Promise<OperatorSession> {
+  const activated = await apiRequest<ActivationResponse>('/v1/mobile/auth/activate', {
+    method: 'POST',
+    body: { token: token.trim(), new_password: newPassword },
+    skipAuth: true,
+  });
+  if (activated.role !== 'operator') throw new Error('MOBILE_OPERATOR_ONLY');
+  return login(activated.username, newPassword);
 }
 
 export async function logout(): Promise<void> {
@@ -67,11 +138,11 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function restoreAuthentication(): Promise<boolean> {
+export async function restoreAuthentication(): Promise<OperatorSession | null> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) {
     await clearSessionTokens();
-    return false;
+    return null;
   }
   try {
     const res = await apiRequest<LoginResponse>('/v1/mobile/auth/refresh', {
@@ -81,12 +152,11 @@ export async function restoreAuthentication(): Promise<boolean> {
     });
     if (!res.access_token || !res.refresh_token) {
       await clearSessionTokens();
-      return false;
+      return null;
     }
-    await setTokens(res.access_token, res.refresh_token);
-    return true;
+    return await persistSession(res);
   } catch {
     await clearSessionTokens();
-    return false;
+    return null;
   }
 }

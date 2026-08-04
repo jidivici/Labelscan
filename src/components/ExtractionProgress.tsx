@@ -45,13 +45,7 @@ function AnimatedCheck() {
   );
 }
 
-const STEPS = [
-  { key: 'upload', label: 'Photo envoyée' },
-  { key: 'ocr', label: 'Lecture du texte' },
-  { key: 'llm', label: 'Analyse de l’espèce' },
-] as const;
-
-type StepKey = (typeof STEPS)[number]['key'];
+type StepKey = 'upload' | 'ocr' | 'llm';
 
 function StepRow({ label, status }: { label: string; status: StepStatus }) {
   return (
@@ -83,11 +77,14 @@ export function ExtractionProgress({
   startedAt,
   ready,
   ocrDone = false,
+  analysisLabel = 'Analyse du produit',
 }: {
   startedAt: number;
   ready: boolean;
   /** Real Tier 3 `ocr_done` transit — pins the stage to 'llm' (no more estimating). */
   ocrDone?: boolean;
+  /** Trade-aware wording supplied by the review screen. */
+  analysisLabel?: string;
 }) {
   // Re-render every ~400 ms so the estimated stage advances; stop once the run lands.
   const [, setTick] = useState(0);
@@ -98,6 +95,11 @@ export function ExtractionProgress({
   }, [ready]);
 
   const stage = extractionStage(Date.now() - startedAt, ready, ocrDone);
+  const steps: ReadonlyArray<{ key: StepKey; label: string }> = [
+    { key: 'upload', label: 'Photo envoyée' },
+    { key: 'ocr', label: 'Lecture du texte' },
+    { key: 'llm', label: analysisLabel },
+  ];
   const statusFor = (key: StepKey): StepStatus => {
     if (key === 'upload') return 'done'; // upload finished during the background submit
     if (key === 'ocr') return stage === 'ocr' ? 'active' : 'done';
@@ -108,7 +110,7 @@ export function ExtractionProgress({
 
   return (
     <View style={styles.box}>
-      {STEPS.map((s) => (
+      {steps.map((s) => (
         <StepRow key={s.key} label={s.label} status={statusFor(s.key)} />
       ))}
     </View>

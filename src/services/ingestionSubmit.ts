@@ -18,13 +18,16 @@
 import { ApiError, createIngestion } from './api';
 import {
   enqueueCreateIngestion,
+  getOperation,
   markFailed,
   markInFlight,
   markSucceeded,
+  operationMatchesOperatorContext,
   type CreateIngestionOperation,
   type CreateIngestionPayload,
   type OperationError,
 } from './outbox';
+import { getOperatorContext } from './authStorage';
 
 export type SubmitOutcome =
   | { kind: 'succeeded'; ingestionId: string; replayed: boolean }
@@ -56,6 +59,10 @@ export function enqueueCapture(input: CaptureInput): Promise<CreateIngestionOper
 
 /** Claim the op and execute it ONCE in the foreground, recording the outcome. */
 export async function executeCreateIngestionOp(opId: string): Promise<SubmitOutcome> {
+  const queued = await getOperation(opId);
+  if (queued && !operationMatchesOperatorContext(queued, await getOperatorContext())) {
+    return { kind: 'pending', code: 'CONTEXT_MISMATCH' };
+  }
   const claimed = await markInFlight(opId);
   if (!claimed || claimed.type !== 'create_ingestion') {
     // Could not claim it (already terminal/claimed) — leave for a later drain.

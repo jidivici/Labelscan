@@ -25,7 +25,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { PulseDot } from './PulseDot';
 import { CompletenessGauge } from './CompletenessGauge';
 import { scanStepFromStatus } from '../services/scanSteps';
-import { CANONICAL_FIELD_COUNT } from '../services/fieldCompleteness';
 import type { PendingScan } from '../services/scanQueue';
 import { colors, spacing, radius, typography } from '../theme';
 
@@ -39,6 +38,8 @@ export interface PendingScanCardProps {
   scan: PendingScan;
   /** Filled canonical field count (0..17) for the gauge. */
   filledCount: number;
+  /** Closed contract size for the scan's server-assigned trade. */
+  totalFieldCount: number;
   /** Whether the product name (commercial_designation) is known yet. */
   nameKnown: boolean;
   onOpen: (scan: PendingScan) => void;
@@ -49,6 +50,7 @@ export interface PendingScanCardProps {
 export const PendingScanCard = React.memo(function PendingScanCard({
   scan,
   filledCount,
+  totalFieldCount,
   nameKnown,
   onOpen,
   onRetry,
@@ -61,7 +63,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
   const ready = scan.status === 'ready';
   // Workflow v2: a "ready" scan is only truly "à valider" once all 17 fields are filled.
   // Below that it stays "en cours" and reads "À compléter" — it is NOT an article yet.
-  const complete = ready && filledCount === CANONICAL_FIELD_COUNT;
+  const complete = ready && filledCount === totalFieldCount;
   const displayLabel = ready && !complete ? 'À compléter' : activeLabel;
   // Highlight the active label (accent) while the product name is still unknown.
   const highlightLabel = extracting && !nameKnown;
@@ -201,7 +203,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
             </View>
 
             {errored ? null : showGauge ? (
-              <CompletenessGauge filled={filledCount} loading={extracting} />
+                <CompletenessGauge filled={filledCount} total={totalFieldCount} loading={extracting} />
             ) : (
               <PulseDot size={10} color={colors.primary} />
             )}
