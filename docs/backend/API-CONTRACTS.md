@@ -3,20 +3,24 @@
 **Status:** Core enterprise flow implemented — see
 [`ENTERPRISE-ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md) for the tenant,
 storage and synchronization invariants.
-**Date:** 2026-06-18 (updated from 2026-06-14 design)
+**Date:** 2026-08-04
 **Companion to:** [`BACKEND-ARCHITECTURE.md`](./BACKEND-ARCHITECTURE.md) (see §8 endpoint list,
 §9 error model, §10 auth, §11 idempotency). Machine-readable skeleton:
 [`openapi.v1.yaml`](./openapi.v1.yaml).
 
-**Implementation notes (as of 2026-07-26):**
-- Auth: HS256 JWT (not RS256/OIDC yet); RBAC roles `admin` and `operator` are
-  mapped to least-privilege scopes.
+**Implementation notes (as of 2026-08-04):**
+- Auth: HS256 access JWT plus rotating, server-side refresh sessions. The
+  implemented RBAC roles are `super_admin`, `admin`, `manager`, and `operator`.
+- Data authorization is evaluated independently on the
+  `organization × store × business_portal` dimensions.
 - Default LLM: `claude-haiku-4-5` (not `claude-opus-4-8`); GS1 handles critical exact fields.
 - `extracted_field.source` ∈ `{llm, gs1, human}` (not `{llm, human}`); `field_name` includes `gtin`.
-- Implemented endpoints: POST /o/{organization_slug}/auth/login,
-  POST /mobile/auth/login,
-  POST/GET /users,
-  PATCH/DELETE /users/{id}, POST/GET /stores, PATCH /stores/{code},
+- Implemented identity endpoints include `/o/{organization_slug}/auth/login`,
+  `/mobile/auth/login`, `/auth/activate`, `/me`, `/professions`, `/admins`,
+  `/managers`, `/portals/{portal_id}/operators`, `/stores`, and
+  `/stores/{store_id}/portals`. Generic `/users` reads and writes are disabled in favor of
+  the role-specific administration routes.
+- Implemented business endpoints include
   GET /arrivals, GET /arrivals/{batch_id}, GET /arrivals/{batch_id}/image,
   POST /ingestions, GET /ingestions/{id},
   POST /ingestions/{id}/reviews,
@@ -42,78 +46,139 @@ Common conventions (all operations):
 
 The canonical login route is
 `POST /v1/o/{organization_slug}/auth/login`. The organization is resolved from
-the route, then signed into the JWT with `organization_id`, `organization_slug`,
-`store_id` and `store_code`. The legacy `POST /v1/auth/login` route remains a
-temporary compatibility alias for the default `labelscan` organization.
+the route. The access token is signed with `organization_id`, `organization_slug`, `store_ids`,
+`business_portal_ids`, the primary `business_portal_id`, and `trade_code`. The
+legacy `POST /v1/auth/login` route remains a temporary compatibility alias for
+the default `labelscan` organization.
 Tenant-protected operations never accept an arbitrary organization from the
 request body or query string.
 
-All user and store administration endpoints require `identity:admin`.
-Responses never contain a password or password hash.
+### 0.1 Professions and business portals
 
-- `POST /v1/users` accepts non-empty `username`, `display_name`, `password`,
-  `store_code`, and `role` (`operator` by default). No artificial maximum is
-  imposed on the username or password. An operator must reference an active
-  store. It returns `201`, or `409 USER_ALREADY_EXISTS`.
-- `GET /v1/users` supports `role`, `active`, `store_code`, `q`, `limit` and `offset`, and
-  returns `{items,total,limit,offset}`.
-- `PATCH /v1/users/{id}` accepts any non-empty subset of `display_name`,
-  `password`, `role`, `active`, and `store_code`.
-- `DELETE /v1/users/{id}` performs the same reversible soft-delete as
-  `active=false`, and returns `204`.
-- `POST /v1/stores` creates a store from a unique normalized `code` and `name`;
-  integrations may omit the code and let the service create an opaque internal
-  identifier. `GET /v1/stores` lists or filters stores for administrators,
-  while `GET /v1/stores/current` returns only the assigned store name for an
-  operator. `PATCH /v1/stores/{code}` renames or activates/deactivates one. A
-  store with active users cannot be deactivated.
+`GET /v1/professions` returns the three supported, versioned profiles and their
+common, specific, and required extraction fields:
 
-Deactivation is the supported soft-delete for accounts.
-  An administrator cannot remove their own admin access, and concurrent changes
-  cannot remove the last active administrator (`409
-  SELF_ACCESS_CHANGE_NOT_ALLOWED` / `LAST_ACTIVE_ADMIN`).
+| Code | Display name |
+|---|---|
+| `poissonnerie` | Poissonnerie |
+| `boucherie` | Boucherie |
+| `charcuterie_traiteur` | Charcuterie / Traiteur |
 
-Creates and updates are recorded by a database trigger in
-`audit.audit_log`, in the same transaction, with actions
-`identity.user_created`, `identity.user_updated`, `identity.store_created`, and
-`identity.store_updated`.
+`charcuterie_traiteur` is one profession and one portal; it must never be split
+into separate `charcuterie` and `traiteur` identifiers. A business portal is the
+unique `(organization_id, store_id, profession_code)` access and ownership unit.
+It is soft-activated with `active`; it is never physically deleted at runtime.
+
+### 0.2 Role matrix
+
+Scopes decide *what* an actor may do; persisted organization and portal
+assignments decide *where* they may do it. The database role and assignments are
+authoritative even if a JWT contains a broader, stale, or forged scope.
+
+| Role | Client surface | Visibility | Identity administration |
+|---|---|---|---|
+| `super_admin` | Browser | Entire organization | Create/list/soft-delete admins; all admin powers |
+| `admin` | Browser | Every store and portal in its organization | Invite/list/disable managers; assign manager portals; soft-activate store portals; never handles another user's password |
+| `manager` | Browser | Assigned active portals and their derived stores | Create/list/disable/reassign operators only inside assigned portals; issue operator credential-reset grants |
+| `operator` | Mobile only | Its single active portal and derived store | No web or identity-administration access |
+
+`super_admin` is organization-scoped, not platform-global. Only it may add or
+soft-delete an `admin`. An `admin` cannot set, read, move, or reset credentials.
+
+### 0.3 Identity endpoints and activation
+
+All user responses omit passwords and password hashes. Every generic
+`/v1/users` is not registered; callers use these bounded routes
+instead:
+
+| Method | Path | Contract |
+|---|---|---|
+| `GET` | `/v1/me` | Current user, canonical capabilities/scopes, authorized stores, and detailed authorized portals (`id`, store id/code/name, profession code/name, portal name, `active`) |
+| `POST` | `/v1/me/password` | Authenticated user changes only their own password; all their sessions are revoked |
+| `GET`, `POST` | `/v1/admins` | Super-admin lists or creates inactive admins |
+| `DELETE` | `/v1/admins/{user_id}` | Super-admin-only reversible soft-deactivation |
+| `GET`, `POST` | `/v1/managers` | Admin/super-admin lists or invites managers |
+| `PATCH` | `/v1/managers/{user_id}` | Admin/super-admin toggles manager activity |
+| `PATCH` | `/v1/managers/{user_id}/portals` | Replaces active manager assignments without deleting history |
+| `GET`, `POST` | `/v1/portals/{portal_id}/operators` | Manager lists or invites operators in an assigned portal |
+| `PATCH` | `/v1/portals/{portal_id}/operators/{user_id}` | Manager reassigns or toggles an operator within its portal perimeter |
+| `POST` | `/v1/operators/{user_id}/credential-reset` | Manager invalidates the operator credential, revokes sessions, and receives a one-time reset grant |
+| `GET` | `/v1/stores/{store_id}/portals` | Admin/super-admin sees all organization portals; manager/operator sees only its active assignments; invisible stores return `404` |
+| `PUT` | `/v1/stores/{store_id}/portals` | Admin/super-admin idempotently sets `{portal_id, active}`; no physical delete; deactivation revokes affected sessions |
+
+Creating a store provisions one active portal for each of the three canonical
+professions in the same transaction. Administrators can then deactivate the
+portals that the store does not operate through the endpoint above.
+
+Creating an admin, manager, or operator creates an inactive account and returns
+an opaque activation token exactly once. Only its SHA-256 digest is stored; the
+grant expires after 24 hours. `POST /v1/auth/activate` consumes the token and
+sets the new password. Credential reset follows the same one-time flow and
+never discloses an existing credential. Role, assignment, password, account, or
+portal changes revoke affected refresh sessions.
+
+The mobile client uses `POST /v1/mobile/auth/activate`, which accepts only an
+operator grant. A manager or administrator token is rejected before it is
+consumed, so it remains usable on the browser activation flow.
+
+Account, assignment, store, and portal-state transitions are audited in the
+same database transaction. Assignment and account deletion are soft state
+changes; runtime IAM code has no physical delete path.
 
 ---
 
-## 0.1 Mobile operator login
+### 0.4 Browser and mobile sessions
 
 `POST /v1/mobile/auth/login` accepts the same identifier/password pair as the
-web login but issues a token only for an active `operator` assigned to a store.
-An administrator uses the web back-office and receives `403 FORBIDDEN` on this
-mobile route. No device activation or QR code is required.
+web login but issues tokens only for an active `operator` assigned to an active
+portal. Browser login accepts only `manager`, `admin`, or `super_admin`.
+
+Browser refresh tokens are opaque rotating cookies; mobile refresh tokens are
+returned to the client for secure device storage. Each server session records
+`client_type = browser|mobile`. Login and refresh both reject crossing the
+surface boundary; a browser refresh cannot be replayed on `/mobile/auth/refresh`
+and an operator cannot acquire a browser session.
 
 ---
 
-## 0.2 Store-scoped arrivals — `GET /v1/arrivals`
+### 0.5 Portal-scoped arrivals — `GET /v1/arrivals`
 
 The arrivals feed exposes registered traceability batches as product occurrences.
 It requires `catalog:read`.
 
-- Operators are always restricted server-side to the `store_code` carried by
-  their signed JWT; supplying another store returns `403 FORBIDDEN`.
-- Administrators can query all stores or select `store_code`.
+- Admin and super-admin are organization-wide. Managers and operators are
+  restricted server-side to their `business_portal_ids` and derived stores;
+  requesting another portal returns `403 FORBIDDEN`.
+- `store_code` is repeatable. `business_portal_id` and `profession` select one
+  access dimension; `profession` accepts only `poissonnerie`, `boucherie`, or
+  `charcuterie_traiteur`.
 - `q` searches product/common name, scientific name, lot, GTIN, and supplier.
-- `date_from` and `date_to` filter the immutable batch registration date.
+- Structured filters are `status`, `alert_state`, `completeness_min`,
+  `supplier`, `lot_code`, `gtin`, `captured_by_user_id`, `date_from`, `date_to`,
+  `expiry_from`, `expiry_to`, and repeatable `field_filter=field_name:value`.
+- Sorting supports `recorded_at`, `expiry_date`, `product_name`, `supplier`,
+  `lot_code`, `completeness`, or `status`, with `sort_direction=asc|desc`.
 - Results use `{items,total,limit,offset}` and contain no mutable client-owned
-  data.
+  data. Each item carries its store, portal, profession and trade-profile
+  snapshot, capturing user, completeness, and alert summary.
+- Text prefilters use PostgreSQL trigram indexes over the projection and common
+  supplier/lot expressions. Exact totals are counted separately so the limited
+  page query can use the portal/date or selected expression sort index.
 
-The store is captured when the ingestion is submitted and copied to the
-immutable batch, so historical products do not move if a user later changes
-stores.
+The organization, store, portal, profession code, profile version, and capture
+actor are snapshotted through ingestion, batch, and arrival projection. Historical
+products therefore do not move or change trade if a user is later reassigned.
 
 `GET /v1/arrivals/{batch_id}/image` returns the persisted source photo. It uses
 the same `catalog:read` scope and store isolation as the arrivals feed.
 
 `GET /v1/arrivals/{batch_id}` returns the current append-only projection:
-the canonical 17 fields, validation metadata, revision date and
-`photo_available`. An administrator may read any store in its organization; an
-operator is limited to the store signed into its JWT. Unknown and invisible
-identifiers both return `404`, preventing identifier probing across tenants.
+the profile-specific field set (17 Poissonnerie, 22 Boucherie, or 22
+Charcuterie–Traiteur fields), validation metadata, revision date and
+`photo_available`. Unknown and invisible identifiers both return `404`,
+preventing IDOR probing across organizations, stores, and portals. `403` is
+reserved for an authenticated actor attempting a known operation outside its
+role or requested portal perimeter.
 
 ---
 
@@ -576,7 +641,7 @@ client retry (with backoff + jitter, reusing the same `Idempotency-Key` for unsa
 | `USER_ALREADY_EXISTS` | 409 | Username is already assigned. | No |
 | `STORE_ALREADY_EXISTS` | 409 | Store code is already assigned. | No |
 | `STORE_INACTIVE` | 409 | Disabled store cannot receive an assignment. | No |
-| `STORE_IN_USE` | 409 | Store still has active assigned users. | No |
+| `STORE_IN_USE` | 409 | Store still has active users or active portal assignments. | No |
 | `LAST_ACTIVE_ADMIN` | 409 | Mutation would remove the last active administrator. | No |
 | `SELF_ACCESS_CHANGE_NOT_ALLOWED` | 409 | Administrator tried to revoke their own access. | No |
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | Key reused with a different payload. | No (new key) |

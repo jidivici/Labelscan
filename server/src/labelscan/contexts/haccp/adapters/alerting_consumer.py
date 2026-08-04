@@ -34,6 +34,19 @@ class AlertingConsumer:
 
         batch_id = msg.payload["batch_id"]
         corr, trace = msg.correlation_id, msg.trace_id
+        dimensions = (
+            conn.execute(
+                text(
+                    "SELECT organization_id::text AS organization_id, "
+                    "store_id::text AS store_id, "
+                    "business_portal_id::text AS business_portal_id "
+                    "FROM traceability.batch WHERE id = :batch_id"
+                ),
+                {"batch_id": batch_id},
+            )
+            .mappings()
+            .one()
+        )
 
         if msg.event_type == "batch.flagged":
             set_audit_context(
@@ -52,6 +65,7 @@ class AlertingConsumer:
                 {"issues": msg.payload.get("issues", [])},
                 corr,
                 trace,
+                dimensions,
             )
             return
 
@@ -95,16 +109,28 @@ class AlertingConsumer:
                 v.detail,
                 corr,
                 trace,
+                dimensions,
             )
 
     def _raise(
-        self, conn, batch_id, alert_type, severity, plan_version, detail, corr, trace
+        self,
+        conn,
+        batch_id,
+        alert_type,
+        severity,
+        plan_version,
+        detail,
+        corr,
+        trace,
+        dimensions,
     ) -> None:
         conn.execute(
             text(
-                "INSERT INTO haccp.alert (batch_id, alert_type, severity, control_plan_version, detail, "
-                " correlation_id, trace_id) "
-                "VALUES (:b, :t, :sev, :pv, CAST(:d AS jsonb), :corr, :trace)"
+                "INSERT INTO haccp.alert (batch_id, organization_id, store_id, "
+                "business_portal_id, alert_type, severity, control_plan_version, detail, "
+                "correlation_id, trace_id) "
+                "VALUES (:b, :organization_id, :store_id, :business_portal_id, "
+                ":t, :sev, :pv, CAST(:d AS jsonb), :corr, :trace)"
             ),
             {
                 "b": batch_id,
@@ -114,5 +140,8 @@ class AlertingConsumer:
                 "d": json.dumps(detail),
                 "corr": corr,
                 "trace": trace,
+                "organization_id": dimensions["organization_id"],
+                "store_id": dimensions["store_id"],
+                "business_portal_id": dimensions["business_portal_id"],
             },
         )

@@ -11,7 +11,7 @@
  */
 
 /** Fields the operator types as a calendar date (number-pad + DD/MM/YYYY mask). */
-export const DATE_FIELDS = new Set(['expiry_date', 'packaging_date']);
+export const DATE_FIELDS = new Set(['expiry_date', 'packaging_date', 'preparation_date']);
 
 export function isDateField(fieldName: string): boolean {
   return DATE_FIELDS.has(fieldName);

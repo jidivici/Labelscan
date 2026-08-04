@@ -18,6 +18,7 @@ from labelscan.contexts.haccp.application.alert_service import (
     AuditContext,
 )
 from labelscan.contexts.haccp.domain.alert import InvalidAlertTransition
+from labelscan.platform.http.access import access_context_for_principal
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
 
@@ -50,6 +51,7 @@ def _audit(request: Request, principal: Principal) -> AuditContext:
         actor_id=principal.actor_id,
         correlation_id=request.state.correlation_id,
         trace_id=request.state.trace_id,
+        access=access_context_for_principal(principal),
     )
 
 

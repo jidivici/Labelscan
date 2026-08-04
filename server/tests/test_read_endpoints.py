@@ -136,9 +136,11 @@ def seeded(client, engine, raw_store):
         c.execute(
             text(
                 "INSERT INTO platform.outbox (event_type, payload, correlation_id, trace_id) "
-                "VALUES ('ingestion.raw_stored', CAST(:p AS jsonb), 'c', 't')"
+                "SELECT 'ingestion.raw_stored', jsonb_build_object("
+                "'ingestion_id', id::text, 'organization_id', organization_id::text), "
+                "'c', 't' FROM ingestion.ingestion WHERE id = :id"
             ),
-            {"p": f'{{"ingestion_id": "{ingestion_id}"}}'},
+            {"id": ingestion_id},
         )
     _extraction_only_worker(engine, raw_store).run_once()
     return ingestion_id

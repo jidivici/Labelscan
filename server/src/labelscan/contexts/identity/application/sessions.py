@@ -23,16 +23,25 @@ class RefreshSession:
     refresh_token: str
     refresh_expires_in: int
     user: AuthenticatedUser
+    client_type: str = "browser"
 
 
 class SessionRepository(Protocol):
     def create(
-        self, user: AuthenticatedUser, token_hash: str, ttl_seconds: int
+        self,
+        user: AuthenticatedUser,
+        token_hash: str,
+        ttl_seconds: int,
+        client_type: str,
     ) -> str: ...
 
     def rotate(
-        self, token_hash: str, replacement_hash: str, ttl_seconds: int
-    ) -> tuple[str, AuthenticatedUser]: ...
+        self,
+        token_hash: str,
+        replacement_hash: str,
+        ttl_seconds: int,
+        expected_client_type: str,
+    ) -> tuple[str, AuthenticatedUser, str]: ...
 
     def revoke(self, token_hash: str) -> None: ...
 
@@ -64,21 +73,32 @@ class SessionService:
     def __init__(self, repository: SessionRepository) -> None:
         self._repository = repository
 
-    def create(self, user: AuthenticatedUser) -> RefreshSession:
+    def create(
+        self, user: AuthenticatedUser, client_type: str = "browser"
+    ) -> RefreshSession:
+        if client_type not in {"browser", "mobile"}:
+            raise ValueError("unknown authentication client type")
         token = _new_token()
         ttl = refresh_ttl_seconds()
-        family_id = self._repository.create(user, token_digest(token), ttl)
-        return RefreshSession(family_id, token, ttl, user)
+        family_id = self._repository.create(user, token_digest(token), ttl, client_type)
+        return RefreshSession(family_id, token, ttl, user, client_type)
 
-    def rotate(self, token: str) -> RefreshSession:
+    def rotate(
+        self, token: str, expected_client_type: str = "browser"
+    ) -> RefreshSession:
         if not token:
+            raise InvalidRefreshToken()
+        if expected_client_type not in {"browser", "mobile"}:
             raise InvalidRefreshToken()
         replacement = _new_token()
         ttl = refresh_ttl_seconds()
-        family_id, user = self._repository.rotate(
-            token_digest(token), token_digest(replacement), ttl
+        family_id, user, client_type = self._repository.rotate(
+            token_digest(token),
+            token_digest(replacement),
+            ttl,
+            expected_client_type,
         )
-        return RefreshSession(family_id, replacement, ttl, user)
+        return RefreshSession(family_id, replacement, ttl, user, client_type)
 
     def revoke(self, token: str) -> None:
         if token:

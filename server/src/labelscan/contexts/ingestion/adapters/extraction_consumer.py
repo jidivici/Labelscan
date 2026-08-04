@@ -30,6 +30,7 @@ from typing import Protocol
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from labelscan.business_profiles import TradeProfile, trade_profile
 from labelscan.contexts.ingestion.application.extraction_ports import (
     LlmExtractor,
     LlmResult,
@@ -233,12 +234,20 @@ class ExtractionConsumer:
     # -- outbox handler signature: (message, worker transaction connection) --
     def __call__(self, msg: _RelayMessage, worker_conn: Connection) -> None:
         ingestion_id = msg.payload["ingestion_id"]
+        organization_id = msg.payload["organization_id"]
         corr, trace = msg.correlation_id, msg.trace_id
 
         # Deterministic socle FIRST: parse the native-scanned barcode (exact data).
-        image_bytes, image_artifact_id, barcode_raw, organization_id = self._load_image_meta(
-            ingestion_id
-        )
+        (
+            image_bytes,
+            image_artifact_id,
+            barcode_raw,
+            loaded_organization_id,
+            profile,
+        ) = self._load_image_meta(ingestion_id, organization_id)
+        if loaded_organization_id != organization_id:
+            raise LookupError("ingestion tenant does not match its outbox event")
+        active_rule_set = self._rule_set_for(profile)
         gs1 = parse_gs1(barcode_raw)
         known = tuple(gs1_resolved_field_names(gs1))  # prompt hint (advisory only)
 
@@ -253,7 +262,14 @@ class ExtractionConsumer:
                 )
             )
         except _ProviderExhausted as e:
-            self._persist_failed(worker_conn, ingestion_id, corr, trace, error=str(e))
+            self._persist_failed(
+                worker_conn,
+                ingestion_id,
+                corr,
+                trace,
+                error=str(e),
+                rule_set_version=active_rule_set.version,
+            )
             return
         # Latency instrumentation: ~0 ms on a dedup/replay (no external call), the real
         # provider time on a miss — isolates the dominant cost (docs/LATENCY-REVIEW.md §6).
@@ -283,7 +299,13 @@ class ExtractionConsumer:
                 image_artifact_id=image_artifact_id,
             )
             self._persist_skipped_garbage(
-                worker_conn, ingestion_id, reconciled, ocr_artifact_id, corr, trace
+                worker_conn,
+                ingestion_id,
+                reconciled,
+                ocr_artifact_id,
+                corr,
+                trace,
+                rule_set_version=active_rule_set.version,
             )
             return
 
@@ -323,13 +345,21 @@ class ExtractionConsumer:
                     known,
                     corr,
                     trace,
+                    profile=profile,
                     llm=self._llm,
                     model=self._llm.model,
                     is_primary=True,
                 )
             )
         except _ProviderExhausted as e:
-            self._persist_failed(worker_conn, ingestion_id, corr, trace, error=str(e))
+            self._persist_failed(
+                worker_conn,
+                ingestion_id,
+                corr,
+                trace,
+                error=str(e),
+                rule_set_version=active_rule_set.version,
+            )
             return
         llm_ms = (time.monotonic() - _llm_t0) * 1000.0
         # The two external-call durations, side by side — so the dominant cost (almost
@@ -349,7 +379,7 @@ class ExtractionConsumer:
         )
 
         # The anti-fabrication gate runs on the PRIMARY LLM fields UNCHANGED.
-        verdict = self._gate(llm.fields, ocr)
+        verdict = self._gate(llm.fields, ocr, active_rule_set)
 
         # --- Two-tier escalation (Work Item A), BETWEEN the gate and reconcile. ---
         # The gate, GS1 precedence, and domain stay untouched. Escalate at most ONCE,
@@ -359,7 +389,11 @@ class ExtractionConsumer:
         # budget; on exhaustion we fall back to the primary verdict (no unbounded loop).
         escalation_model: str | None = None
         recoverable = self._recoverable_free_text(verdict, known)
-        if self._escalation_enabled and self._escalation_llm is not None and recoverable:
+        if (
+            self._escalation_enabled
+            and self._escalation_llm is not None
+            and recoverable
+        ):
             _log.info(
                 "llm_escalation_total",
                 extra={
@@ -379,6 +413,7 @@ class ExtractionConsumer:
                         known,
                         corr,
                         trace,
+                        profile=profile,
                         llm=self._escalation_llm,
                         model=self._escalation_llm.model,
                         is_primary=False,
@@ -403,9 +438,12 @@ class ExtractionConsumer:
                 # set ONCE so missing_required/unverifiable/etc. are the gate's own
                 # verdict (no relaxation, no re-implementation of the gate).
                 merged = _merge_raw_fields(
-                    llm.fields, esc.fields, verdict.fields, self._gate(esc.fields, ocr).fields
+                    llm.fields,
+                    esc.fields,
+                    verdict.fields,
+                    self._gate(esc.fields, ocr, active_rule_set).fields,
                 )
-                verdict = self._gate(merged, ocr)
+                verdict = self._gate(merged, ocr, active_rule_set)
                 escalation_model = self._escalation_llm.model
 
         # NET-NEW metric: the gate coerced fabricated (non-substring) evidence to null.
@@ -456,15 +494,29 @@ class ExtractionConsumer:
             corr,
             trace,
             escalation_model=escalation_model,
+            rule_set_version=active_rule_set.version,
         )
 
-    def _gate(self, fields: tuple[LlmField, ...], ocr: OcrResult) -> GateVerdict:
+    def _rule_set_for(self, profile: TradeProfile) -> RuleSet:
+        if profile.code == "poissonnerie":
+            return self._rule_set
+        return RuleSet(
+            version=f"trade-profile:{profile.code}:v{profile.version}",
+            required_fields=frozenset(profile.required_fields),
+        )
+
+    def _gate(
+        self,
+        fields: tuple[LlmField, ...],
+        ocr: OcrResult,
+        rule_set: RuleSet,
+    ) -> GateVerdict:
         """Run the anti-fabrication gate (the trust boundary) — never relaxed."""
         return evaluate(
             fields,
             ocr_text=ocr.full_text,
             ocr_confidence=ocr.mean_confidence,
-            rule_set=self._rule_set,
+            rule_set=rule_set,
             thresholds=self._thresholds,
             page=ocr.page,
         )
@@ -480,9 +532,7 @@ class ExtractionConsumer:
         weak = set(verdict.missing_required) | set(verdict.low_confidence_required)
         gs1_known_set = set(gs1_known)
         return frozenset(
-            n
-            for n in weak
-            if n not in gs1_known_set and n not in _GS1_OWNED_FIELDS
+            n for n in weak if n not in gs1_known_set and n not in _GS1_OWNED_FIELDS
         )
 
     def _with_provider_retry(self, fn):
@@ -499,32 +549,44 @@ class ExtractionConsumer:
     # ---- step helpers -------------------------------------------------------
 
     def _load_image_meta(
-        self, ingestion_id: str
-    ) -> tuple[bytes, str, str | None, str]:
-        """Return image bytes, artifact id, barcode and tenant id."""
-        with self._engine.connect() as c:
+        self, ingestion_id: str, organization_id: str
+    ) -> tuple[bytes, str, str | None, str, TradeProfile]:
+        """Return image bytes, artifact id, barcode, tenant and trade profile."""
+        with self._engine.begin() as c:
+            set_tenant_context(c, organization_id)
             row = (
                 c.execute(
                     text(
-                        "SELECT id::text AS id, checksum_sha256, "
-                        "organization_id::text AS organization_id "
-                        "FROM ingestion.raw_artifact "
-                        "WHERE ingestion_id = :id AND artifact_kind = 'image' ORDER BY occurred_at LIMIT 1"
+                        "SELECT artifact.id::text AS id, artifact.checksum_sha256, "
+                        "artifact.organization_id::text AS organization_id, "
+                        "ingestion.barcode_raw, ingestion.trade_code_snapshot, "
+                        "ingestion.trade_profile_version "
+                        "FROM ingestion.raw_artifact AS artifact "
+                        "JOIN ingestion.ingestion AS ingestion "
+                        "ON ingestion.id = artifact.ingestion_id "
+                        "WHERE artifact.ingestion_id = :id "
+                        "AND artifact.artifact_kind = 'image' "
+                        "ORDER BY artifact.occurred_at LIMIT 1"
                     ),
                     {"id": ingestion_id},
                 )
                 .mappings()
                 .one()
             )
-            barcode_raw = c.execute(
-                text("SELECT barcode_raw FROM ingestion.ingestion WHERE id = :id"),
-                {"id": ingestion_id},
-            ).scalar_one()
         image_bytes = self._raw.read(
             checksum=row["checksum_sha256"],
             organization_id=row["organization_id"],
         )
-        return image_bytes, row["id"], barcode_raw, row["organization_id"]
+        profile = trade_profile(
+            row["trade_code_snapshot"], row["trade_profile_version"]
+        )
+        return (
+            image_bytes,
+            row["id"],
+            row["barcode_raw"],
+            row["organization_id"],
+            profile,
+        )
 
     def _ensure_ocr(
         self, ingestion_id, organization_id, image_bytes, corr, trace
@@ -592,6 +654,7 @@ class ExtractionConsumer:
         corr,
         trace,
         *,
+        profile: TradeProfile,
         llm: LlmExtractor,
         model: str,
         is_primary: bool,
@@ -627,9 +690,12 @@ class ExtractionConsumer:
                     )
                 )
 
-            result = llm.run(
-                ocr_text, known_field_names
-            )  # <-- external call (only on miss)
+            result = llm.run(  # <-- external call (only on miss)
+                ocr_text,
+                known_field_names,
+                trade_code=profile.code,
+                trade_profile_version=profile.version,
+            )
             normalized = _llm_to_json(result)
             checksum = _sha(normalized)
             ref = self._raw.put(
@@ -743,6 +809,7 @@ class ExtractionConsumer:
         trace,
         *,
         escalation_model: str | None = None,
+        rule_set_version: str,
     ) -> None:
         set_audit_context(
             conn,
@@ -776,7 +843,7 @@ class ExtractionConsumer:
                 "llm": llm.model,
                 "esc": escalation_model,
                 "ocr_ref": ocr_artifact_id,
-                "rsv": self._rule_set.version,
+                "rsv": rule_set_version,
                 "corr": corr,
                 "trace": trace,
             },
@@ -835,7 +902,15 @@ class ExtractionConsumer:
             )
 
     def _persist_skipped_garbage(
-        self, conn, ingestion_id, reconciled, ocr_artifact_id, corr, trace
+        self,
+        conn,
+        ingestion_id,
+        reconciled,
+        ocr_artifact_id,
+        corr,
+        trace,
+        *,
+        rule_set_version: str,
     ) -> None:
         """Persist an OCR-quality-gated run: the LLM was SKIPPED (illegible image), so
         the run outcome is needs_review and the ingestion status is the distinct
@@ -873,7 +948,7 @@ class ExtractionConsumer:
                 "ocrp": self._ocr.name,
                 "llm": self._llm.model,
                 "ocr_ref": ocr_artifact_id,
-                "rsv": self._rule_set.version,
+                "rsv": rule_set_version,
                 "corr": corr,
                 "trace": trace,
             },
@@ -903,7 +978,16 @@ class ExtractionConsumer:
             conn, ingestion_id, str(run_id), "needs_review", corr, trace
         )
 
-    def _persist_failed(self, conn, ingestion_id, corr, trace, *, error: str) -> None:
+    def _persist_failed(
+        self,
+        conn,
+        ingestion_id,
+        corr,
+        trace,
+        *,
+        error: str,
+        rule_set_version: str,
+    ) -> None:
         set_audit_context(
             conn,
             actor_id=SYSTEM_ACTOR,
@@ -930,7 +1014,7 @@ class ExtractionConsumer:
                 "att": attempt_no,
                 "ocrp": self._ocr.name,
                 "llm": self._llm.model,
-                "rsv": self._rule_set.version,
+                "rsv": rule_set_version,
                 "corr": corr,
                 "trace": trace,
             },

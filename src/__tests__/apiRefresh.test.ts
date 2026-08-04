@@ -11,12 +11,14 @@ describe('API access-token refresh', () => {
 
   it('serializes refresh and retries concurrent failed requests once', async () => {
     const setTokens = jest.fn().mockResolvedValue(undefined);
+    const setOperatorContext = jest.fn().mockResolvedValue(undefined);
     jest.doMock('../services/authStorage', () => ({
       clearSessionTokens: jest.fn(),
       emitUnauthenticated: jest.fn(),
       getRefreshToken: jest.fn().mockResolvedValue('refresh-old'),
       getToken: jest.fn().mockResolvedValue('access-old'),
       setTokens,
+      setOperatorContext,
     }));
 
     let resourceCalls = 0;
@@ -31,7 +33,15 @@ describe('API access-token refresh', () => {
         refreshCalls += 1;
         await refreshGate;
         return new Response(
-          JSON.stringify({ access_token: 'access-new', refresh_token: 'refresh-new' }),
+          JSON.stringify({
+            access_token: 'access-new',
+            refresh_token: 'refresh-new',
+            user: {
+              role: 'operator',
+              business_portal_id: 'portal-1',
+              trade_code: 'poissonnerie',
+            },
+          }),
           { status: 200 },
         );
       }
@@ -57,5 +67,9 @@ describe('API access-token refresh', () => {
     expect(refreshCalls).toBe(1);
     expect(resourceCalls).toBe(4);
     expect(setTokens).toHaveBeenCalledWith('access-new', 'refresh-new');
+    expect(setOperatorContext).toHaveBeenCalledWith({
+      businessPortalId: 'portal-1',
+      tradeCode: 'poissonnerie',
+    });
   });
 });

@@ -90,6 +90,30 @@ class TemperatureRecorder:
             if violation is None:
                 return TemperatureRecorded(alert_raised=False)
 
+            dimensions = (
+                conn.execute(
+                    text(
+                        "SELECT organization_id::text AS organization_id, "
+                        "store_id::text AS store_id, "
+                        "business_portal_id::text AS business_portal_id "
+                        "FROM traceability.batch WHERE id = :batch_id"
+                    ),
+                    {"batch_id": batch_id},
+                )
+                .mappings()
+                .first()
+            )
+            if dimensions is None:
+                dimensions = {
+                    "organization_id": str(
+                        conn.execute(
+                            text("SELECT platform.default_organization_id()")
+                        ).scalar_one()
+                    ),
+                    "store_id": None,
+                    "business_portal_id": None,
+                }
+
             set_audit_context(
                 conn,
                 actor_id=actor_id,
@@ -99,9 +123,11 @@ class TemperatureRecorder:
             )
             conn.execute(
                 text(
-                    "INSERT INTO haccp.alert (batch_id, alert_type, severity, control_plan_version, detail, "
-                    " correlation_id, trace_id) "
-                    "VALUES (:b, 'temperature', :sev, :pv, CAST(:d AS jsonb), :corr, :trace)"
+                    "INSERT INTO haccp.alert (batch_id, organization_id, store_id, "
+                    "business_portal_id, alert_type, severity, control_plan_version, detail, "
+                    "correlation_id, trace_id) "
+                    "VALUES (:b, :organization_id, :store_id, :business_portal_id, "
+                    "'temperature', :sev, :pv, CAST(:d AS jsonb), :corr, :trace)"
                 ),
                 {
                     "b": batch_id,
@@ -110,6 +136,9 @@ class TemperatureRecorder:
                     "d": json.dumps(violation.detail),
                     "corr": correlation_id,
                     "trace": trace_id,
+                    "organization_id": dimensions["organization_id"],
+                    "store_id": dimensions["store_id"],
+                    "business_portal_id": dimensions["business_portal_id"],
                 },
             )
             return TemperatureRecorded(alert_raised=True)

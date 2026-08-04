@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 
+from labelscan.business_profiles import TradeProfile, trade_profile
 from labelscan.contexts.ingestion.application.extraction_ports import LlmResult
 from labelscan.contexts.ingestion.domain.extraction import LlmField
 from labelscan.platform.config import secret_value
@@ -98,69 +99,67 @@ ESCALATION_ENABLED = _env_bool("LABELSCAN_LLM_ESCALATION_ENABLED", False)
 # which would move the breakpoint onto the dynamic message and miss). TTL + toggle
 # are config; when disabled we send no cache_control at all.
 _PROMPT_CACHE_ENABLED = _env_bool("LABELSCAN_LLM_PROMPT_CACHE_ENABLED", True)
-_PROMPT_CACHE_TTL = (os.environ.get("LABELSCAN_LLM_PROMPT_CACHE_TTL") or "1h").strip() or "1h"
-_FIELD_NAMES = [
-    "commercial_designation",
-    "scientific_name",
-    "producer_name",
-    "reseller_brand",
-    "batch_number",
-    "origin_country",
-    "FAO_area",
-    "production_method",
-    "fishing_gear_or_farming_method",
-    "expiry_date",
-    "packaging_date",
-    "storage_temperature",
-    "allergens",
-    "health_mark",
-    "weight",
-    "price",
-    "gtin",
-]
+_PROMPT_CACHE_TTL = (
+    os.environ.get("LABELSCAN_LLM_PROMPT_CACHE_TTL") or "1h"
+).strip() or "1h"
+_FIELD_NAMES = list(trade_profile("poissonnerie").fields)
+
 
 # Compact projection of extraction.v1 (the authoritative schema is
 # docs/extraction/schema/extraction.v1.schema.json; keep in sync).
-_OUTPUT_SCHEMA = {
-    "type": "object",
-    "additionalProperties": False,
-    "required": ["fields"],
-    "properties": {
-        "fields": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "additionalProperties": False,
-                "required": [
-                    "name",
-                    "value",
-                    "confidence",
-                    "evidence",
-                    "validation_status",
-                    "warnings",
-                ],
-                "properties": {
-                    "name": {"type": "string", "enum": _FIELD_NAMES},
-                    "value": {"type": ["string", "null"]},
-                    "confidence": {"type": "number"},
-                    "evidence": {"type": "array", "items": {"type": "string"}},
-                    "validation_status": {
-                        "type": "string",
-                        "enum": [
-                            "present",
-                            "missing",
-                            "ambiguous",
-                            "normalized",
-                            "unnormalizable",
-                            "invalid",
-                        ],
+def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
+    names = list(field_names)
+    return {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["fields"],
+        "properties": {
+            "fields": {
+                "type": "array",
+                "minItems": len(names),
+                "maxItems": len(names),
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": [
+                        "name",
+                        "value",
+                        "confidence",
+                        "evidence",
+                        "validation_status",
+                        "warnings",
+                    ],
+                    "properties": {
+                        "name": {"type": "string", "enum": names},
+                        "value": {"type": ["string", "null"]},
+                        "confidence": {"type": "number"},
+                        "evidence": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                        "validation_status": {
+                            "type": "string",
+                            "enum": [
+                                "present",
+                                "missing",
+                                "ambiguous",
+                                "normalized",
+                                "unnormalizable",
+                                "invalid",
+                            ],
+                        },
+                        "warnings": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
                     },
-                    "warnings": {"type": "array", "items": {"type": "string"}},
                 },
-            },
-        }
-    },
-}
+            }
+        },
+    }
+
+
+_OUTPUT_SCHEMA = _output_schema(_FIELD_NAMES)
 
 # STATIC, cacheable system prefix (Work Item B). Authored faithfully to the
 # seafood-label-extraction contract (docs/extraction/PROMPT-CONTRACT.md sec.3) for
@@ -535,6 +534,49 @@ EXPECTED JSON:
 Return only the JSON object."""
 
 
+_TRADE_GUIDANCE = {
+    "boucherie": (
+        "For animal_species and cut_name copy the explicit species and cut. "
+        "Keep birth_country, rearing_country, slaughter_country and cutting_country "
+        "separate; never infer one country from another. Copy slaughterhouse_approval "
+        "and cutting_plant_approval only from explicit establishment approval marks."
+    ),
+    "charcuterie_traiteur": (
+        "Distinguish product_family from commercial_designation and manufacturer_name "
+        "from reseller_brand. Copy preparation_date, conditioning_type, storage_mode, "
+        "use_instructions and reheating_instructions only when explicit. Ingredients "
+        "and additives must remain verbatim and must never be reconstructed."
+    ),
+}
+
+
+def _system_text_for(profile: TradeProfile) -> str:
+    if profile.code == "poissonnerie":
+        return _SYSTEM_TEXT
+    names = ", ".join(profile.fields)
+    required = ", ".join(profile.required_fields)
+    return f"""\
+You are a deterministic information-extraction function for a French food label in
+the {profile.display_name} trade. Return only one JSON object with a fields array.
+The closed field set is exactly: {names}.
+Return each field exactly once. Required operational fields are: {required}.
+For an absent value return null, confidence 0, empty evidence, status missing and no
+warning. Never guess, translate, repair OCR, use outside knowledge, or infer a value
+from another field. Every non-null value must be copied from the OCR text and every
+evidence item must be an exact OCR substring. Use ambiguous when several readings are
+possible and explain only in warnings. Dates use YYYY-MM-DD only when unambiguous;
+otherwise return null. GTIN and other GS1-resolved fields are supplied separately and
+must not be derived from unrelated numbers. Health/approval marks do not prove origin.
+{_TRADE_GUIDANCE[profile.code]}
+Return only the JSON object."""
+
+
+def _profile_prompt_version(profile: TradeProfile) -> str:
+    if profile.code == "poissonnerie":
+        return _PROMPT_VERSION
+    return f"food-label-extraction/{profile.code}/v{profile.version}"
+
+
 def _supports_effort_thinking(model: str) -> bool:
     # `output_config.effort` and adaptive thinking are Opus/Sonnet-4.6+ features.
     # Haiku 4.5 REJECTS effort (400) and has no adaptive thinking — send neither.
@@ -579,18 +621,33 @@ class ClaudeLlmExtractor:
     def model(self) -> str:
         return self._model
 
-    def run(self, ocr_text: str, known_field_names: tuple[str, ...] = ()) -> LlmResult:
+    def run(
+        self,
+        ocr_text: str,
+        known_field_names: tuple[str, ...] = (),
+        *,
+        trade_code: str = "poissonnerie",
+        trade_profile_version: str = "1",
+    ) -> LlmResult:
+        profile = trade_profile(trade_code, trade_profile_version)
         # The system prompt is the stable, >=4096-token static prefix; one explicit
         # cache_control breakpoint at its end lets Anthropic bill it at ~0.1x on a hit
         # (Haiku 4.5 caches only >=4096-token prefixes). OCR text + the GS1 hint stay in
         # the dynamic user message, so the cached prefix is identical across labels.
         # When caching is disabled, send no cache_control (plain static prefix).
-        system_block: dict = {"type": "text", "text": _SYSTEM_TEXT}
-        if _PROMPT_CACHE_ENABLED:
-            system_block["cache_control"] = {"type": "ephemeral", "ttl": _PROMPT_CACHE_TTL}
+        system_text = _system_text_for(profile)
+        system_block: dict = {"type": "text", "text": system_text}
+        if _PROMPT_CACHE_ENABLED and profile.code == "poissonnerie":
+            system_block["cache_control"] = {
+                "type": "ephemeral",
+                "ttl": _PROMPT_CACHE_TTL,
+            }
         system = [system_block]
         output_config: dict = {
-            "format": {"type": "json_schema", "schema": _OUTPUT_SCHEMA}
+            "format": {
+                "type": "json_schema",
+                "schema": _output_schema(profile.fields),
+            }
         }
         kwargs: dict = {
             "model": self._model,
@@ -631,6 +688,19 @@ class ClaudeLlmExtractor:
 
         text_out = next((b.text for b in resp.content if b.type == "text"), "")
         data = json.loads(text_out)
+        raw_fields = data.get("fields")
+        expected_names = set(profile.fields)
+        actual_names = (
+            [field.get("name") for field in raw_fields]
+            if isinstance(raw_fields, list)
+            else []
+        )
+        if (
+            len(actual_names) != len(profile.fields)
+            or len(set(actual_names)) != len(actual_names)
+            or set(actual_names) != expected_names
+        ):
+            raise RuntimeError(f"LLM returned an invalid {profile.code} field contract")
         fields = tuple(
             LlmField(
                 name=f["name"],
@@ -640,12 +710,13 @@ class ClaudeLlmExtractor:
                 validation_status=f["validation_status"],
                 warnings=tuple(f.get("warnings") or ()),
             )
-            for f in data["fields"]
+            for f in raw_fields
         )
+        prompt_version = _profile_prompt_version(profile)
         return LlmResult(
             raw_json=text_out.encode(),
             fields=fields,
-            extractor_version=_PROMPT_VERSION,
+            extractor_version=prompt_version,
             model=self._model,
-            prompt_version=_PROMPT_VERSION,
+            prompt_version=prompt_version,
         )

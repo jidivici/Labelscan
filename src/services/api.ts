@@ -24,8 +24,10 @@ import {
   emitUnauthenticated,
   getRefreshToken,
   getToken,
+  setOperatorContext,
   setTokens,
 } from './authStorage';
+import { isTradeCode } from './businessProfiles';
 import type {
   CreateIngestionResponse,
   ExtractionRunResponse,
@@ -92,7 +94,20 @@ async function refreshAccessToken(): Promise<string | null> {
       if (typeof body.access_token !== 'string' || typeof body.refresh_token !== 'string') {
         return null;
       }
-      await setTokens(body.access_token, body.refresh_token);
+      if (
+        body.user?.role !== 'operator' ||
+        typeof body.user.business_portal_id !== 'string' ||
+        !isTradeCode(body.user.trade_code)
+      ) {
+        return null;
+      }
+      await Promise.all([
+        setTokens(body.access_token, body.refresh_token),
+        setOperatorContext({
+          businessPortalId: body.user.business_portal_id,
+          tradeCode: body.user.trade_code,
+        }),
+      ]);
       return body.access_token;
     } catch {
       return null;

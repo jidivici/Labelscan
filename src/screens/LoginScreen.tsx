@@ -25,16 +25,28 @@ import { useAuth } from '../context/AuthContext';
 import { ApiError } from '../services/api';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 
-function messageForError(err: unknown): string {
+type AuthMode = 'login' | 'activation';
+
+function messageForError(err: unknown, mode: AuthMode): string {
   if (err instanceof Error && err.message === 'MOBILE_OPERATOR_ONLY') {
     return 'L’application mobile est réservée aux opérateurs.';
+  }
+  if (err instanceof Error && err.message === 'MOBILE_CONTEXT_MISSING') {
+    return 'Ce compte opérateur n’est pas rattaché à un portail métier compatible.';
   }
   if (err instanceof ApiError) {
     if (err.code === 'FORBIDDEN' || err.status === 403) {
       return 'L’application mobile est réservée aux opérateurs.';
     }
     if (err.code === 'UNAUTHENTICATED' || err.status === 401) {
-      return 'Identifiant ou mot de passe incorrect.';
+      return mode === 'activation'
+        ? 'Ce code d’activation est invalide, expiré ou déjà utilisé.'
+        : 'Identifiant ou mot de passe incorrect.';
+    }
+    if (err.code === 'VALIDATION_ERROR' || err.status === 422) {
+      return mode === 'activation'
+        ? 'Vérifiez le code et choisissez un mot de passe d’au moins 12 caractères.'
+        : 'Vérifiez les informations saisies.';
     }
     if (err.code === 'CONFIG_ERROR') {
       return 'L’application n’est pas configurée pour joindre le serveur. Contactez le développeur.';
@@ -48,27 +60,54 @@ function messageForError(err: unknown): string {
 
 export function LoginScreen() {
   const insets = useSafeAreaInsets();
-  const { signIn } = useAuth();
+  const { signIn, activate } = useAuth();
 
+  const [mode, setMode] = useState<AuthMode>('login');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [activationToken, setActivationToken] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canSubmit = username.trim().length > 0 && password.length > 0 && !submitting;
+  const canSubmit = mode === 'login'
+    ? username.trim().length > 0 && password.length > 0 && !submitting
+    : activationToken.trim().length > 0 &&
+      newPassword.length >= 12 &&
+      newPassword === confirmPassword &&
+      !submitting;
 
   const handleSubmit = useCallback(async () => {
     if (!canSubmit) return;
     setSubmitting(true);
     setError(null);
     try {
-      await signIn(username.trim(), password);
+      if (mode === 'login') {
+        await signIn(username.trim(), password);
+      } else {
+        await activate(activationToken.trim(), newPassword);
+      }
       // On success the navigator swaps this screen out — no further action.
     } catch (err) {
-      setError(messageForError(err));
+      setError(messageForError(err, mode));
       setSubmitting(false); // keep the form mounted to show the error
     }
-  }, [canSubmit, signIn, username, password]);
+  }, [
+    activate,
+    activationToken,
+    canSubmit,
+    mode,
+    newPassword,
+    password,
+    signIn,
+    username,
+  ]);
+
+  const switchMode = useCallback(() => {
+    setMode((current) => (current === 'login' ? 'activation' : 'login'));
+    setError(null);
+  }, []);
 
   return (
     <KeyboardAvoidingView
@@ -84,44 +123,104 @@ export function LoginScreen() {
           />
           <Text style={[typography.headlineSmall, styles.title]}>LabelScan</Text>
           <Text style={[typography.bodyMedium, styles.subtitle]}>
-            Traçabilité des produits de la mer
+            Traçabilité des métiers de bouche
           </Text>
         </View>
 
         <View style={styles.form}>
-          <Text style={[typography.labelMedium, styles.fieldLabel]}>Identifiant</Text>
-          <TextInput
-            value={username}
-            onChangeText={setUsername}
-            style={styles.input}
-            placeholder="Identifiant"
-            placeholderTextColor={colors.onSurfaceVariant}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="username"
-            textContentType="username"
-            returnKeyType="next"
-            editable={!submitting}
-            accessibilityLabel="Identifiant"
-          />
+          {mode === 'login' ? (
+            <>
+              <Text style={[typography.labelMedium, styles.fieldLabel]}>Identifiant</Text>
+              <TextInput
+                value={username}
+                onChangeText={setUsername}
+                style={styles.input}
+                placeholder="Identifiant"
+                placeholderTextColor={colors.onSurfaceVariant}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="username"
+                textContentType="username"
+                returnKeyType="next"
+                editable={!submitting}
+                accessibilityLabel="Identifiant"
+              />
 
-          <Text style={[typography.labelMedium, styles.fieldLabel]}>Mot de passe</Text>
-          <TextInput
-            value={password}
-            onChangeText={setPassword}
-            style={styles.input}
-            placeholder="Mot de passe"
-            placeholderTextColor={colors.onSurfaceVariant}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="password"
-            textContentType="password"
-            returnKeyType="go"
-            onSubmitEditing={handleSubmit}
-            editable={!submitting}
-            accessibilityLabel="Mot de passe"
-          />
+              <Text style={[typography.labelMedium, styles.fieldLabel]}>Mot de passe</Text>
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                style={styles.input}
+                placeholder="Mot de passe"
+                placeholderTextColor={colors.onSurfaceVariant}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="password"
+                textContentType="password"
+                returnKeyType="go"
+                onSubmitEditing={handleSubmit}
+                editable={!submitting}
+                accessibilityLabel="Mot de passe"
+              />
+            </>
+          ) : (
+            <>
+              <Text style={[typography.labelMedium, styles.fieldLabel]}>Code d’activation</Text>
+              <TextInput
+                value={activationToken}
+                onChangeText={setActivationToken}
+                style={styles.input}
+                placeholder="Code remis par votre responsable"
+                placeholderTextColor={colors.onSurfaceVariant}
+                autoCapitalize="none"
+                autoCorrect={false}
+                returnKeyType="next"
+                editable={!submitting}
+                accessibilityLabel="Code d’activation"
+              />
+
+              <Text style={[typography.labelMedium, styles.fieldLabel]}>Nouveau mot de passe</Text>
+              <TextInput
+                value={newPassword}
+                onChangeText={setNewPassword}
+                style={styles.input}
+                placeholder="12 caractères minimum"
+                placeholderTextColor={colors.onSurfaceVariant}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="next"
+                editable={!submitting}
+                accessibilityLabel="Nouveau mot de passe"
+              />
+
+              <Text style={[typography.labelMedium, styles.fieldLabel]}>Confirmer le mot de passe</Text>
+              <TextInput
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+                style={styles.input}
+                placeholder="Confirmer le mot de passe"
+                placeholderTextColor={colors.onSurfaceVariant}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="new-password"
+                textContentType="newPassword"
+                returnKeyType="go"
+                onSubmitEditing={handleSubmit}
+                editable={!submitting}
+                accessibilityLabel="Confirmer le mot de passe"
+              />
+              {confirmPassword.length > 0 && confirmPassword !== newPassword ? (
+                <Text style={[typography.bodySmall, styles.errorText]}>
+                  Les mots de passe ne correspondent pas.
+                </Text>
+              ) : null}
+            </>
+          )}
 
           {error ? (
             <View style={styles.errorRow} accessibilityLiveRegion="polite">
@@ -136,14 +235,30 @@ export function LoginScreen() {
             style={[styles.button, !canSubmit && styles.buttonDisabled]}
             android_ripple={{ color: colors.primaryContainer }}
             accessibilityRole="button"
-            accessibilityLabel="Se connecter"
+            accessibilityLabel={mode === 'login' ? 'Se connecter' : 'Activer mon compte'}
             accessibilityState={{ disabled: !canSubmit, busy: submitting }}
           >
             {submitting ? (
               <ActivityIndicator size="small" color={colors.onPrimary} />
             ) : (
-              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>Se connecter</Text>
+              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>
+                {mode === 'login' ? 'Se connecter' : 'Activer mon compte'}
+              </Text>
             )}
+          </Pressable>
+
+          <Pressable
+            onPress={switchMode}
+            disabled={submitting}
+            style={styles.modeButton}
+            accessibilityRole="button"
+            accessibilityLabel={
+              mode === 'login' ? 'Activer un nouveau compte' : 'Revenir à la connexion'
+            }
+          >
+            <Text style={[typography.labelMedium, styles.modeButtonText]}>
+              {mode === 'login' ? 'Première connexion ? Activer mon compte' : 'J’ai déjà activé mon compte'}
+            </Text>
           </Pressable>
         </View>
       </View>
@@ -218,5 +333,15 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.5,
+  },
+  modeButton: {
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: spacing.sm,
+  },
+  modeButtonText: {
+    color: colors.primary,
+    textAlign: 'center',
   },
 });

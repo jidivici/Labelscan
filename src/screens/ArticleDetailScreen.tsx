@@ -35,7 +35,11 @@ import { formatDateShort } from '../services/dates';
 import { fieldLabelFr, displayFieldValue } from '../services/fieldLabels';
 import { formatFaoDisplay } from '../services/faoDisplay';
 import { commonName } from '../services/articleGrouping';
-import { FIELD_GROUPS } from '../services/fieldOrder';
+import {
+  businessProfileFor,
+  inferTradeCodeFromFields,
+  type FieldGroup,
+} from '../services/businessProfiles';
 import {
   parseTemp,
   formatTemp,
@@ -48,6 +52,7 @@ import { queryClient } from '../services/queryClient';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
+import { useAuth } from '../context/AuthContext';
 
 type DetailRoute = RouteProp<ArticlesStackParamList, 'ArticleDetail'>;
 type DetailNav = StackNavigationProp<ArticlesStackParamList, 'ArticleDetail'>;
@@ -56,7 +61,7 @@ type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 // A quiet leading icon per field — gives each row a modern, anchored look (and fills the
 // otherwise-bare list). Purely decorative; unknown fields fall back to a generic tag.
 const FIELD_ICON: Record<string, IconName> = {
-  commercial_designation: 'fish',
+  commercial_designation: 'food-variant',
   scientific_name: 'flask-outline',
   producer_name: 'factory',
   reseller_brand: 'store-outline',
@@ -73,6 +78,24 @@ const FIELD_ICON: Record<string, IconName> = {
   allergens: 'alert-circle-outline',
   price: 'currency-eur',
   gtin: 'barcode',
+  animal_species: 'cow',
+  animal_category: 'shape-outline',
+  cut_name: 'knife',
+  birth_country: 'baby-face-outline',
+  rearing_country: 'barn',
+  slaughter_country: 'map-marker-outline',
+  cutting_country: 'map-marker-outline',
+  slaughterhouse_approval: 'certificate-outline',
+  cutting_plant_approval: 'certificate-outline',
+  product_family: 'food-outline',
+  manufacturer_name: 'factory',
+  ingredients: 'format-list-bulleted',
+  additives: 'flask-outline',
+  preparation_date: 'calendar-edit',
+  conditioning_type: 'package-variant-closed',
+  storage_mode: 'snowflake',
+  use_instructions: 'information-outline',
+  reheating_instructions: 'microwave',
 };
 
 const FIELD_GROUP_ICON: Record<string, IconName> = {
@@ -95,11 +118,11 @@ interface DisplayFieldGroup {
 }
 
 /** Group saved fields by shared business logic; unexpected legacy fields stay visible. */
-function groupFields(fields: ArticleField[]): DisplayFieldGroup[] {
+function groupFields(fields: ArticleField[], fieldGroups: readonly FieldGroup[]): DisplayFieldGroup[] {
   const byName = new Map(fields.map((f) => [f.field_name, f]));
   const groups: DisplayFieldGroup[] = [];
 
-  for (const group of FIELD_GROUPS) {
+  for (const group of fieldGroups) {
     const groupItems: ArticleField[] = [];
     for (const name of group.fields) {
       const field = byName.get(name);
@@ -257,6 +280,7 @@ export function ArticleDetailScreen() {
   const navigation = useNavigation<DetailNav>();
   const route = useRoute<DetailRoute>();
   const { articleId } = route.params;
+  const { tradeCode } = useAuth();
 
   const [article, setArticle] = useState<Article | null>(null);
   const [loading, setLoading] = useState(true);
@@ -280,7 +304,19 @@ export function ArticleDetailScreen() {
     };
   }, [articleId]);
 
-  const groupedFields = useMemo(() => groupFields(article?.fields ?? []), [article]);
+  const articleTradeCode = useMemo(
+    () =>
+      inferTradeCodeFromFields(
+        (article?.fields ?? []).map((field) => field.field_name),
+        article?.trade_code ?? tradeCode,
+      ),
+    [article, tradeCode],
+  );
+  const articleProfile = businessProfileFor(articleTradeCode);
+  const groupedFields = useMemo(
+    () => groupFields(article?.fields ?? [], articleProfile.groups),
+    [article, articleProfile.groups],
+  );
   const fieldCount = useMemo(
     () => groupedFields.reduce((total, group) => total + group.fields.length, 0),
     [groupedFields],
@@ -369,6 +405,14 @@ export function ArticleDetailScreen() {
   const productName = commonName(article) || 'Produit sans nom';
   const scientificName = fieldValue('scientific_name');
   const producer = fieldValue('producer_name') || fieldValue('reseller_brand');
+  const tradeDescription =
+    articleProfile.code === 'boucherie'
+      ? [fieldValue('cut_name'), fieldValue('animal_species')].filter(Boolean).join(' · ')
+      : articleProfile.code === 'charcuterie_traiteur'
+        ? [fieldValue('product_family'), fieldValue('manufacturer_name')]
+            .filter(Boolean)
+            .join(' · ')
+        : scientificName;
   const fao = fieldValue('FAO_area');
   const productionMethod = displayFieldValue('production_method', fieldValue('production_method'));
 
@@ -426,15 +470,25 @@ export function ArticleDetailScreen() {
             complete traceability record. */}
         <View style={styles.identityCard}>
           <View style={styles.identityHeader}>
-            <Text style={[typography.labelSmall, styles.identityEyebrow]}>Produit enregistré</Text>
+            <Text style={[typography.labelSmall, styles.identityEyebrow]}>
+              {articleProfile.displayName} · produit enregistré
+            </Text>
           </View>
 
           <Text selectable style={[typography.headlineSmall, styles.productName]}>
             {productName}
           </Text>
-          {scientificName ? (
-            <Text selectable style={[typography.bodyMedium, styles.scientificName]}>
-              {scientificName}
+          {tradeDescription ? (
+            <Text
+              selectable
+              style={[
+                typography.bodyMedium,
+                articleProfile.code === 'poissonnerie'
+                  ? styles.scientificName
+                  : styles.productDescription,
+              ]}
+            >
+              {tradeDescription}
             </Text>
           ) : producer ? (
             <Text selectable style={[typography.bodyMedium, styles.productDescription]}>

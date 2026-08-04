@@ -60,14 +60,21 @@ class RegistrationConsumer:
         ingestion_id = msg.payload["ingestion_id"]
         run_id = msg.payload["run_id"]
         corr, trace = msg.correlation_id, msg.trace_id
-        tenant = conn.execute(
-            text(
-                "SELECT organization_id::text AS organization_id, "
-                "store_id::text AS store_id, store_code "
-                "FROM ingestion.ingestion WHERE id = :ingestion_id"
-            ),
-            {"ingestion_id": ingestion_id},
-        ).mappings().one()
+        tenant = (
+            conn.execute(
+                text(
+                    "SELECT organization_id::text AS organization_id, "
+                    "store_id::text AS store_id, store_code, "
+                    "business_portal_id::text AS business_portal_id, "
+                    "trade_code_snapshot, trade_profile_version, "
+                    "captured_by_user_id::text AS captured_by_user_id "
+                    "FROM ingestion.ingestion WHERE id = :ingestion_id"
+                ),
+                {"ingestion_id": ingestion_id},
+            )
+            .mappings()
+            .one()
+        )
 
         vals = {
             r["field_name"]: r["value"]
@@ -138,7 +145,10 @@ class RegistrationConsumer:
             # as an ingestion/audit record; the catalogue deliberately keeps one
             # flagged batch per lot rather than inventing duplicate stock.
             if self._has_flagged_lot(
-                conn, tenant["organization_id"], candidate.lot_code
+                conn,
+                tenant["organization_id"],
+                tenant["business_portal_id"],
+                candidate.lot_code,
             ):
                 return
             self._flag(
@@ -155,7 +165,13 @@ class RegistrationConsumer:
             # Same physical lot scanned twice: keep the second capture in the
             # immutable ingestion history, but do not create a duplicate batch
             # card (the database enforces one supplier/product/lot identity).
-            if self._has_registered_batch(conn, tenant["organization_id"], candidate, vals):
+            if self._has_registered_batch(
+                conn,
+                tenant["organization_id"],
+                tenant["business_portal_id"],
+                candidate,
+                vals,
+            ):
                 return
             self._register(
                 conn,
@@ -169,22 +185,29 @@ class RegistrationConsumer:
             )
 
     @staticmethod
-    def _has_flagged_lot(conn, organization_id, lot_code) -> bool:
+    def _has_flagged_lot(conn, organization_id, business_portal_id, lot_code) -> bool:
         return (
             conn.execute(
                 text(
                     "SELECT 1 FROM traceability.batch "
                     "WHERE organization_id = :organization_id "
+                    "AND business_portal_id IS NOT DISTINCT FROM :business_portal_id "
                     "AND status = 'flagged' "
                     "AND lot_code IS NOT DISTINCT FROM :lot_code LIMIT 1"
                 ),
-                {"organization_id": organization_id, "lot_code": lot_code},
+                {
+                    "organization_id": organization_id,
+                    "business_portal_id": business_portal_id,
+                    "lot_code": lot_code,
+                },
             ).scalar_one_or_none()
             is not None
         )
 
     @staticmethod
-    def _has_registered_batch(conn, organization_id, candidate, values) -> bool:
+    def _has_registered_batch(
+        conn, organization_id, business_portal_id, candidate, values
+    ) -> bool:
         return (
             conn.execute(
                 text(
@@ -192,6 +215,7 @@ class RegistrationConsumer:
                     "LEFT JOIN traceability.supplier AS supplier ON supplier.id = batch.supplier_id "
                     "LEFT JOIN traceability.product AS product ON product.id = batch.product_id "
                     "WHERE batch.organization_id = :organization_id "
+                    "AND batch.business_portal_id IS NOT DISTINCT FROM :business_portal_id "
                     "AND batch.status = 'registered' "
                     "AND batch.lot_code IS NOT DISTINCT FROM :lot_code "
                     "AND COALESCE(supplier.name, '') = COALESCE(:supplier_name, '') "
@@ -201,6 +225,7 @@ class RegistrationConsumer:
                 ),
                 {
                     "organization_id": organization_id,
+                    "business_portal_id": business_portal_id,
                     "lot_code": candidate.lot_code,
                     "supplier_name": candidate.supplier_name,
                     "common_name": values.get("commercial_designation")
@@ -242,15 +267,21 @@ class RegistrationConsumer:
         batch_id = conn.execute(
             text(
                 "INSERT INTO traceability.batch "
-                "(organization_id, store_id, lot_code, product_id, supplier_id, store_code, "
+                "(organization_id, store_id, business_portal_id, trade_code_snapshot, "
+                " trade_profile_version, captured_by_user_id, lot_code, product_id, supplier_id, store_code, "
                 " species_scientific, fao_area_code, production_method, "
                 " use_by, packaging_date, status, source_ingestion_id, source_extraction_run_id, correlation_id, trace_id) "
-                "VALUES (:org, :store_id, :lot, :pid, :sid, :store, :sci, :fao, :pm, "
+                "VALUES (:org, :store_id, :business_portal_id, :trade_code_snapshot, "
+                " :trade_profile_version, :captured_by_user_id, :lot, :pid, :sid, :store, :sci, :fao, :pm, "
                 " :ub, :pkg, 'registered', :iid, :rid, :corr, :trace) RETURNING id"
             ),
             {
                 "org": tenant["organization_id"],
                 "store_id": tenant["store_id"],
+                "business_portal_id": tenant["business_portal_id"],
+                "trade_code_snapshot": tenant["trade_code_snapshot"],
+                "trade_profile_version": tenant["trade_profile_version"],
+                "captured_by_user_id": tenant["captured_by_user_id"],
                 "lot": c.lot_code,
                 "pid": product_id,
                 "sid": supplier_id,
@@ -273,6 +304,10 @@ class RegistrationConsumer:
             organization_id=tenant["organization_id"],
             store_id=tenant["store_id"],
             store_code=tenant["store_code"],
+            business_portal_id=tenant["business_portal_id"],
+            trade_code_snapshot=tenant["trade_code_snapshot"],
+            trade_profile_version=tenant["trade_profile_version"],
+            captured_by_user_id=tenant["captured_by_user_id"],
         )
         self._emit(
             conn,
@@ -280,6 +315,11 @@ class RegistrationConsumer:
             {
                 "batch_id": str(batch_id),
                 "use_by": c.use_by.isoformat() if c.use_by else None,
+                "organization_id": tenant["organization_id"],
+                "store_id": tenant["store_id"],
+                "business_portal_id": tenant["business_portal_id"],
+                "trade_code_snapshot": tenant["trade_code_snapshot"],
+                "trade_profile_version": tenant["trade_profile_version"],
             },
             corr,
             trace,
@@ -306,15 +346,21 @@ class RegistrationConsumer:
         batch_id = conn.execute(
             text(
                 "INSERT INTO traceability.batch "
-                "(organization_id, store_id, lot_code, store_code, species_scientific, "
+                "(organization_id, store_id, business_portal_id, trade_code_snapshot, "
+                " trade_profile_version, captured_by_user_id, lot_code, store_code, species_scientific, "
                 " fao_area_code, production_method, use_by, packaging_date, "
                 " status, source_ingestion_id, source_extraction_run_id, correlation_id, trace_id) "
-                "VALUES (:org, :store_id, :lot, :store, :sci, :fao, :pm, :ub, :pkg, "
+                "VALUES (:org, :store_id, :business_portal_id, :trade_code_snapshot, "
+                " :trade_profile_version, :captured_by_user_id, :lot, :store, :sci, :fao, :pm, :ub, :pkg, "
                 " 'flagged', :iid, :rid, :corr, :trace) RETURNING id"
             ),
             {
                 "org": tenant["organization_id"],
                 "store_id": tenant["store_id"],
+                "business_portal_id": tenant["business_portal_id"],
+                "trade_code_snapshot": tenant["trade_code_snapshot"],
+                "trade_profile_version": tenant["trade_profile_version"],
+                "captured_by_user_id": tenant["captured_by_user_id"],
                 "lot": c.lot_code,
                 "store": tenant["store_code"],
                 "sci": c.scientific_name,
@@ -335,11 +381,23 @@ class RegistrationConsumer:
             organization_id=tenant["organization_id"],
             store_id=tenant["store_id"],
             store_code=tenant["store_code"],
+            business_portal_id=tenant["business_portal_id"],
+            trade_code_snapshot=tenant["trade_code_snapshot"],
+            trade_profile_version=tenant["trade_profile_version"],
+            captured_by_user_id=tenant["captured_by_user_id"],
         )
         self._emit(
             conn,
             "batch.flagged",
-            {"batch_id": str(batch_id), "issues": list(issues)},
+            {
+                "batch_id": str(batch_id),
+                "issues": list(issues),
+                "organization_id": tenant["organization_id"],
+                "store_id": tenant["store_id"],
+                "business_portal_id": tenant["business_portal_id"],
+                "trade_code_snapshot": tenant["trade_code_snapshot"],
+                "trade_profile_version": tenant["trade_profile_version"],
+            },
             corr,
             trace,
         )
@@ -353,6 +411,10 @@ class RegistrationConsumer:
         organization_id,
         store_id,
         store_code,
+        business_portal_id,
+        trade_code_snapshot,
+        trade_profile_version,
+        captured_by_user_id,
     ) -> None:
         """Publish the latest immutable revision into the mutable read model.
 
@@ -365,10 +427,14 @@ class RegistrationConsumer:
                 """
                 INSERT INTO traceability.arrival_projection (
                     batch_id, organization_id, store_id, store_code, ingestion_id,
-                    extraction_run_id, fields, image_ref, image_checksum, recorded_at
+                    business_portal_id, trade_code_snapshot, trade_profile_version,
+                    captured_by_user_id, extraction_run_id, fields, image_ref,
+                    image_checksum, recorded_at
                 )
                 SELECT
                     :batch_id, :organization_id, :store_id, :store_code, i.id,
+                    :business_portal_id, :trade_code_snapshot, :trade_profile_version,
+                    :captured_by_user_id,
                     latest.id,
                     COALESCE((
                         SELECT jsonb_object_agg(f.field_name, f.value)
@@ -399,6 +465,10 @@ class RegistrationConsumer:
                 "organization_id": organization_id,
                 "store_id": store_id,
                 "store_code": store_code,
+                "business_portal_id": business_portal_id,
+                "trade_code_snapshot": trade_code_snapshot,
+                "trade_profile_version": trade_profile_version,
+                "captured_by_user_id": captured_by_user_id,
                 "ingestion_id": ingestion_id,
             },
         )

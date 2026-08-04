@@ -143,6 +143,28 @@ describe('scanQueue', () => {
     expect(mockedPersistPhoto).toHaveBeenCalledWith('fixed-id-123', 'file:///pending/fixed-id-123-raw.jpg');
   });
 
+  it('stores the received trade locally without adding it to the ingestion payload', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockReturnValue(new Promise(() => {}));
+
+    const scan = await enqueueScan({
+      tempUri: 'file:///cache/boucherie.jpg',
+      capturedAt: '2026-08-04T08:00:00Z',
+      tradeCode: 'boucherie',
+      businessPortalId: 'portal-boucherie',
+    });
+
+    expect(scan.tradeCode).toBe('boucherie');
+    expect(scan.businessPortalId).toBe('portal-boucherie');
+    expect(mockedEnqueueCapture).toHaveBeenCalledWith({
+      fileUri: scan.photoUri,
+      barcodeRaw: undefined,
+      capturedAt: '2026-08-04T08:00:00Z',
+    });
+    expect(mockedEnqueueCapture.mock.calls[0][0]).not.toHaveProperty('tradeCode');
+    expect(mockedEnqueueCapture.mock.calls[0][0]).not.toHaveProperty('businessPortalId');
+  });
+
   it('saveScanEdits persists the review draft and it survives a restart (workflow v2 session)', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockReturnValue(new Promise(() => {})); // stays 'submitting'

@@ -183,23 +183,196 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
       security: []
-  /v1/users:
+  /v1/auth/activate:
     post:
-      summary: Create User
-      operationId: create_user_v1_users_post
+      summary: Activate Account
+      operationId: activate_account_v1_auth_activate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/mobile/auth/activate:
+    post:
+      summary: Activate an operator account from the mobile application
+      operationId: activate_operator_account_v1_mobile_auth_activate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActivateRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/me:
+    get:
+      summary: Get the current user and complete access context
+      description: Returns role-derived capabilities plus authorized stores and detailed business portals.
+        Administrators see the whole organization; managers and operators are limited to their active
+        portal assignments.
+      operationId: get_me_v1_me_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+      security:
+      - bearerAuth: []
+  /v1/stores/{store_id}/portals:
+    get:
+      summary: List the business portals visible for a store
+      description: Administrators see every portal of an organization-owned store. Managers and operators
+        see only active portals assigned to them; an unassigned or foreign store is reported as not found.
+      operationId: list_store_portals_v1_stores__store_id__portals_get
+      parameters:
+      - name: store_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Store Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PortalResponse'
+                title: Response List Store Portals V1 Stores  Store Id  Portals Get
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+    put:
+      summary: Soft-activate or deactivate a store portal
+      description: Admin and super-admin only. The requested state is idempotent and never deletes a portal.
+        A real state transition is audited atomically; deactivation revokes sessions belonging to users
+        assigned to that portal.
+      operationId: set_store_portal_active_v1_stores__store_id__portals_put
+      parameters:
+      - name: store_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Store Id
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/CreateUserRequest'
+              $ref: '#/components/schemas/SetPortalActiveRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PortalResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/me/password:
+    post:
+      summary: Change My Password
+      operationId: change_my_password_v1_me_password_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangePasswordRequest'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/admins:
+    get:
+      summary: List Admins
+      operationId: list_admins_v1_admins_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+                type: array
+                title: Response List Admins V1 Admins Get
+      security:
+      - bearerAuth: []
+    post:
+      summary: Create Admin
+      operationId: create_admin_v1_admins_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIdentityRequest'
+        required: true
       responses:
         '201':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/UserResponse'
+                $ref: '#/components/schemas/ActivationResponse'
         '400':
           description: Request validation failed
           content:
@@ -208,116 +381,10 @@ paths:
                 $ref: '#/components/schemas/Problem'
       security:
       - bearerAuth: []
-    get:
-      summary: List Users
-      operationId: list_users_v1_users_get
-      parameters:
-      - name: role
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - enum:
-            - admin
-            - operator
-            type: string
-          - type: 'null'
-          title: Role
-      - name: active
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Active
-      - name: store_code
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            maxLength: 64
-          - type: 'null'
-          title: Store Code
-      - name: q
-        in: query
-        required: false
-        schema:
-          anyOf:
-          - type: string
-            maxLength: 120
-          - type: 'null'
-          title: Q
-      - name: limit
-        in: query
-        required: false
-        schema:
-          type: integer
-          maximum: 200
-          minimum: 1
-          default: 50
-          title: Limit
-      - name: offset
-        in: query
-        required: false
-        schema:
-          type: integer
-          minimum: 0
-          default: 0
-          title: Offset
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserPage'
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
-  /v1/users/{user_id}:
-    patch:
-      summary: Update User
-      operationId: update_user_v1_users__user_id__patch
-      parameters:
-      - name: user_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: User Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/UpdateUserRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
+  /v1/admins/{user_id}:
     delete:
-      summary: Delete User
-      description: Soft-delete an account while preserving its audit history.
-      operationId: delete_user_v1_users__user_id__delete
+      summary: Delete Admin
+      operationId: delete_admin_v1_admins__user_id__delete
       parameters:
       - name: user_id
         in: path
@@ -329,6 +396,241 @@ paths:
       responses:
         '204':
           description: Successful Response
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/managers:
+    get:
+      summary: List Managers
+      operationId: list_managers_v1_managers_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+                type: array
+                title: Response List Managers V1 Managers Get
+      security:
+      - bearerAuth: []
+    post:
+      summary: Create Manager
+      operationId: create_manager_v1_managers_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateManagerRequest'
+        required: true
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivationResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/managers/{user_id}/portals:
+    patch:
+      summary: Change Manager Portals
+      operationId: change_manager_portals_v1_managers__user_id__portals_patch
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagerAssignmentsRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/managers/{user_id}:
+    patch:
+      summary: Set Manager Active
+      operationId: set_manager_active_v1_managers__user_id__patch
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ActiveRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/portals/{portal_id}/operators:
+    get:
+      summary: List Operators
+      operationId: list_operators_v1_portals__portal_id__operators_get
+      parameters:
+      - name: portal_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Portal Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UserResponse'
+                title: Response List Operators V1 Portals  Portal Id  Operators Get
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+    post:
+      summary: Create Operator
+      operationId: create_operator_v1_portals__portal_id__operators_post
+      parameters:
+      - name: portal_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Portal Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIdentityRequest'
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivationResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/portals/{portal_id}/operators/{user_id}:
+    patch:
+      summary: Update Operator
+      operationId: update_operator_v1_portals__portal_id__operators__user_id__patch
+      parameters:
+      - name: portal_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Portal Id
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OperatorUpdateRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/operators/{user_id}/credential-reset:
+    post:
+      summary: Reset Operator Credential
+      operationId: reset_operator_credential_v1_operators__user_id__credential_reset_post
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ActivationResponse'
         '400':
           description: Request validation failed
           content:
@@ -353,7 +655,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StoreResponse'
+                $ref: '#/components/schemas/labelscan__contexts__identity__adapters__http__store_admin_router__StoreResponse'
         '400':
           description: Request validation failed
           content:
@@ -391,7 +693,7 @@ paths:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/StoreResponse'
+                  $ref: '#/components/schemas/labelscan__contexts__identity__adapters__http__store_admin_router__StoreResponse'
                 title: Response List Stores V1 Stores Get
         '400':
           description: Request validation failed
@@ -440,7 +742,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/StoreResponse'
+                $ref: '#/components/schemas/labelscan__contexts__identity__adapters__http__store_admin_router__StoreResponse'
         '400':
           description: Request validation failed
           content:
@@ -711,6 +1013,22 @@ paths:
                 $ref: '#/components/schemas/Problem'
       security:
       - bearerAuth: []
+  /v1/professions:
+    get:
+      summary: List Professions
+      operationId: list_professions_v1_professions_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  $ref: '#/components/schemas/ProfessionResponse'
+                type: array
+                title: Response List Professions V1 Professions Get
+      security:
+      - bearerAuth: []
   /v1/arrivals:
     get:
       summary: List Arrivals
@@ -730,10 +1048,101 @@ paths:
         required: false
         schema:
           anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          title: Store Code
+      - name: business_portal_id
+        in: query
+        required: false
+        schema:
+          anyOf:
           - type: string
             maxLength: 64
           - type: 'null'
-          title: Store Code
+          title: Business Portal Id
+      - name: profession
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - poissonnerie
+            - boucherie
+            - charcuterie_traiteur
+            type: string
+          - type: 'null'
+          title: Profession
+      - name: status
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - registered
+            - flagged
+            type: string
+          - type: 'null'
+          title: Status
+      - name: alert_state
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - open
+            - acknowledged
+            - resolved
+            type: string
+          - type: 'null'
+          title: Alert State
+      - name: completeness_min
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: integer
+            maximum: 100
+            minimum: 0
+          - type: 'null'
+          title: Completeness Min
+      - name: supplier
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Supplier
+      - name: lot_code
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Lot Code
+      - name: gtin
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 32
+          - type: 'null'
+          title: Gtin
+      - name: captured_by_user_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Captured By User Id
       - name: date_from
         in: query
         required: false
@@ -752,6 +1161,59 @@ paths:
             format: date
           - type: 'null'
           title: Date To
+      - name: expiry_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Expiry From
+      - name: expiry_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Expiry To
+      - name: field_filter
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          title: Field Filter
+      - name: sort_by
+        in: query
+        required: false
+        schema:
+          enum:
+          - recorded_at
+          - expiry_date
+          - product_name
+          - supplier
+          - lot_code
+          - completeness
+          - status
+          type: string
+          default: recorded_at
+          title: Sort By
+      - name: sort_direction
+        in: query
+        required: false
+        schema:
+          enum:
+          - asc
+          - desc
+          type: string
+          default: desc
+          title: Sort Direction
       - name: limit
         in: query
         required: false
@@ -888,6 +1350,24 @@ paths:
             maxLength: 128
           - type: 'null'
           title: Batch Id
+      - name: business_portal_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 128
+          - type: 'null'
+          title: Business Portal Id
+      - name: profession
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 64
+          - type: 'null'
+          title: Profession
       - name: limit
         in: query
         required: false
@@ -1026,6 +1506,48 @@ paths:
       security: []
 components:
   schemas:
+    ActivateRequest:
+      properties:
+        token:
+          type: string
+          maxLength: 256
+          minLength: 32
+          title: Token
+        new_password:
+          type: string
+          maxLength: 128
+          minLength: 12
+          title: New Password
+      type: object
+      required:
+      - token
+      - new_password
+      title: ActivateRequest
+    ActivationResponse:
+      properties:
+        user:
+          $ref: '#/components/schemas/UserResponse'
+        activation_token:
+          type: string
+          title: Activation Token
+        expires_at:
+          type: string
+          title: Expires At
+      type: object
+      required:
+      - user
+      - activation_token
+      - expires_at
+      title: ActivationResponse
+    ActiveRequest:
+      properties:
+        active:
+          type: boolean
+          title: Active
+      type: object
+      required:
+      - active
+      title: ActiveRequest
     AlertItem:
       properties:
         id:
@@ -1062,6 +1584,26 @@ components:
           anyOf:
           - $ref: '#/components/schemas/AuditEntry'
           - type: 'null'
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+        store_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Store Id
+        business_portal_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Portal Id
+        profession_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Profession Code
       type: object
       required:
       - id
@@ -1320,6 +1862,40 @@ components:
         photo_available:
           type: boolean
           title: Photo Available
+        store_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Store Id
+        business_portal_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Portal Id
+        profession_code:
+          type: string
+          title: Profession Code
+        trade_profile_version:
+          type: string
+          title: Trade Profile Version
+        captured_by_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Captured By User Id
+        completeness:
+          type: integer
+          title: Completeness
+        alert_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Alert State
+        alert_severity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Alert Severity
       type: object
       required:
       - batch_id
@@ -1332,6 +1908,14 @@ components:
       - recorded_at
       - updated_at
       - photo_available
+      - store_id
+      - business_portal_id
+      - profession_code
+      - trade_profile_version
+      - captured_by_user_id
+      - completeness
+      - alert_state
+      - alert_severity
       title: CatalogArrivalResponse
     CatalogPage:
       properties:
@@ -1418,6 +2002,40 @@ components:
         photo_available:
           type: boolean
           title: Photo Available
+        store_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Store Id
+        business_portal_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Portal Id
+        profession_code:
+          type: string
+          title: Profession Code
+        trade_profile_version:
+          type: string
+          title: Trade Profile Version
+        captured_by_user_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Captured By User Id
+        completeness:
+          type: integer
+          title: Completeness
+        alert_state:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Alert State
+        alert_severity:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Alert Severity
       type: object
       required:
       - batch_id
@@ -1434,7 +2052,26 @@ components:
       - packaging_date
       - recorded_at
       - photo_available
+      - store_id
+      - business_portal_id
+      - profession_code
+      - trade_profile_version
+      - captured_by_user_id
+      - completeness
+      - alert_state
+      - alert_severity
       title: CatalogProductResponse
+    ChangePasswordRequest:
+      properties:
+        new_password:
+          type: string
+          maxLength: 128
+          minLength: 12
+          title: New Password
+      type: object
+      required:
+      - new_password
+      title: ChangePasswordRequest
     ConfirmIngestionResponse:
       properties:
         ingestion_id:
@@ -1452,6 +2089,48 @@ components:
       - status
       - replayed
       title: ConfirmIngestionResponse
+    CreateIdentityRequest:
+      properties:
+        username:
+          type: string
+          maxLength: 254
+          minLength: 1
+          title: Username
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+      type: object
+      required:
+      - username
+      - display_name
+      title: CreateIdentityRequest
+    CreateManagerRequest:
+      properties:
+        username:
+          type: string
+          maxLength: 254
+          minLength: 1
+          title: Username
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+        business_portal_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          minItems: 1
+          title: Business Portal Ids
+      type: object
+      required:
+      - username
+      - display_name
+      - business_portal_ids
+      title: CreateManagerRequest
     CreateStoreRequest:
       properties:
         code:
@@ -1470,42 +2149,6 @@ components:
       required:
       - name
       title: CreateStoreRequest
-    CreateUserRequest:
-      properties:
-        username:
-          type: string
-          maxLength: 254
-          minLength: 1
-          title: Username
-        display_name:
-          type: string
-          maxLength: 120
-          minLength: 1
-          title: Display Name
-        password:
-          type: string
-          maxLength: 128
-          minLength: 12
-          title: Password
-        role:
-          type: string
-          enum:
-          - admin
-          - operator
-          title: Role
-          default: operator
-        store_code:
-          anyOf:
-          - type: string
-            maxLength: 64
-          - type: 'null'
-          title: Store Code
-      type: object
-      required:
-      - username
-      - display_name
-      - password
-      title: CreateUserRequest
     CurrentStoreResponse:
       properties:
         name:
@@ -1549,6 +2192,24 @@ components:
           - type: string
           - type: 'null'
           title: Store Id
+        business_portal_ids:
+          items:
+            type: string
+          type: array
+          title: Business Portal Ids
+        business_portal_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Business Portal Id
+        trade_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Trade Code
+        client_type:
+          type: string
+          title: Client Type
       type: object
       required:
       - id
@@ -1556,6 +2217,7 @@ components:
       - display_name
       - role
       - store_code
+      - client_type
       title: CurrentUserResponse
     ExtractionRunView:
       properties:
@@ -1895,6 +2557,55 @@ components:
       - expires_in
       - user
       title: LoginResponse
+    ManagerAssignmentsRequest:
+      properties:
+        business_portal_ids:
+          items:
+            type: string
+            format: uuid
+          type: array
+          minItems: 1
+          title: Business Portal Ids
+      type: object
+      required:
+      - business_portal_ids
+      title: ManagerAssignmentsRequest
+    MeResponse:
+      properties:
+        user:
+          $ref: '#/components/schemas/UserResponse'
+        capabilities:
+          items:
+            type: string
+          type: array
+          title: Capabilities
+          description: Canonical capabilities granted by the persisted user role.
+        scopes:
+          items:
+            type: string
+          type: array
+          title: Scopes
+          description: OAuth-style scope names; currently identical to capabilities.
+        stores:
+          items:
+            $ref: '#/components/schemas/labelscan__contexts__identity__adapters__http__access_router__StoreResponse'
+          type: array
+          title: Stores
+          description: Stores visible to the current role and portal assignments.
+        business_portals:
+          items:
+            $ref: '#/components/schemas/PortalResponse'
+          type: array
+          title: Business Portals
+          description: Business portals visible to the current role and assignments.
+      type: object
+      required:
+      - user
+      - capabilities
+      - scopes
+      - stores
+      - business_portals
+      title: MeResponse
     MobileLoginResponse:
       properties:
         access_token:
@@ -1923,6 +2634,21 @@ components:
       - refresh_token
       - refresh_expires_in
       title: MobileLoginResponse
+    OperatorUpdateRequest:
+      properties:
+        business_portal_id:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Business Portal Id
+        active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Active
+      type: object
+      title: OperatorUpdateRequest
     OverriddenFieldResponse:
       properties:
         ingestion_id:
@@ -1986,6 +2712,78 @@ components:
           default: false
       type: object
       title: OverrideFieldRequest
+    PortalResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        store_id:
+          type: string
+          title: Store Id
+        store_code:
+          type: string
+          title: Store Code
+        store_name:
+          type: string
+          title: Store Name
+        profession_code:
+          type: string
+          title: Profession Code
+        profession_name:
+          type: string
+          title: Profession Name
+        name:
+          type: string
+          title: Name
+        active:
+          type: boolean
+          title: Active
+      type: object
+      required:
+      - id
+      - store_id
+      - store_code
+      - store_name
+      - profession_code
+      - profession_name
+      - name
+      - active
+      title: PortalResponse
+    ProfessionResponse:
+      properties:
+        code:
+          type: string
+          title: Code
+        name:
+          type: string
+          title: Name
+        version:
+          type: string
+          title: Version
+        common_fields:
+          items:
+            type: string
+          type: array
+          title: Common Fields
+        specific_fields:
+          items:
+            type: string
+          type: array
+          title: Specific Fields
+        required_fields:
+          items:
+            type: string
+          type: array
+          title: Required Fields
+      type: object
+      required:
+      - code
+      - name
+      - version
+      - common_fields
+      - specific_fields
+      - required_fields
+      title: ProfessionResponse
     RawArtifactView:
       properties:
         id:
@@ -2059,7 +2857,147 @@ components:
       - created_at
       - is_latest
       title: RunSummary
-    StoreResponse:
+    SetPortalActiveRequest:
+      properties:
+        portal_id:
+          type: string
+          format: uuid
+          title: Portal Id
+          description: Portal belonging to the store identified by the URL.
+        active:
+          type: boolean
+          title: Active
+          description: Desired soft-activation state. Repeating the same PUT is a no-op.
+      type: object
+      required:
+      - portal_id
+      - active
+      title: SetPortalActiveRequest
+    UpdateStoreRequest:
+      properties:
+        name:
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
+          title: Name
+        active:
+          anyOf:
+          - type: boolean
+          - type: 'null'
+          title: Active
+      type: object
+      title: UpdateStoreRequest
+    UserResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        username:
+          type: string
+          title: Username
+        display_name:
+          type: string
+          title: Display Name
+        role:
+          type: string
+          title: Role
+        active:
+          type: boolean
+          title: Active
+        organization_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Organization Id
+        store_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Store Id
+        store_code:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Store Code
+        business_portal_ids:
+          items:
+            type: string
+          type: array
+          title: Business Portal Ids
+        created_by:
+          type: string
+          title: Created By
+        created_at:
+          type: string
+          title: Created At
+        updated_at:
+          type: string
+          title: Updated At
+      type: object
+      required:
+      - id
+      - username
+      - display_name
+      - role
+      - active
+      - organization_id
+      - store_id
+      - store_code
+      - business_portal_ids
+      - created_by
+      - created_at
+      - updated_at
+      title: UserResponse
+    ValidationError:
+      properties:
+        loc:
+          items:
+            anyOf:
+            - type: string
+            - type: integer
+          type: array
+          title: Location
+        msg:
+          type: string
+          title: Message
+        type:
+          type: string
+          title: Error Type
+        input:
+          title: Input
+        ctx:
+          type: object
+          title: Context
+      type: object
+      required:
+      - loc
+      - msg
+      - type
+      title: ValidationError
+    labelscan__contexts__identity__adapters__http__access_router__StoreResponse:
+      properties:
+        id:
+          type: string
+          title: Id
+        code:
+          type: string
+          title: Code
+        name:
+          type: string
+          title: Name
+        active:
+          type: boolean
+          title: Active
+      type: object
+      required:
+      - id
+      - code
+      - name
+      - active
+      title: StoreResponse
+    labelscan__contexts__identity__adapters__http__store_admin_router__StoreResponse:
       properties:
         id:
           type: string
@@ -2097,164 +3035,6 @@ components:
       - created_at
       - updated_at
       title: StoreResponse
-    UpdateStoreRequest:
-      properties:
-        name:
-          anyOf:
-          - type: string
-            maxLength: 120
-            minLength: 1
-          - type: 'null'
-          title: Name
-        active:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Active
-      type: object
-      title: UpdateStoreRequest
-    UpdateUserRequest:
-      properties:
-        display_name:
-          anyOf:
-          - type: string
-            maxLength: 120
-            minLength: 1
-          - type: 'null'
-          title: Display Name
-        password:
-          anyOf:
-          - type: string
-            maxLength: 128
-            minLength: 12
-          - type: 'null'
-          title: Password
-        role:
-          anyOf:
-          - type: string
-            enum:
-            - admin
-            - operator
-          - type: 'null'
-          title: Role
-        active:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Active
-        store_code:
-          anyOf:
-          - type: string
-            maxLength: 64
-          - type: 'null'
-          title: Store Code
-      type: object
-      title: UpdateUserRequest
-    UserPage:
-      properties:
-        items:
-          items:
-            $ref: '#/components/schemas/UserResponse'
-          type: array
-          title: Items
-        total:
-          type: integer
-          title: Total
-        limit:
-          type: integer
-          title: Limit
-        offset:
-          type: integer
-          title: Offset
-      type: object
-      required:
-      - items
-      - total
-      - limit
-      - offset
-      title: UserPage
-    UserResponse:
-      properties:
-        id:
-          type: string
-          title: Id
-        username:
-          type: string
-          title: Username
-        display_name:
-          type: string
-          title: Display Name
-        role:
-          type: string
-          enum:
-          - admin
-          - operator
-          title: Role
-        active:
-          type: boolean
-          title: Active
-        store_code:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Store Code
-        created_by:
-          type: string
-          title: Created By
-        created_at:
-          type: string
-          title: Created At
-        updated_at:
-          type: string
-          title: Updated At
-        organization_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Organization Id
-        store_id:
-          anyOf:
-          - type: string
-          - type: 'null'
-          title: Store Id
-      type: object
-      required:
-      - id
-      - username
-      - display_name
-      - role
-      - active
-      - store_code
-      - created_by
-      - created_at
-      - updated_at
-      title: UserResponse
-    ValidationError:
-      properties:
-        loc:
-          items:
-            anyOf:
-            - type: string
-            - type: integer
-          type: array
-          title: Location
-        msg:
-          type: string
-          title: Message
-        type:
-          type: string
-          title: Error Type
-        input:
-          title: Input
-        ctx:
-          type: object
-          title: Context
-      type: object
-      required:
-      - loc
-      - msg
-      - type
-      title: ValidationError
     Problem:
       type: object
       description: Sanitized RFC 9457-style error envelope.

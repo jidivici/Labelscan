@@ -4,19 +4,21 @@
 > **Scope:** the Python/FastAPI backend (`server/`) — runtime topology, module
 > architecture, request & extraction flows, data model, security, observability,
 > invariants, and the operational runbook.
-> **Status:** reflects the code as of 2026-06-18 (auth JWT, hybrid GS1+LLM
-> extraction, DLQ+backoff, structured logging). For the *gap/risk* view see
+> **Status:** reflects the code as of 2026-08-04 (multi-trade portals, rotating
+> sessions, role-specific IAM, hybrid GS1+LLM extraction, DLQ+backoff, structured
+> logging). For the *gap/risk* view see
 > `AUDIT-TECHNIQUE-COMPLET.md`; this document is the *reference* architecture.
 >
 > Companion files: [`API-CONTRACTS.md`](./API-CONTRACTS.md) (OpenAPI fragments + the full
 > error-code catalog) and [`openapi.v1.yaml`](./openapi.v1.yaml) (machine-readable skeleton —
 > paths + components only, not an implementation). Keep all three in sync.
 
-A note on regulatory scope (unchanged from ARCHITECTURE.md §0): the *source* of the required
-seafood label fields is the EU consumer-information regime for fishery and aquaculture products.
-This document references that regime only at a high level to justify which fields exist. It
-encodes **no** article numbers, thresholds, or legal text; those live in the Compliance context's
-versioned **RequiredFieldRuleSet**, never hard-coded.
+A note on regulatory scope (unchanged from ARCHITECTURE.md §0): each profession
+profile owns its versioned field rules. The seafood profile draws its required
+fields from the EU consumer-information regime for fishery and aquaculture
+products. This document encodes **no** article numbers, thresholds, or legal
+text; those live in the Compliance context's versioned
+**RequiredFieldRuleSet**, never hard-coded.
 
 ---
 
@@ -45,8 +47,9 @@ versioned **RequiredFieldRuleSet**, never hard-coded.
 
 ## 1. What this system is
 
-LabelScan ingests photos of seafood product labels and turns them into **audited,
-immutable HACCP traceability records**. The three design obsessions, in order:
+LabelScan ingests photos of fresh-food product labels for poissonnerie,
+boucherie, and charcuterie–traiteur and turns them into **audited, immutable
+HACCP traceability records**. The three design obsessions, in order:
 
 1. **No data loss** on ingestion (raw-before-ack + transactional outbox).
 2. **No fabrication / zero hallucination** on critical fields (barcode-exact GS1
@@ -112,7 +115,7 @@ server/src/labelscan/
 │   │   └── adapters/         #     http routers, SQL repo, Google Vision, Claude, extraction consumer
 │   ├── traceability/         #   product/supplier/batch chain + store arrivals
 │   ├── haccp/                #   control plans + alerts lifecycle
-│   ├── identity/             #   auth + access directory: users, roles, stores, JWT, admin APIs
+│   ├── identity/             #   auth + org/store/portal access, roles, sessions and IAM APIs
 │   ├── compliance/ · audit/  #   (thin / placeholder)
 ├── platform/                 # framework/infra, no business logic
 │   ├── db/ (engine, audit_context)  http/ (security=JWT gate, errors, middleware, jwt codec, deps)
@@ -226,27 +229,38 @@ status + all extraction runs (append-only; latest flagged `is_latest`) + fields
 `GET /v1/extraction-runs/{id}` returns one run with its fields. The mobile polls
 the ingestion until a terminal status or a bounded 30 s / 20-attempt budget.
 
-**Auth (identity context):** `POST /v1/auth/login` (username/password; pbkdf2 hash
-in `identity.app_user`) → **HS256 JWT** carrying `actor_id` / `principal` /
-`scopes` / `role` / `store_code`. Every scoped endpoint depends on `require_scope(scope)` →
-`resolve_principal(request)`, which **verifies the Bearer token first** (signature +
-`exp`, secret ≥32 bytes). The legacy `X-Actor-Id/...` header seam is **off by
-default** (`LABELSCAN_ALLOW_HEADER_AUTH`). Roles `operator` and `admin` map to
-additive scope sets; only `admin` receives
-`identity:admin`. The audit actor is taken from a **signed claim**.
+**Auth (identity context):** browser login is
+`POST /v1/o/{organization_slug}/auth/login` (`/v1/auth/login` remains the default
+organization alias). It accepts only `super_admin`, `admin`, and `manager`.
+`POST /v1/mobile/auth/login` accepts only `operator`. Both issue a short-lived
+**HS256 JWT** carrying the actor, organization, scopes, role, store ids, portal
+ids, primary portal, trade code, client type, and server session family id.
+Every scoped endpoint depends on `require_scope(scope)` →
+`resolve_principal(request)`, which verifies signature, expiry, session, and
+claims. The legacy identity-header seam is off by default. The audit actor is
+taken from the signed claim and re-authorized against persisted IAM state for
+privileged administration.
 
-`POST/GET /v1/users`, `PATCH/DELETE /v1/users/{id}`, `POST/GET /v1/stores`, and
-`PATCH /v1/stores/{code}` form the back-office identity/access API. Account
-deletion is a reversible soft-disable. Operators must reference an active,
-unique store code; a store assigned to active users cannot be disabled. All
-writes protect the current and last active administrator where applicable and
-are co-committed with an immutable audit entry.
+Refresh sessions are opaque and rotating. Browser refresh is cookie-based;
+mobile refresh is an explicit token for secure device storage. The persisted
+`client_type` prevents a browser refresh from being used on the mobile route or
+vice versa. Role, portal, password, credential-reset, account, and portal-active
+changes revoke affected sessions.
+
+The role-specific IAM API replaces all generic user reads and mutations: a super-admin
+manages admins; an admin manages managers and store portals; a manager manages
+operators inside assigned portals. Accounts start inactive and receive a
+one-time, 24-hour activation grant whose hash alone is stored. Admins never
+read, set, or reset another user's credential. Runtime deletion is always a
+reversible soft state transition.
 
 `GET /v1/arrivals` belongs to the traceability context. It projects immutable
-registered batches into a searchable arrivals feed. An operator
-is forcibly scoped to the `store_code` in the signed JWT; an administrator may
-query all stores. The store is captured on ingestion and snapshotted on the
-batch, preserving historical ownership across later user reassignment.
+registered batches into a searchable arrivals feed. Admin and super-admin are
+organization-wide; managers and operators are restricted to the active portal
+ids and derived stores signed into the token. Organization, store, portal,
+profession/profile version, and capture actor are snapshotted on ingestion and
+copied into the immutable traceability chain, preserving historical ownership
+across later reassignment.
 The future evolution is RS256/JWKS + OIDC; `require_scope()` keeps that swap
 isolated from business routes.
 
@@ -271,15 +285,20 @@ isolated from business routes.
   for GS1-reconciled fields (confidence 1.0, bypass evidence gate).
 - **`extracted_field.field_name`** includes `gtin` (migration 0008) — set by GS1
   parser from AI 01, not by the LLM.
-- **Migrations:** Alembic `0001 → 0017`, all reversible (CI runs up→down→up).
+- **Migrations:** Alembic `0001 → 0025`, with guarded downgrade behavior (CI runs
+  migration proofs).
   - `0007` adds `identity.app_user` (credential store for JWT auth);
   - `0008` extends `extracted_field` CHECKs (`source += 'gs1'`, `field_name += 'gtin'`);
   - `0009` adds DLQ + exponential backoff to `platform.outbox` (`attempts`, `next_retry_at`,
     `last_error`, `status` columns).
   - `0014` adds identity RBAC metadata and audited user administration;
-  - `0015` reduces the role model to `admin` and `operator`;
+  - `0015` temporarily reduces the role model to `admin` and `operator`;
   - `0016` adds the audited store directory and mandatory operator-to-store association.
   - `0017` snapshots the submitting store on ingestions and immutable batches for arrivals.
+  - `0024` adds rotating, revocable refresh-session families.
+  - `0025` adds the four IAM roles, the three professions, business portals,
+    user-portal assignments, activation grants, client-type sessions, and
+    organization/store/portal ownership snapshots.
 
 ---
 
@@ -291,11 +310,11 @@ Conventions for every endpoint below:
 - **Headers (all requests):** `X-Correlation-Id` (client may supply; server generates if absent
   and always echoes it). `Authorization: Bearer <token>` except where noted. Responses also carry
   a server-generated `traceparent` (W3C) so traces stitch across the pipeline.
-- **Idempotency:** every **unsafe state-changing** POST/PUT/PATCH that creates a resource or an
-  irreversible side effect **requires** an `Idempotency-Key` header (§11). GETs are inherently
-  idempotent and need no key.
-- **Auth scope:** OAuth2-style scopes (`<resource>:<action>`), mapped to the `admin` role in the
-  current implementation (see §10).
+- **Idempotency:** business writes marked below require `Idempotency-Key` (§11).
+  IAM active-state `PUT`/`PATCH` operations are state-idempotent and soft; GETs
+  are inherently idempotent.
+- **Auth scope:** OAuth2-style scopes (`<resource>:<action>`) decide capability;
+  the organization/store/portal access context independently bounds data (see §10).
 - **Pagination:** list endpoints use cursor pagination (`?limit=&cursor=`), returning
   `{ items, next_cursor }`. Filtering/sorting via explicit query params only.
 
@@ -303,15 +322,28 @@ Conventions for every endpoint below:
 
 | Method | Path | Purpose | Auth scope | Idempotent? |
 |--------|------|---------|-----------|-------------|
-| POST | `/v1/auth/login` | Username/password → HS256 JWT | none | No |
-| POST | `/v1/users` | Create a nominative account. | `identity:admin` | No |
-| GET | `/v1/users` | Filtered/paginated account list. | `identity:admin` | Yes (safe) |
-| PATCH | `/v1/users/{id}` | Change name/role/active state or reset password. | `identity:admin` | State-idempotent |
-| DELETE | `/v1/users/{id}` | Reversibly soft-delete an account. | `identity:admin` | State-idempotent |
+| POST | `/v1/o/{organization_slug}/auth/login` | Browser login for manager/admin/super-admin; rotating cookie session. | none | No |
+| POST | `/v1/mobile/auth/login` | Mobile login for operator only; explicit refresh token. | none | No |
+| POST | `/v1/auth/activate` | Consume one-time activation/reset grant and set a password. | none | Token single-use |
+| POST | `/v1/auth/refresh`, `/v1/mobile/auth/refresh` | Rotate a same-client-type refresh session. | refresh credential | Rotation-safe |
+| GET | `/v1/me` | Current user, scopes, authorized stores, and detailed portals. | authenticated | Yes (safe) |
+| POST | `/v1/me/password` | Change own password and revoke own sessions. | authenticated | No |
+| GET | `/v1/professions` | Three versioned profiles: `poissonnerie`, `boucherie`, `charcuterie_traiteur`. | `catalog:read` | Yes (safe) |
+| GET, POST | `/v1/admins` | Super-admin lists or creates inactive admins. | `identity:admins:manage` | GET only |
+| DELETE | `/v1/admins/{user_id}` | Super-admin soft-deactivates an admin. | `identity:admins:manage` | State-idempotent |
+| GET, POST | `/v1/managers` | Admin/super-admin lists or invites managers. | `identity:managers:manage` | GET only |
+| PATCH | `/v1/managers/{user_id}` | Toggle manager activity. | `identity:managers:manage` | State-idempotent |
+| PATCH | `/v1/managers/{user_id}/portals` | Replace active assignments without deleting history. | `identity:managers:manage` | State-idempotent |
+| GET, POST | `/v1/portals/{portal_id}/operators` | Manager lists or invites portal-scoped operators. | `identity:operators:manage` | GET only |
+| PATCH | `/v1/portals/{portal_id}/operators/{user_id}` | Manager reassigns or toggles an in-scope operator. | `identity:operators:manage` | State-idempotent |
+| POST | `/v1/operators/{user_id}/credential-reset` | Manager invalidates credential and issues one-time reset grant. | `identity:operators:manage` | No |
 | POST | `/v1/stores` | Create a uniquely coded store. | `identity:admin` | No |
 | GET | `/v1/stores` | List/filter the store directory. | `identity:admin` | Yes (safe) |
 | PATCH | `/v1/stores/{code}` | Rename, activate, or safely disable a store. | `identity:admin` | State-idempotent |
-| GET | `/v1/arrivals` | Search registered arrivals by store and registration date. | `catalog:read` | Yes (safe) |
+| GET | `/v1/stores/{store_id}/portals` | List portals visible in the current access context. | authenticated | Yes (safe) |
+| PUT | `/v1/stores/{store_id}/portals` | Admin/super-admin soft-activates a portal; disabling revokes affected sessions. | `identity:portals:manage` | State-idempotent |
+| GET | `/v1/arrivals` | Filter/sort arrivals by authorized stores, portal, profession, state, completeness, supplier, lot, GTIN, actor, dates, expiry, and extracted fields. | `catalog:read` | Yes (safe) |
+| GET | `/v1/arrivals/{batch_id}` | Detailed portal-scoped arrival projection. | `catalog:read` | Yes (safe) |
 | GET | `/v1/arrivals/{batch_id}/image` | Read the store-scoped persisted source photo. | `catalog:read` | Yes (safe) |
 | POST | `/v1/ingestions` | Submit capture (multipart: image + barcode_raw + client_captured_at). Stores raw + enqueues extraction. Returns 202. | `ingestion:write` | **Yes — requires `Idempotency-Key`** |
 | GET | `/v1/ingestions/{id}` | Ingestion status + extraction run summaries + audit. | `ingestion:read` | Yes (safe) |
@@ -387,14 +419,14 @@ Codes are **append-only and never renumbered/repurposed** (same discipline as th
 | `VALIDATION_ERROR` | 400 | Malformed request. | No |
 | `UNAUTHENTICATED` | 401 | Missing/invalid/expired token. | No |
 | `FORBIDDEN` | 403 | Authenticated but lacks scope/role. | No |
-| `NOT_FOUND` | 404 | Resource does not exist. | No |
+| `NOT_FOUND` | 404 | Resource is absent or outside the caller's data perimeter (IDOR-safe). | No |
 | `METHOD_NOT_ALLOWED` | 405 | e.g. attempting to write the audit log. | No |
 | `STORE_NOT_FOUND` | 400 | Referenced store code does not exist. | No |
 | `STORE_REQUIRED` | 400 | An operator has no store assignment. | No |
 | `USER_ALREADY_EXISTS` | 409 | Username is already assigned. | No |
 | `STORE_ALREADY_EXISTS` | 409 | Store code is already assigned. | No |
 | `STORE_INACTIVE` | 409 | Disabled store cannot receive an assignment. | No |
-| `STORE_IN_USE` | 409 | Store still has active assigned users. | No |
+| `STORE_IN_USE` | 409 | Store still has active users or active portal assignments. | No |
 | `LAST_ACTIVE_ADMIN` | 409 | Mutation would remove the last active administrator. | No |
 | `SELF_ACCESS_CHANGE_NOT_ALLOWED` | 409 | Administrator tried to revoke their own access. | No |
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | Key reused with different payload. | No |
@@ -426,20 +458,33 @@ Codes are **append-only and never renumbered/repurposed** (same discipline as th
 |--------|---------|---------------|
 | **Token format** | HS256 JWT (symmetric, secret ≥32 bytes) | RS256 JWT (asymmetric, JWKS rotation) |
 | **Signing secret** | `LABELSCAN_JWT_SECRET` env var | IdP JWKS endpoint |
-| **Token TTL** | 12 h default (`LABELSCAN_JWT_TTL_SECONDS`) | 15 min access + refresh rotation |
-| **Roles** | `operator`, `admin` | Enterprise IdP groups / site-aware roles |
-| **Login** | `POST /v1/auth/login` (username/password, pbkdf2) | OIDC login at IdP |
-| **Device auth** | Not implemented (devices use admin JWT) | OAuth2 client-credentials per device |
+| **Session** | Short-lived access JWT plus opaque rotating refresh family; replay revokes the family | IdP-backed refresh/session policy |
+| **Roles** | `super_admin`, `admin`, `manager`, `operator` | Enterprise IdP group mapping |
+| **Browser login** | Organization route; manager/admin/super-admin only; refresh in strict cookie | OIDC login at IdP |
+| **Mobile login** | Operator only; refresh returned for SecureStore | Managed-device policy where required |
 | **Header auth** | Off by default (`LABELSCAN_ALLOW_HEADER_AUTH=0`) | Removed |
 
-**RBAC scopes (current):**
+All four roles receive only their domain capabilities. Data visibility is a
+separate access context:
 
-- `operator`: `ingestion:write`, `ingestion:read`, `extraction:review`,
-  `catalog:read`;
-- `admin`: all operator scopes plus `haccp:read`, `alert:ack`, `alert:resolve`,
-  `traceability:read`, `export:read`, `identity:admin`.
+| Role | Data perimeter | IAM capability delta |
+|---|---|---|
+| `super_admin` | Every store/portal in one organization | `identity:admins:manage`, `identity:managers:manage`, `identity:portals:manage`, `identity:read` |
+| `admin` | Every store/portal in one organization | `identity:managers:manage`, `identity:portals:manage`, `identity:read` |
+| `manager` | Assigned portals and their derived stores | `identity:operators:manage`, `identity:read` |
+| `operator` | Its single assigned portal and derived store | No identity-administration capability |
 
-### 10.2 Design target RBAC roles (not yet implemented)
+Every data query is constrained by `organization_id`; non-organization-wide
+roles add `business_portal_id` (or store fallback for attributable legacy rows).
+The same scope is applied to list, detail, and image routes. A resource absent
+or outside the caller's data perimeter returns the same `404 NOT_FOUND`, which
+prevents IDOR enumeration. `403 FORBIDDEN` means the authenticated actor lacks
+the action/role or explicitly requests a portal outside its assignments.
+
+### 10.2 Optional future IdP roles
+
+The following names are design inputs for a future enterprise IdP mapping, not
+current application roles:
 
 | Role | Intended operator | Scopes granted |
 |------|-------------------|----------------|
@@ -608,6 +653,8 @@ Constraints:
 | 0007 | Identity: app_user (credential store for JWT auth) |
 | 0008 | GS1 provenance: `source += 'gs1'`, `field_name += 'gtin'` |
 | 0009 | Outbox DLQ + backoff: attempts, next_retry_at, last_error, status columns |
+| 0024 | Opaque rotating refresh sessions, replay detection, and family revocation |
+| 0025 | Multi-trade professions/portals, IAM assignments/activation, client-type sessions, and ownership snapshots |
 
 ### 15.4 Reversibility of each backend phase
 

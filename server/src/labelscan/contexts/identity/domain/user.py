@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+SUPER_ADMIN_ROLE = "super_admin"
 ADMIN_ROLE = "admin"
+MANAGER_ROLE = "manager"
 OPERATOR_ROLE = "operator"
 USER_ROLES: frozenset[str] = frozenset(
-    {ADMIN_ROLE, OPERATOR_ROLE}
+    {SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE, OPERATOR_ROLE}
 )
 
 FULL_APPLICATION_SCOPES: frozenset[str] = frozenset(
@@ -37,10 +39,25 @@ FULL_APPLICATION_SCOPES: frozenset[str] = frozenset(
 OPERATOR_SCOPES: frozenset[str] = frozenset(
     scope for scope in FULL_APPLICATION_SCOPES if scope != "identity:admin"
 )
-ADMIN_SCOPES: frozenset[str] = FULL_APPLICATION_SCOPES
+SUPER_ADMIN_SCOPES: frozenset[str] = FULL_APPLICATION_SCOPES | frozenset(
+    {
+        "identity:admins:manage",
+        "identity:managers:manage",
+        "identity:portals:manage",
+        "identity:read",
+    }
+)
+ADMIN_SCOPES: frozenset[str] = FULL_APPLICATION_SCOPES | frozenset(
+    {"identity:managers:manage", "identity:portals:manage", "identity:read"}
+)
+MANAGER_SCOPES: frozenset[str] = OPERATOR_SCOPES | frozenset(
+    {"identity:operators:manage", "identity:read"}
+)
 
 _ROLE_SCOPES: dict[str, frozenset[str]] = {
+    SUPER_ADMIN_ROLE: SUPER_ADMIN_SCOPES,
     ADMIN_ROLE: ADMIN_SCOPES,
+    MANAGER_ROLE: MANAGER_SCOPES,
     OPERATOR_ROLE: OPERATOR_SCOPES,
 }
 
@@ -64,6 +81,10 @@ class StoredUser:
     organization_id: str | None = None
     organization_slug: str = "labelscan"
     store_id: str | None = None
+    business_portal_ids: tuple[str, ...] = ()
+    business_portal_id: str | None = None
+    trade_code: str | None = None
+    store_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -79,6 +100,10 @@ class AuthenticatedUser:
     organization_id: str | None = None
     organization_slug: str = "labelscan"
     store_id: str | None = None
+    business_portal_ids: tuple[str, ...] = ()
+    business_portal_id: str | None = None
+    trade_code: str | None = None
+    store_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,3 +121,4 @@ class ManagedUser:
     updated_at: str
     organization_id: str | None = None
     store_id: str | None = None
+    business_portal_ids: tuple[str, ...] = ()

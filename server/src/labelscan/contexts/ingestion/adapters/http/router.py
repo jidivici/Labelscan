@@ -31,6 +31,7 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field, model_validator
 
+from labelscan.business_profiles import trade_profile
 from labelscan.contexts.ingestion.adapters.http.schemas import IngestionAcceptedResponse
 from labelscan.contexts.ingestion.application.confirm_ingestion import (
     ConfirmIngestion,
@@ -59,6 +60,7 @@ from labelscan.contexts.ingestion.application.submit_ingestion import (
     SubmitIngestion,
     SubmitIngestionCommand,
 )
+from labelscan.platform.http.access import access_context_for_principal
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
 from labelscan.platform.image_validation import InvalidImage, validate_image
@@ -140,7 +142,9 @@ def submit_ingestion(
             break
         total += len(chunk)
         if total > _MAX_BYTES:
-            raise ApiError("PAYLOAD_TOO_LARGE", "image exceeds the configured size limit")
+            raise ApiError(
+                "PAYLOAD_TOO_LARGE", "image exceeds the configured size limit"
+            )
         chunks.append(chunk)
     data = b"".join(chunks)
     if not data:
@@ -150,6 +154,11 @@ def submit_ingestion(
     except InvalidImage as exc:
         raise ApiError("VALIDATION_ERROR", str(exc))
 
+    access = access_context_for_principal(principal)
+    portal_id = getattr(principal, "business_portal_id", None)
+    if portal_id is None and len(access.business_portal_ids) == 1:
+        portal_id = next(iter(access.business_portal_ids))
+    profile = trade_profile(getattr(principal, "trade_code", None))
     command = SubmitIngestionCommand(
         image_bytes=data,
         content_type=media_type,
@@ -162,6 +171,9 @@ def submit_ingestion(
         store_code=principal.store_code,
         organization_id=principal.organization_id,
         store_id=principal.store_id,
+        business_portal_id=portal_id,
+        trade_code_snapshot=profile.code,
+        trade_profile_version=profile.version,
     )
 
     try:
@@ -257,6 +269,7 @@ def override_field(
         # original outcome instead of appending another run.
         idempotency_key=idempotency_key,
         force_gs1=body.force_gs1,
+        access=access_context_for_principal(principal),
     )
     try:
         result = use_case(command)
@@ -333,6 +346,7 @@ def confirm_ingestion(
         correlation_id=request.state.correlation_id,
         trace_id=request.state.trace_id,
         organization_id=principal.organization_id,
+        access=access_context_for_principal(principal),
     )
     try:
         result = use_case(command)
@@ -355,7 +369,7 @@ def confirm_ingestion(
     )
 
 
-# ── Enterprise sync: all 17 final fields + confirmation in one commit ────────────
+# ── Enterprise sync: complete trade-profile review + confirmation in one commit ─
 
 _DEFAULT_FINALIZE_REVIEW: FinalizeReview | None = None
 _FINALIZE_REVIEW_LOCK = threading.Lock()
@@ -383,7 +397,9 @@ class FinalizeReviewRequest(BaseModel):
 
     @model_validator(mode="after")
     def values_are_bounded(self):
-        if any(value is not None and len(value) > 512 for value in self.fields.values()):
+        if any(
+            value is not None and len(value) > 512 for value in self.fields.values()
+        ):
             raise ValueError("review field values must be at most 512 characters")
         return self
 
@@ -421,6 +437,7 @@ def finalize_review(
                 actor_id=principal.actor_id,
                 correlation_id=request.state.correlation_id,
                 trace_id=request.state.trace_id,
+                access=access_context_for_principal(principal),
             )
         )
     except InvalidReviewFields as exc:

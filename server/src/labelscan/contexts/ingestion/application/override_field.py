@@ -15,11 +15,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from labelscan.business_profiles import TRADE_PROFILES
 from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
     FieldOverrideRepository,
     OverriddenField,
 )
+from labelscan.platform.http.access import AccessContext
 
 _ACTION = "ingestion.field_overridden"
 # Distinct audit action when a GS1-owned field is overridden under the explicit flag:
@@ -32,30 +34,14 @@ _ACTION_GS1 = "ingestion.gs1_field_overridden"
 # unknown field is rejected before the DB is ever touched. The v2 prompt emits
 # producer_name / reseller_brand / health_mark and no longer product_name / supplier_name,
 # but the latter two stay accepted so a reviewer can still correct an immutable v1 run.
-FIELD_NAMES: frozenset[str] = frozenset(
-    {
-        # v2-emitted set
-        "commercial_designation",
-        "scientific_name",
-        "producer_name",
-        "reseller_brand",
-        "batch_number",
-        "origin_country",
-        "FAO_area",
-        "production_method",
-        "fishing_gear_or_farming_method",
-        "expiry_date",
-        "packaging_date",
-        "storage_temperature",
-        "allergens",
-        "health_mark",
-        "weight",
-        "price",
-        "gtin",
-        # legacy v1 names — kept editable for historical runs (migration 0011 superset)
-        "product_name",
-        "supplier_name",
-    }
+_LEGACY_FIELD_NAMES = frozenset({"product_name", "supplier_name"})
+FIELD_NAMES: frozenset[str] = (
+    frozenset(
+        field_name
+        for profile in TRADE_PROFILES.values()
+        for field_name in profile.fields
+    )
+    | _LEGACY_FIELD_NAMES
 )
 
 # GS1-owned fields are read from the barcode symbology (mathematically exact), never
@@ -92,7 +78,9 @@ class OverrideFieldCommand:
     field_name: str
     value: str | None  # None or empty => the reviewer cleared the field
     note: str | None
-    actor_id: str  # authenticated reviewer (recorded as the human provenance + audit actor)
+    actor_id: (
+        str  # authenticated reviewer (recorded as the human provenance + audit actor)
+    )
     correlation_id: str
     trace_id: str
     organization_id: str | None = None
@@ -102,6 +90,7 @@ class OverrideFieldCommand:
     # Explicit acknowledgement that a GS1-owned (barcode-derived) field is being
     # overridden. Without it, GS1-owned fields stay rejected (409) — full back-compat.
     force_gs1: bool = False
+    access: AccessContext | None = None
 
 
 class OverrideField:
@@ -132,6 +121,7 @@ class OverrideField:
             ),
             action=_ACTION_GS1 if gs1_owned else _ACTION,
             idempotency_key=cmd.idempotency_key,
+            access=cmd.access,
         )
         if result is None:
             raise IngestionNotFound(cmd.ingestion_id)

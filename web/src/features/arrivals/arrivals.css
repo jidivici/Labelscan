@@ -1,0 +1,59 @@
+.kpi-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.kpi-card {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--line);
+  border-top: 3px solid #90a7a2;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.kpi-card.positive { border-top-color: var(--primary); }
+.kpi-card.warning { border-top-color: #c48221; }
+.kpi-card.danger { border-top-color: var(--danger); }
+.kpi-card .kpi-label { color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+.kpi-card strong { font-size: 25px; letter-spacing: -.035em; }
+.kpi-card small { color: var(--muted); font-size: 10px; }
+
+.advanced-filter-panel {
+  display: grid;
+  gap: 18px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.filter-group { display: grid; gap: 12px; }
+.filter-group + .filter-group { padding-top: 16px; border-top: 1px solid var(--line); }
+.filter-group-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.filter-group-heading strong { font-size: 12px; }
+.filter-group-heading span { color: var(--muted); font-size: 10px; }
+.filter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; }
+.portal-filter-group { padding: 16px; border-radius: 11px; background: color-mix(in srgb, var(--portal-accent) 5%, white); }
+.filter-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; padding-top: 16px; border-top: 1px solid var(--line); }
+.sort-controls { display: flex; gap: 10px; }
+.sort-controls .field { min-width: 180px; }
+.detail-sections { display: grid; gap: 14px; }
+
+.secondary-value { white-space: nowrap; }
+.secondary-value.missing { color: var(--muted); }
+.completeness-value { display: inline-flex; align-items: center; gap: 7px; }
+.completeness-track { width: 44px; height: 5px; overflow: hidden; border-radius: 999px; background: #e5ecea; }
+.completeness-track span { display: block; height: 100%; background: var(--portal-accent, var(--primary)); }
+
+@media (max-width: 1100px) {
+  .kpi-strip, .filter-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .kpi-strip, .filter-grid { grid-template-columns: 1fr; }
+  .filter-footer, .sort-controls { align-items: stretch; flex-direction: column; }
+  .sort-controls .field { min-width: 0; }
+}

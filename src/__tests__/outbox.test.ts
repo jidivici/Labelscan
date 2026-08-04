@@ -1,4 +1,9 @@
-import { backoffDelayMs, isRetryableError, MAX_ATTEMPTS } from '../services/outbox';
+import {
+  backoffDelayMs,
+  isRetryableError,
+  MAX_ATTEMPTS,
+  operationMatchesOperatorContext,
+} from '../services/outbox';
 
 describe('outbox backoff', () => {
   it('first attempt delay is at least base', () => {
@@ -51,5 +56,32 @@ describe('isRetryableError', () => {
 describe('MAX_ATTEMPTS', () => {
   it('is 5', () => {
     expect(MAX_ATTEMPTS).toBe(5);
+  });
+});
+
+describe('local operator ownership', () => {
+  const owned = {
+    owner_business_portal_id: 'portal-a',
+    owner_trade_code: 'boucherie',
+  } as never;
+
+  it('allows the exact server context and blocks another portal', () => {
+    expect(
+      operationMatchesOperatorContext(owned, {
+        businessPortalId: 'portal-a',
+        tradeCode: 'boucherie',
+      }),
+    ).toBe(true);
+    expect(
+      operationMatchesOperatorContext(owned, {
+        businessPortalId: 'portal-b',
+        tradeCode: 'boucherie',
+      }),
+    ).toBe(false);
+    expect(operationMatchesOperatorContext(owned, null)).toBe(false);
+  });
+
+  it('keeps unowned historical operations replayable', () => {
+    expect(operationMatchesOperatorContext({} as never, null)).toBe(true);
   });
 });

@@ -5,6 +5,7 @@
 
 import {
   CANONICAL_FIELD_COUNT,
+  canonicalFieldCount,
   filledCountFromInterim,
   filledCountFromRun,
   filledCountFromValues,
@@ -39,6 +40,8 @@ function field(
 describe('fieldCompleteness', () => {
   it('CANONICAL_FIELD_COUNT is 17 (the closed LLM field set)', () => {
     expect(CANONICAL_FIELD_COUNT).toBe(17);
+    expect(canonicalFieldCount('boucherie')).toBe(22);
+    expect(canonicalFieldCount('charcuterie_traiteur')).toBe(22);
   });
 
   it('filledCountFromRun counts only canonical, present, non-blank fields', () => {
@@ -147,5 +150,20 @@ describe('fieldCompleteness', () => {
       'storage_temperature', 'weight', 'allergens', 'price', 'gtin',
     ].map((n) => field(n));
     expect(filledCountFromRun(fields)).toBe(17);
+  });
+
+  it('scores non-fish profiles against their own closed 22-field contract', () => {
+    const boucherieFields = [
+      'commercial_designation', 'animal_species', 'animal_category', 'cut_name',
+      'producer_name', 'reseller_brand', 'origin_country', 'birth_country',
+      'rearing_country', 'slaughter_country', 'cutting_country', 'batch_number',
+      'health_mark', 'slaughterhouse_approval', 'cutting_plant_approval', 'gtin',
+      'packaging_date', 'expiry_date', 'storage_temperature', 'allergens', 'weight', 'price',
+    ].map((name) => field(name));
+    expect(filledCountFromRun(boucherieFields, undefined, 'boucherie')).toBe(22);
+    // Fish-only fields do not inflate another trade's score.
+    expect(
+      filledCountFromRun([...boucherieFields, field('scientific_name')], undefined, 'boucherie'),
+    ).toBe(22);
   });
 });

@@ -58,13 +58,11 @@ class SqlStoreRepository(StoreRepository):
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
 
-    def create_store(
-        self, store: NewStore, audit: StoreAuditContext
-    ) -> Store:
+    def create_store(self, store: NewStore, audit: StoreAuditContext) -> Store:
         try:
             with self._engine.begin() as conn:
-                organization_id = (
-                    audit.organization_id or _default_organization_id(conn)
+                organization_id = audit.organization_id or _default_organization_id(
+                    conn
                 )
                 set_tenant_context(conn, organization_id)
                 set_audit_context(
@@ -96,6 +94,25 @@ class SqlStoreRepository(StoreRepository):
                     )
                     .mappings()
                     .one()
+                )
+                # Every newly-created store receives the same three versioned
+                # business portals as stores backfilled by migration 0025. Portal
+                # activation can then be managed idempotently through the IAM API;
+                # no later request has to manufacture ownership rows implicitly.
+                conn.execute(
+                    text(
+                        "INSERT INTO identity.business_portal "
+                        "(organization_id, store_id, profession_code, name, created_by) "
+                        "SELECT :organization_id, :store_id, profession.code, "
+                        "profession.name, :created_by "
+                        "FROM identity.profession AS profession "
+                        "WHERE profession.active = true"
+                    ),
+                    {
+                        "organization_id": organization_id,
+                        "store_id": row["id"],
+                        "created_by": store.created_by,
+                    },
                 )
         except IntegrityError as exc:
             if _is_unique_violation(exc):
@@ -163,11 +180,29 @@ class SqlStoreRepository(StoreRepository):
             if current["active"] and changes.active is False:
                 active_users = conn.execute(
                     text(
-                        "SELECT 1 FROM identity.app_user "
-                        "WHERE organization_id = :organization_id "
-                        "AND store_code = :code AND active = true LIMIT 1"
+                        "SELECT 1 FROM identity.app_user AS app_user "
+                        "WHERE app_user.organization_id = :organization_id "
+                        "AND app_user.active = true AND ("
+                        "app_user.store_id = CAST(:store_id AS uuid) "
+                        "OR app_user.store_code = :code "
+                        "OR EXISTS ("
+                        "SELECT 1 FROM identity.user_portal_assignment AS assignment "
+                        "JOIN identity.business_portal AS portal "
+                        "ON portal.organization_id = assignment.organization_id "
+                        "AND portal.id = assignment.portal_id "
+                        "WHERE assignment.organization_id = :organization_id "
+                        "AND assignment.user_id = app_user.id "
+                        "AND assignment.active = true "
+                        "AND portal.active = true "
+                        "AND portal.store_id = CAST(:store_id AS uuid)"
+                        ")"
+                        ") LIMIT 1"
                     ),
-                    {"organization_id": organization_id, "code": code},
+                    {
+                        "organization_id": organization_id,
+                        "store_id": current["id"],
+                        "code": code,
+                    },
                 ).first()
                 if active_users is not None:
                     raise StoreInUse()

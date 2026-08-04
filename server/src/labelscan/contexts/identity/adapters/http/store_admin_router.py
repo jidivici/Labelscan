@@ -88,7 +88,7 @@ def _map_write_error(exc: Exception) -> None:
     if isinstance(exc, StoreInUse):
         raise ApiError(
             "STORE_IN_USE",
-            "store cannot be disabled while active users are assigned",
+            "store cannot be disabled while active users or portal assignments remain",
         )
     if isinstance(exc, ValueError):
         raise ApiError("VALIDATION_ERROR", str(exc))

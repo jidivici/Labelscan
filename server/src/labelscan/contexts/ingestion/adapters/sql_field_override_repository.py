@@ -30,6 +30,8 @@ import json
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from labelscan.business_profiles import trade_profile
+from labelscan.contexts.ingestion.application.override_field import UnknownField
 from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
     FieldOverrideRepository,
@@ -37,6 +39,7 @@ from labelscan.contexts.ingestion.application.ports import (
 )
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.http.access import AccessContext, postgres_scope
 
 _LATEST_RUN = text(
     "SELECT run.id::text AS id, run.attempt_no "
@@ -124,6 +127,7 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
         audit: AuditContext,
         action: str,
         idempotency_key: str | None = None,
+        access: AccessContext | None = None,
     ) -> OverriddenField | None:
         with self._engine.begin() as conn:
             if audit.organization_id:
@@ -136,6 +140,37 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 correlation_id=audit.correlation_id,
                 trace_id=audit.trace_id,
             )
+
+            access_params: dict[str, object] = {}
+            conditions = ["ingestion.id = :scoped_ingestion_id"]
+            if access is not None and access.organization_id:
+                predicate, access_params = postgres_scope(access, alias="ingestion")
+                conditions.append(predicate)
+            ingestion_profile = (
+                conn.execute(
+                    text(
+                        "SELECT ingestion.trade_code_snapshot, "
+                        "ingestion.trade_profile_version "
+                        "FROM ingestion.ingestion AS ingestion "
+                        f"WHERE {' AND '.join(conditions)}"
+                    ),
+                    {"scoped_ingestion_id": ingestion_id, **access_params},
+                )
+                .mappings()
+                .first()
+            )
+            if ingestion_profile is None:
+                return None
+            profile = trade_profile(
+                ingestion_profile["trade_code_snapshot"],
+                ingestion_profile["trade_profile_version"],
+            )
+            allowed_fields = set(profile.fields)
+            if profile.code == "poissonnerie":
+                # Historical v1 runs used these names before the v2 split.
+                allowed_fields.update({"product_name", "supplier_name"})
+            if field_name not in allowed_fields:
+                raise UnknownField(field_name)
 
             # KEY replay (P3): this exact request was already processed — return the
             # field as recorded on the run the ORIGINAL request produced, before any
@@ -169,21 +204,23 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                         replayed=True,
                     )
 
-            latest = conn.execute(
-                _LATEST_RUN,
-                {
-                    "iid": ingestion_id,
-                    "organization_id": audit.organization_id,
-                },
-            ).mappings().first()
+            latest = (
+                conn.execute(
+                    _LATEST_RUN,
+                    {
+                        "iid": ingestion_id,
+                        "organization_id": audit.organization_id,
+                    },
+                )
+                .mappings()
+                .first()
+            )
             if latest is None:
                 return None  # no run for this ingestion -> 404
             parent_run_id = latest["id"]
 
             current = (
-                conn.execute(
-                    _CURRENT_FIELD, {"rid": parent_run_id, "fn": field_name}
-                )
+                conn.execute(_CURRENT_FIELD, {"rid": parent_run_id, "fn": field_name})
                 .mappings()
                 .first()
             )
@@ -194,7 +231,12 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 and current["value"] == value
             ):
                 self._record_key(
-                    conn, idempotency_key, audit, ingestion_id, parent_run_id, field_name
+                    conn,
+                    idempotency_key,
+                    audit,
+                    ingestion_id,
+                    parent_run_id,
+                    field_name,
                 )
                 return OverriddenField(
                     run_id=parent_run_id,
@@ -235,9 +277,15 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                         "rid": new_run_id,
                         "fn": field_name,
                         "val": json.dumps(value),
-                        "ev": json.dumps([note] if note else ["Validé par l'opérateur"]),
+                        "ev": json.dumps(
+                            [note] if note else ["Validé par l'opérateur"]
+                        ),
                         "prov": json.dumps(
-                            {"source": "human", "actor_id": audit.actor_id, "note": note}
+                            {
+                                "source": "human",
+                                "actor_id": audit.actor_id,
+                                "note": note,
+                            }
                         ),
                         "src": image_id,
                     },
@@ -245,9 +293,7 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 self._record_key(
                     conn, idempotency_key, audit, ingestion_id, new_run_id, field_name
                 )
-                self._emit_projection_update(
-                    conn, ingestion_id, new_run_id, audit
-                )
+                self._emit_projection_update(conn, ingestion_id, new_run_id, audit)
                 return OverriddenField(
                     run_id=str(new_run_id),
                     field_name=field_name,
@@ -295,13 +341,24 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
         )
 
     @staticmethod
-    def _emit_projection_update(conn, ingestion_id, run_id, audit: AuditContext) -> None:
-        organization_id = audit.organization_id or conn.execute(
-            text(
-                "SELECT organization_id::text FROM ingestion.ingestion WHERE id = :id"
-            ),
-            {"id": ingestion_id},
-        ).scalar_one()
+    def _emit_projection_update(
+        conn, ingestion_id, run_id, audit: AuditContext
+    ) -> None:
+        dimensions = (
+            conn.execute(
+                text(
+                    "SELECT organization_id::text AS organization_id, "
+                    "store_id::text AS store_id, business_portal_id::text AS business_portal_id, "
+                    "trade_code_snapshot, trade_profile_version, "
+                    "captured_by_user_id::text AS captured_by_user_id "
+                    "FROM ingestion.ingestion WHERE id = :id"
+                ),
+                {"id": ingestion_id},
+            )
+            .mappings()
+            .one()
+        )
+        organization_id = audit.organization_id or dimensions["organization_id"]
         conn.execute(
             text(
                 "INSERT INTO platform.outbox "
@@ -315,6 +372,11 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 "organization_id": organization_id,
                 "ingestion_id": ingestion_id,
                 "run_id": run_id,
+                "business_portal_id": dimensions["business_portal_id"],
+                "store_id": dimensions["store_id"],
+                "trade_code_snapshot": dimensions["trade_code_snapshot"],
+                "trade_profile_version": dimensions["trade_profile_version"],
+                "captured_by_user_id": dimensions["captured_by_user_id"],
                 "correlation_id": audit.correlation_id,
                 "trace_id": audit.trace_id,
             },

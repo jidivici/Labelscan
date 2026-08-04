@@ -39,5 +39,9 @@ export interface Article {
   fields: ArticleField[];
   saved_at: string; // ISO 8601
   saved_by: string | null; // signed-in user who saved this record; null if unknown
+  /** Server snapshot metadata; optional so historical local records remain readable. */
+  business_portal_id?: string | null;
+  trade_code?: string;
+  trade_profile_version?: string;
   raw_extraction_run?: ExtractionRunResponse | null; // full payload, for debugging
 }

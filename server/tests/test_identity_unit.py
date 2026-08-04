@@ -20,7 +20,9 @@ from labelscan.contexts.identity.domain.password import hash_password, verify_pa
 from labelscan.contexts.identity.domain.store import normalize_store_code
 from labelscan.contexts.identity.domain.user import (
     ADMIN_SCOPES,
+    MANAGER_SCOPES,
     OPERATOR_SCOPES,
+    SUPER_ADMIN_SCOPES,
     USER_ROLES,
     ManagedUser,
     StoredUser,
@@ -155,10 +157,15 @@ def test_login_unknown_user_rejected():
 
 
 def test_role_scope_matrix_is_additive_and_fail_closed():
-    assert USER_ROLES == {"admin", "operator"}
+    assert USER_ROLES == {"super_admin", "admin", "manager", "operator"}
     assert OPERATOR_SCOPES < ADMIN_SCOPES
+    assert OPERATOR_SCOPES < MANAGER_SCOPES
+    assert ADMIN_SCOPES < SUPER_ADMIN_SCOPES
     assert "identity:admin" in ADMIN_SCOPES
     assert "identity:admin" not in OPERATOR_SCOPES
+    assert "identity:admins:manage" in SUPER_ADMIN_SCOPES
+    assert "identity:admins:manage" not in ADMIN_SCOPES
+    assert "identity:operators:manage" in MANAGER_SCOPES
     assert "catalog:read" in OPERATOR_SCOPES
     assert scopes_for_role("unknown") == frozenset()
 

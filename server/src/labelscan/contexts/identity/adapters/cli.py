@@ -20,21 +20,18 @@ import uuid
 from sqlalchemy import text
 
 from labelscan.contexts.identity.domain.password import hash_password
-from labelscan.contexts.identity.domain.user import ADMIN_ROLE
+from labelscan.contexts.identity.domain.user import SUPER_ADMIN_ROLE
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.engine import make_engine
 
 
 def upsert_admin(username: str, password: str) -> str:
-    """Create the admin, or reset its password and reactivate it. Return its id."""
+    """Bootstrap the organization super-admin (legacy function name retained)."""
     encoded = hash_password(password)
     engine = make_engine()
     with engine.begin() as conn:
         organization_id = conn.execute(
-            text(
-                "SELECT id::text FROM identity.organization "
-                "WHERE slug = 'labelscan'"
-            )
+            text("SELECT id::text FROM identity.organization WHERE slug = 'labelscan'")
         ).scalar_one()
         existing_id = conn.execute(
             text(
@@ -71,7 +68,7 @@ def upsert_admin(username: str, password: str) -> str:
                 "organization_id": organization_id,
                 "u": username,
                 "h": encoded,
-                "r": ADMIN_ROLE,
+                "r": SUPER_ADMIN_ROLE,
             },
         ).first()
         conn.execute(
