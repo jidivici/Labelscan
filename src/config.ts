@@ -11,7 +11,20 @@
  * Backend base URL, e.g. "https://api.example.com" or "http://192.168.1.10:8000".
  * Empty when unset — the API client throws a clear error instead of guessing a host.
  */
-export const API_BASE_URL: string = (process.env.EXPO_PUBLIC_API_BASE_URL ?? '').trim();
+declare const __DEV__: boolean | undefined;
+
+export function validateApiBaseUrl(value: string, isDev: boolean): string {
+  const normalized = value.trim();
+  if (!isDev && normalized.toLowerCase().startsWith('http://')) {
+    throw new Error('Release builds require an HTTPS EXPO_PUBLIC_API_BASE_URL');
+  }
+  return normalized;
+}
+
+export const API_BASE_URL: string = validateApiBaseUrl(
+  process.env.EXPO_PUBLIC_API_BASE_URL ?? '',
+  typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production',
+);
 
 /**
  * Capture path selector. Backend extraction is the DEFAULT saved-article path.

@@ -17,7 +17,7 @@ from labelscan.contexts.ingestion.adapters.sql_ingestion_repository import (
     SqlIngestionRepository,
 )
 from labelscan.contexts.ingestion.application.submit_ingestion import SubmitIngestion
-from tests.conftest import bearer
+from tests.conftest import bearer, jpeg_bytes
 
 AUTH = bearer("ingestion:write", store_code="TEST-MAG-01")
 
@@ -31,7 +31,8 @@ def client(engine, raw_store):
 
 
 def _files(content: bytes, media="image/jpeg"):
-    return {"image": ("label.jpg", content, media)}
+    image = jpeg_bytes(content) if media == "image/jpeg" and content else content
+    return {"image": ("label.jpg", image, media)}
 
 
 def test_submit_returns_202_after_durable_write(client, engine):

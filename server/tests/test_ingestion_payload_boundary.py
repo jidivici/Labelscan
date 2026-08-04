@@ -16,7 +16,7 @@ from labelscan.contexts.ingestion.adapters.sql_ingestion_repository import (
     SqlIngestionRepository,
 )
 from labelscan.contexts.ingestion.application.submit_ingestion import SubmitIngestion
-from tests.conftest import bearer
+from tests.conftest import bearer, jpeg_bytes
 
 AUTH = bearer("ingestion:write")
 
@@ -38,7 +38,8 @@ def _files(content: bytes, media="image/jpeg", barcode_raw=None):
 
 
 def test_payload_exactly_10mb_accepted(client):
-    content = b"x" * (10 * 1024 * 1024)
+    overhead = len(jpeg_bytes())
+    content = jpeg_bytes(b"x" * (10 * 1024 * 1024 - overhead))
     files, data = _files(content)
     r = client.post(
         "/v1/ingestions",
@@ -50,7 +51,8 @@ def test_payload_exactly_10mb_accepted(client):
 
 
 def test_payload_just_over_10mb_rejected(client):
-    content = b"x" * (10 * 1024 * 1024 + 1)
+    overhead = len(jpeg_bytes())
+    content = jpeg_bytes(b"x" * (10 * 1024 * 1024 + 1 - overhead))
     files, data = _files(content)
     r = client.post(
         "/v1/ingestions",
@@ -73,9 +75,9 @@ def test_empty_payload_rejected(client):
     assert r.status_code == 400
 
 
-def test_oversized_barcode_raw_accepted_but_truncated(client, engine):
+def test_oversized_barcode_raw_is_rejected(client):
     long_barcode = "x" * 10000
-    content = b"barcode-boundary-test"
+    content = jpeg_bytes(b"barcode-boundary-test")
     files, data = _files(content, barcode_raw=long_barcode)
     r = client.post(
         "/v1/ingestions",
@@ -83,11 +85,44 @@ def test_oversized_barcode_raw_accepted_but_truncated(client, engine):
         data=data,
         headers={"Idempotency-Key": "k-long-barcode", **AUTH},
     )
-    assert r.status_code == 202
-    iid = r.json()["ingestion_id"]
-    with engine.connect() as c:
-        stored = c.execute(
-            text("SELECT barcode_raw FROM ingestion.ingestion WHERE id = :id"),
-            {"id": iid},
-        ).scalar_one()
-    assert stored == long_barcode
+    assert r.status_code == 400
+    assert r.json()["error_code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    ("content", "media"),
+    [
+        (b"\xff\xd8\xff\xc0\x00", "image/jpeg"),
+        (jpeg_bytes(b"mislabeled"), "image/png"),
+        (
+            b"\x89PNG\r\n\x1a\n\x00\x00\x00\x0dIHDR"
+            + (10001).to_bytes(4, "big")
+            + (1).to_bytes(4, "big"),
+            "image/png",
+        ),
+    ],
+)
+def test_invalid_image_is_rejected_before_raw_persistence(client, engine, content, media):
+    with engine.connect() as conn:
+        before = conn.execute(text("SELECT count(*) FROM ingestion.raw_artifact")).scalar_one()
+    files, data = _files(content, media=media)
+    response = client.post(
+        "/v1/ingestions",
+        files=files,
+        data=data,
+        headers={"Idempotency-Key": f"invalid-{len(content)}-{media}", **AUTH},
+    )
+    assert response.status_code == 400
+    with engine.connect() as conn:
+        after = conn.execute(text("SELECT count(*) FROM ingestion.raw_artifact")).scalar_one()
+    assert after == before
+
+
+def test_oversized_idempotency_key_is_rejected(client):
+    response = client.post(
+        "/v1/ingestions",
+        files=_files(jpeg_bytes(b"valid"))[0],
+        headers={"Idempotency-Key": "k" * 129, **AUTH},
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"

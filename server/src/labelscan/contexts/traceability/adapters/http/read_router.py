@@ -9,16 +9,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.read_models import AuditEntry, audit_entries
 from labelscan.platform.http.security import Principal, require_scope
-from labelscan.platform.db.tenant_context import set_tenant_context
 
 router = APIRouter()
 
@@ -66,8 +66,8 @@ class BatchView(BaseModel):
 
 @router.get("/v1/batches/{batch_id}", response_model=BatchView)
 def get_batch(
-    batch_id: str,
     request: Request,
+    batch_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("traceability:read")),
     engine: Engine = Depends(get_engine),
 ) -> BatchView:

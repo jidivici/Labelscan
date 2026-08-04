@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 import uuid
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel, Field
 
 from labelscan.contexts.identity.application.manage_stores import (
@@ -60,12 +60,12 @@ class StoreResponse(BaseModel):
 class CreateStoreRequest(BaseModel):
     # The web portal creates opaque codes automatically.  Keeping this optional
     # preserves the API for integrations that already own a store-code scheme.
-    code: str | None = Field(None, min_length=1)
-    name: str = Field(min_length=1)
+    code: str | None = Field(None, min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=120)
 
 
 class UpdateStoreRequest(BaseModel):
-    name: str | None = Field(None, min_length=1)
+    name: str | None = Field(None, min_length=1, max_length=120)
     active: bool | None = None
 
 
@@ -126,7 +126,7 @@ def create_store(
 @router.get("/v1/stores", response_model=list[StoreResponse])
 def list_stores(
     active: bool | None = Query(None),
-    q: str | None = Query(None),
+    q: str | None = Query(None, max_length=120),
     principal: Principal = Depends(require_scope("identity:admin")),
     service: StoreAdminService = Depends(get_store_admin_service),
 ) -> list[StoreResponse]:
@@ -158,9 +158,9 @@ def get_current_store(
 
 @router.patch("/v1/stores/{code}", response_model=StoreResponse)
 def update_store(
-    code: str,
     body: UpdateStoreRequest,
     request: Request,
+    code: str = Path(min_length=1, max_length=64),
     principal: Principal = Depends(require_scope("identity:admin")),
     service: StoreAdminService = Depends(get_store_admin_service),
 ) -> StoreResponse:

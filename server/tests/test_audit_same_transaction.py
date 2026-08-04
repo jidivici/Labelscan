@@ -12,7 +12,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from labelscan.platform.db.audit_context import audited_transaction, set_audit_context
+from labelscan.platform.db.audit_context import audited_transaction
 from tests.conftest import ACTOR_ID, insert_raw_artifact
 
 

@@ -15,8 +15,8 @@ from sqlalchemy import text
 
 from labelscan.app.http_app import create_app
 from labelscan.contexts.haccp.adapters.alerting_consumer import AlertingConsumer
-from labelscan.contexts.ingestion.adapters.http.router import get_submit_ingestion
 from labelscan.contexts.ingestion.adapters.extraction_consumer import ExtractionConsumer
+from labelscan.contexts.ingestion.adapters.http.router import get_submit_ingestion
 from labelscan.contexts.ingestion.adapters.sql_ingestion_repository import (
     SqlIngestionRepository,
 )
@@ -29,7 +29,7 @@ from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import FakeLlm, FakeOcr, traceable_fields
-from tests.conftest import ACTOR_ID, bearer
+from tests.conftest import ACTOR_ID, bearer, jpeg_bytes
 
 RULES = RuleSet(
     version="test",
@@ -125,7 +125,7 @@ def seeded(client, engine, raw_store):
     _quiesce(engine)
     r = client.post(
         "/v1/ingestions",
-        files={"image": ("l.jpg", b"read-endpoints-1", "image/jpeg")},
+        files={"image": ("l.jpg", jpeg_bytes(b"read-endpoints-1"), "image/jpeg")},
         headers={"Idempotency-Key": "rk", **AUTH},
     )
     ingestion_id = r.json()["ingestion_id"]
@@ -171,7 +171,13 @@ def test_get_ingestion_embeds_latest_fields(client, engine, raw_store):
     _quiesce(engine)
     r = client.post(
         "/v1/ingestions",
-        files={"image": ("l.jpg", b"embed-latest-fields-1", "image/jpeg")},
+        files={
+            "image": (
+                "l.jpg",
+                jpeg_bytes(b"embed-latest-fields-1"),
+                "image/jpeg",
+            )
+        },
         headers={"Idempotency-Key": "embed-latest-fields", **AUTH},
     )
     ingestion_id = r.json()["ingestion_id"]

@@ -6,7 +6,7 @@ import threading
 import time
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Path, Query, Response
 from pydantic import BaseModel
 
 from labelscan.contexts.traceability.application.catalog import (
@@ -154,8 +154,8 @@ def _catalog_access(principal: Principal) -> CatalogAccess:
 @router.get("/v1/catalog/products", response_model=CatalogPage, include_in_schema=False)
 @router.get("/v1/arrivals", response_model=CatalogPage)
 def list_arrivals(
-    q: str | None = Query(None),
-    store_code: str | None = Query(None),
+    q: str | None = Query(None, max_length=120),
+    store_code: str | None = Query(None, max_length=64),
     date_from: date | None = Query(None),
     date_to: date | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
@@ -201,7 +201,7 @@ def list_arrivals(
 
 @router.get("/v1/arrivals/{batch_id}", response_model=CatalogArrivalResponse)
 def get_arrival(
-    batch_id: str,
+    batch_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("catalog:read")),
     service: CatalogService = Depends(get_catalog_service),
 ) -> CatalogArrivalResponse:
@@ -221,7 +221,7 @@ def get_arrival(
 
 @router.get("/v1/arrivals/{batch_id}/image", response_class=Response)
 def get_arrival_image(
-    batch_id: str,
+    batch_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("catalog:read")),
     service: CatalogService = Depends(get_catalog_service),
     reader=Depends(get_raw_image_reader),
@@ -250,5 +250,5 @@ def get_arrival_image(
     return Response(
         content=image.content,
         media_type=image.media_type,
-        headers={"Cache-Control": "private, max-age=3600"},
+        headers={"Cache-Control": "no-store"},
     )

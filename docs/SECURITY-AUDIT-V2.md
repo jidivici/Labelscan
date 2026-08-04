@@ -1,5 +1,8 @@
 # Audit de sécurité — LabelScan V2 (préparation pentest externe)
 
+> **Superseded:** this point-in-time assessment is retained for traceability. The
+> current finding disposition and release gates are in `SECURITY-AUDIT-V3.md`.
+
 **Date :** 8 juillet 2026.
 **Périmètre :** tout le dépôt — backend (`server/`), mobile (`src/`, `ios/`, `android/`), base de données (migrations Alembic 0001-0013), config (`docker-compose.yml`, `.env.example`, `app.json`), docs.
 **Objectif :** inventaire exhaustif des surfaces de risque en vue d'un **pentest tiers** (`PROD-READINESS.md` §2.4) — y compris ce qui est déjà couvert (documenté avec preuve, pour que le pentesteur ne re-découvre pas ce qui est connu).

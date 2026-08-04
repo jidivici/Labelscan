@@ -321,15 +321,16 @@ def downgrade() -> None:
             DROP COLUMN store_id,
             DROP COLUMN organization_code,
             DROP COLUMN organization_id,
-            ADD CONSTRAINT app_user_username_key UNIQUE (username),
-            ADD CONSTRAINT fk_app_user_store_code FOREIGN KEY (store_code)
-                REFERENCES identity.store(code);
+            ADD CONSTRAINT app_user_username_key UNIQUE (username);
         ALTER TABLE identity.store
             DROP CONSTRAINT uq_store_org_id_id,
             DROP CONSTRAINT uq_store_organization_code,
             DROP COLUMN organization_code,
             DROP COLUMN organization_id,
             ADD CONSTRAINT store_code_key UNIQUE (code);
+        ALTER TABLE identity.app_user
+            ADD CONSTRAINT fk_app_user_store_code FOREIGN KEY (store_code)
+                REFERENCES identity.store(code);
         """
     )
     op.execute("DROP TABLE IF EXISTS identity.organization;")

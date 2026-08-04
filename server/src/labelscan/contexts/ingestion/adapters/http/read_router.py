@@ -19,18 +19,21 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Path, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.http.errors import ApiError
+from labelscan.platform.http.rate_limit import LimitExceeded, rate_limits
 from labelscan.platform.http.read_models import AuditEntry, audit_entries
 from labelscan.platform.http.security import Principal, require_scope
-from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.observability import get_logger
 
 router = APIRouter()
+_log = get_logger("http.security")
 
 # Long-poll bounds: the hold is ALWAYS bounded (a client cannot pin a thread
 # indefinitely) and the probe cadence keeps DB load negligible (one indexed
@@ -166,8 +169,8 @@ class ExtractionRunView(BaseModel):
 
 @router.get("/v1/ingestions/{ingestion_id}", response_model=IngestionView)
 def get_ingestion(
-    ingestion_id: str,
     request: Request,
+    ingestion_id: str = Path(min_length=1, max_length=128),
     wait: float = Query(
         default=0.0,
         description=(
@@ -178,6 +181,7 @@ def get_ingestion(
     ),
     last_status: str | None = Query(
         default=None,
+        max_length=64,
         description="The status the client last observed (long-poll baseline).",
     ),
     principal: Principal = Depends(require_scope("ingestion:read")),
@@ -189,15 +193,35 @@ def get_ingestion(
     # load below raises the same 404 the plain GET always did.
     wait_s = clamp_wait(wait)
     if wait_s > 0 and last_status:
-        deadline = time.monotonic() + wait_s
-        while True:
-            current = _probe_status(engine, ingestion_id, principal)
-            if current is None or current != last_status:
-                break
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break  # hold expired — return the (unchanged) current state
-            time.sleep(min(_PROBE_INTERVAL_S, remaining))
+        try:
+            rate_limits.acquire_hold(principal.actor_id)
+        except LimitExceeded as exc:
+            _log.warning(
+                "rate_limited",
+                extra={
+                    "actor_id": principal.actor_id,
+                    "rate_limit_scope": exc.scope,
+                    "retry_after": exc.retry_after,
+                    "path": request.url.path,
+                },
+            )
+            raise ApiError(
+                "RATE_LIMITED",
+                "long-poll concurrency limit exceeded",
+                headers={"Retry-After": str(exc.retry_after)},
+            )
+        try:
+            deadline = time.monotonic() + wait_s
+            while True:
+                current = _probe_status(engine, ingestion_id, principal)
+                if current is None or current != last_status:
+                    break
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break  # hold expired — return the (unchanged) current state
+                time.sleep(min(_PROBE_INTERVAL_S, remaining))
+        finally:
+            rate_limits.release_hold(principal.actor_id)
 
     with engine.connect() as c:
         organization_id = _organization_id(c, principal)
@@ -316,8 +340,8 @@ def get_ingestion(
 
 @router.get("/v1/extraction-runs/{run_id}", response_model=ExtractionRunView)
 def get_extraction_run(
-    run_id: str,
     request: Request,
+    run_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("ingestion:read")),
     engine: Engine = Depends(get_engine),
 ) -> ExtractionRunView:

@@ -1,9 +1,8 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
-import { ApiProblem, organizationSlug, request } from './api';
+import { ApiProblem, authorizedFetch, organizationSlug, refreshBrowserSession, request } from './api';
 import type { Arrival, ArrivalDetail, Role, Session, Store, User } from './types';
 
-const SESSION_KEY = 'labelscan.web-session.v2';
 const FIELD_LABELS: Record<string, string> = {
   commercial_designation: 'Désignation commerciale',
   scientific_name: 'Nom scientifique',
@@ -48,16 +47,6 @@ function storeName(stores: Store[], code: string | null, ownStoreName?: string |
   return stores.find((store) => store.code === code)?.name ?? ownStoreName ?? 'Magasin non renseigné';
 }
 
-function readSession(): Session | null {
-  try {
-    const parsed = JSON.parse(sessionStorage.getItem(SESSION_KEY) ?? 'null') as Session | null;
-    if (!parsed || parsed.expiresAt <= Date.now()) return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
 function Login({ onSession }: { onSession: (session: Session) => void }) {
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -96,7 +85,7 @@ function Login({ onSession }: { onSession: (session: Session) => void }) {
         <h1>LabelScan</h1>
         {error && <p className="notice error">{error}</p>}
         <label>Identifiant<input name="username" autoComplete="username" required autoFocus /></label>
-        <label>Mot de passe<input name="password" type="password" autoComplete="current-password" required /></label>
+        <label>Mot de passe<input name="password" type="password" autoComplete="current-password" minLength={12} maxLength={128} required /></label>
         <button className="primary" disabled={busy}>{busy ? 'Connexion…' : 'Se connecter'}</button>
       </form>
     </main>
@@ -109,9 +98,7 @@ function SecureImage({ arrival, session }: { arrival: Arrival; session: Session 
     if (!arrival.photo_available) return;
     let active = true;
     let objectUrl = '';
-    fetch(`/v1/arrivals/${arrival.batch_id}/image`, {
-      headers: { Authorization: `Bearer ${session.token}` },
-    })
+    authorizedFetch(`/v1/arrivals/${arrival.batch_id}/image`, session)
       .then((response) => response.ok ? response.blob() : Promise.reject())
       .then((blob) => {
         objectUrl = URL.createObjectURL(blob);
@@ -278,7 +265,7 @@ function UserForm({ stores, onSave, onClose }: { stores: Store[]; onSave: (body:
     <div className="drawer-head"><h2>Nouvel utilisateur</h2><button type="button" onClick={onClose}>×</button></div>
     <label>Nom affiché<input name="display_name" required /></label>
     <label>Identifiant<input name="username" required /></label>
-    <label>Mot de passe<input name="password" type="password" required /></label>
+    <label>Mot de passe<input name="password" type="password" minLength={12} maxLength={128} required /></label>
     <label>Rôle<select value={role} onChange={(e) => setRole(e.target.value as Role)}><option value="operator">Opérateur</option><option value="admin">Administrateur</option></select></label>
     {role === 'operator' && <label>Magasin<select name="store_code" required><option value="">Sélectionner</option>{stores.filter((s) => s.active).map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}</select></label>}
     <button className="primary">Créer le compte</button>
@@ -326,15 +313,25 @@ function Stores({ session, stores, reload }: { session: Session; stores: Store[]
 }
 
 export function App() {
-  const [session, setSession] = useState<Session | null>(readSession);
+  const [session, setSession] = useState<Session | null>(null);
+  const [restoring, setRestoring] = useState(true);
   const [tab, setTab] = useState<'catalog' | 'users' | 'stores'>('catalog');
   const [stores, setStores] = useState<Store[]>([]);
   const [ownStoreName, setOwnStoreName] = useState<string | null>(null);
   function saveSession(next: Session) {
-    sessionStorage.setItem(SESSION_KEY, JSON.stringify(next));
     setTab('catalog');
     setSession(next);
   }
+  useEffect(() => {
+    let active = true;
+    refreshBrowserSession().then((restored) => {
+      if (active) {
+        setSession(restored);
+        setRestoring(false);
+      }
+    });
+    return () => { active = false; };
+  }, []);
   const loadStores = useCallback(async () => {
     if (!session) {
       setStores([]);
@@ -355,12 +352,13 @@ export function App() {
     }
   }, [session]);
   useEffect(() => { void loadStores(); }, [loadStores]);
+  if (restoring) return <main className="login"><p>Chargement…</p></main>;
   if (!session) return <Login onSession={saveSession} />;
   const admin = session.user.role === 'admin';
   return <div className="shell">
     <header className="header"><button className="brand" onClick={() => setTab('catalog')}><img src="/backoffice/assets/labelscan-logo.png" alt="" /><strong>LabelScan</strong></button>
       <nav><button className={tab === 'catalog' ? 'active' : ''} onClick={() => setTab('catalog')}>Arrivages</button>{admin && <button className={tab === 'users' ? 'active' : ''} onClick={() => setTab('users')}>Utilisateurs</button>}{admin && <button className={tab === 'stores' ? 'active' : ''} onClick={() => setTab('stores')}>Magasins</button>}</nav>
-      <div className="account"><span>{session.user.display_name}</span><button className="text-button" onClick={() => { sessionStorage.removeItem(SESSION_KEY); setSession(null); }}>Déconnexion</button></div>
+      <div className="account"><span>{session.user.display_name}</span><button className="text-button" onClick={() => { void fetch('/v1/auth/logout', { method: 'POST', credentials: 'same-origin' }).finally(() => setSession(null)); }}>Déconnexion</button></div>
     </header>
     <main className="content">{tab === 'catalog' && <Catalog session={session} stores={stores} ownStoreName={ownStoreName} />}{tab === 'users' && admin && <Users session={session} stores={stores} />}{tab === 'stores' && admin && <Stores session={session} stores={stores} reload={loadStores} />}</main>
   </div>;

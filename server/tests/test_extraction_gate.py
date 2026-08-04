@@ -10,7 +10,6 @@ from __future__ import annotations
 from labelscan.contexts.ingestion.domain.extraction import (
     GateOutcome,
     RuleSet,
-    Thresholds,
     evaluate,
 )
 from tests._fakes import OCR_TEXT, field, good_fields

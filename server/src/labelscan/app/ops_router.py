@@ -19,6 +19,7 @@ import os
 from fastapi import APIRouter, Depends
 
 from labelscan.app.extraction_wiring import _PLACEHOLDER_RULESET
+from labelscan.platform.config import is_production
 from labelscan.platform.http.errors import ApiError
 
 router = APIRouter(tags=["ops"])
@@ -92,8 +93,12 @@ def ready(probe: ReadinessProbe = Depends(get_readiness_probe)) -> dict:
     unavailable = sorted(name for name, state in checks.items() if state != "ok")
     if unavailable:
         # 503 problem+json (DEPENDENCY_UNAVAILABLE) per openapi /health/ready.
-        raise ApiError("DEPENDENCY_UNAVAILABLE", f"not ready: {', '.join(unavailable)}")
-    return {"status": "ready", "checks": checks}
+        detail = "not ready" if is_production() else f"not ready: {', '.join(unavailable)}"
+        raise ApiError("DEPENDENCY_UNAVAILABLE", detail)
+    response = {"status": "ready"}
+    if not is_production():
+        response["checks"] = checks
+    return response
 
 
 @router.get("/v1/version")
