@@ -1,0 +1,42 @@
+name: deploy-hostinger
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: labelscan-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy private VPS
+    runs-on: [self-hosted, linux, x64, labelscan-production]
+    environment:
+      name: production
+      url: https://label-scan.fr
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out the exact revision
+        uses: actions/checkout@v4
+        with:
+          clean: true
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify deployment source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git remote get-url origin)" = "https://github.com/${GITHUB_REPOSITORY}"
+          test -f server/Dockerfile
+          test -f web/package-lock.json
+
+      - name: Deploy with backup and health check
+        shell: bash
+        run: sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA"
