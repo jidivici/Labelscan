@@ -2,14 +2,6 @@ name: deploy-hostinger
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - server/**
-      - web/**
-      - deploy/hostinger/**
-      - .dockerignore
-      - .github/workflows/deploy-hostinger.yml
 
 permissions:
   contents: read
@@ -39,6 +31,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
+          test "$GITHUB_REF" = "refs/heads/main"
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$(git remote get-url origin)" = "https://github.com/${GITHUB_REPOSITORY}"
           test -f server/Dockerfile
