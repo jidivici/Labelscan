@@ -236,15 +236,16 @@ export function CameraScreen() {
           const iOSLandscapeCapture =
             orientationAtShutter === 'landscapeLeft'
             || orientationAtShutter === 'landscapeRight';
-          // A landscape result must always become portrait-readable. On iOS we
-          // additionally retain the physical-orientation signal for the camera
-          // edge case that encodes a landscape-held capture in portrait pixels.
-          const rotateLeft = screenWidth <= screenHeight && (
+          // A landscape capture is displayed with the single left quarter-turn
+          // used throughout the app (including the full-screen viewer). Keep the
+          // stored crop untouched: adding a physical rotation here as well would
+          // apply the quarter-turn twice in the viewer.
+          const needsViewerQuarterTurn = screenWidth <= screenHeight && (
             normalizedImage.width > normalizedImage.height
             || (Platform.OS === 'ios' && iOSLandscapeCapture)
           );
-          const outputWidth = rotateLeft ? srcH : srcW;
-          const outputHeight = rotateLeft ? srcW : srcH;
+          const outputWidth = srcW;
+          const outputHeight = srcH;
           const resize =
             outputWidth >= outputHeight
               ? { width: Math.min(outputWidth, 1600) }
@@ -252,7 +253,6 @@ export function CameraScreen() {
 
           const outputContext = ImageManipulator.ImageManipulator.manipulate(normalizedImage);
           outputContext.crop(crop);
-          if (rotateLeft) outputContext.rotate(-90);
           outputContext.resize(resize);
           const outputImage = await outputContext.renderAsync();
           let out: Awaited<ReturnType<typeof outputImage.saveAsync>>;
@@ -271,7 +271,7 @@ export function CameraScreen() {
             normalized: `${normalizedImage.width}x${normalizedImage.height}`,
             crop: `${crop.originX},${crop.originY},${crop.width}x${crop.height}`,
             orientation: orientationAtShutter,
-            rotate_left: String(rotateLeft),
+            viewer_quarter_turn: String(needsViewerQuarterTurn),
           });
 
           // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
@@ -282,7 +282,7 @@ export function CameraScreen() {
             capturedAt,
             tradeCode: businessProfile.code,
             businessPortalId: businessPortalId ?? undefined,
-            photoBaseRotationDegrees: 0,
+            photoBaseRotationDegrees: needsViewerQuarterTurn ? -90 : 0,
           });
           logLatency('capture', { framed: 'true' });
           // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
