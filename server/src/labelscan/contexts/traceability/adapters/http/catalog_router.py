@@ -162,6 +162,7 @@ class CatalogArrivalResponse(BaseModel):
             recorded_at=arrival.recorded_at,
             updated_at=arrival.updated_at,
             photo_available=arrival.photo_available,
+            photo_rotation_degrees=arrival.photo_rotation_degrees,
             store_id=arrival.store_id,
             business_portal_id=arrival.business_portal_id,
             profession_code=arrival.profession_code,
