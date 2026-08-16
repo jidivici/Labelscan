@@ -415,6 +415,7 @@ tbody tr:hover { background: #fafcfb; }
 .modal-card header p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
 .modal-form { display: grid; gap: 20px; }
 .confirm-card > p { margin: 8px 0 24px; color: var(--muted); line-height: 1.55; }
+.confirm-dialog-message { margin: -10px 0 20px; padding: 12px 14px; border-radius: 8px; background: #fff6e8; color: #7a4b08; font-size: 12px; line-height: 1.5; }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .empty-state { min-height: 210px; display: grid; place-content: center; justify-items: center; padding: 28px; border: 1px dashed var(--line-strong); border-radius: 10px; background: #fff; text-align: center; }
 .empty-state h2 { margin-bottom: 6px; font-size: 17px; }
