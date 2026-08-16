@@ -551,6 +551,17 @@ export function ReviewScreen() {
 
   const handleSave = useCallback(async () => {
     if (!run || !ingestion || !ingestionId || !scan) return;
+    // A scan captured by the short-lived +90° build has already reached the
+    // server without physical rotation. It cannot be corrected safely after
+    // OCR: ask for a new capture instead of submitting a payload the deployed
+    // API rejects (and instead of confirming a wrongly oriented source photo).
+    if (Number(scan.photoBaseRotationDegrees) === 90) {
+      Alert.alert(
+        'Photo à reprendre',
+        'Cette photo a été prise avec une ancienne version de la rotation. Revenez à la liste, supprimez cet arrivage puis reprenez la photo.',
+      );
+      return;
+    }
     setSaving(true);
     try {
       const savedFields: ArticleField[] = run.fields.map((f): ArticleField => {

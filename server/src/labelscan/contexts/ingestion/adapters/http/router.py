@@ -401,8 +401,8 @@ class FinalizeReviewRequest(BaseModel):
     def values_are_bounded(self):
         if self.photo_rotation_degrees not in (0, 180):
             raise ValueError("photo rotation must be 0 or 180 degrees")
-        if self.photo_base_rotation_degrees not in (-90, 0, 90):
-            raise ValueError("photo base rotation must be -90, 0, or 90 degrees")
+        if self.photo_base_rotation_degrees not in (-90, 0):
+            raise ValueError("photo base rotation must be -90 or 0 degrees")
         if any(
             value is not None and len(value) > 512 for value in self.fields.values()
         ):

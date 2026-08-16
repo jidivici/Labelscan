@@ -113,7 +113,7 @@ export interface Arrival {
   recorded_at: string;
   photo_available: boolean;
   photo_rotation_degrees?: 0 | 180;
-  photo_base_rotation_degrees?: -90 | 0 | 90;
+  photo_base_rotation_degrees?: -90 | 0;
   store_id?: string | null;
   business_portal_id?: string | null;
   trade_profile_version?: string;
@@ -136,7 +136,7 @@ export interface ArrivalDetail {
   updated_at: string;
   photo_available: boolean;
   photo_rotation_degrees?: 0 | 180;
-  photo_base_rotation_degrees?: -90 | 0 | 90;
+  photo_base_rotation_degrees?: -90 | 0;
   store_id?: string | null;
   business_portal_id?: string | null;
   trade_profile_version?: string;

@@ -240,22 +240,20 @@ export function CameraScreen() {
           const iOSLandscapeCapture =
             orientationAtShutter === 'landscapeLeft'
             || orientationAtShutter === 'landscapeRight';
-          // A landscape capture is displayed with the single left quarter-turn
-          // used throughout the app (including the full-screen viewer). Keep the
-          // stored crop untouched: adding a physical rotation here as well would
-          // apply the quarter-turn twice in the viewer.
-          const needsViewerQuarterTurn = screenWidth <= screenHeight && (
+          // Rotate the cropped pixels themselves before the image enters the queue.
+          // The app stays in portrait; this only normalizes the saved JPEG so OCR,
+          // the review card and the manager all see the same upright photo.
+          const needsPhysicalQuarterTurn = screenWidth <= screenHeight && (
             normalizedImage.width > normalizedImage.height
             || (Platform.OS === 'ios' && iOSLandscapeCapture)
           );
           // `landscapeLeft` is the opposite image basis to `landscapeRight`.
-          // Store the direction explicitly so the viewer can apply the one
-          // correct quarter-turn rather than treating both positions as -90°.
-          const baseRotationDegrees = !needsViewerQuarterTurn
+          // Match the preview-direction mapping used for the frame crop.
+          const physicalRotationDegrees = !needsPhysicalQuarterTurn
             ? 0
             : orientationAtShutter === 'landscapeLeft' ? 90 : -90;
-          const outputWidth = srcW;
-          const outputHeight = srcH;
+          const outputWidth = physicalRotationDegrees ? srcH : srcW;
+          const outputHeight = physicalRotationDegrees ? srcW : srcH;
           const resize =
             outputWidth >= outputHeight
               ? { width: Math.min(outputWidth, 1600) }
@@ -263,6 +261,7 @@ export function CameraScreen() {
 
           const outputContext = ImageManipulator.ImageManipulator.manipulate(normalizedImage);
           outputContext.crop(crop);
+          if (physicalRotationDegrees) outputContext.rotate(physicalRotationDegrees);
           outputContext.resize(resize);
           const outputImage = await outputContext.renderAsync();
           let out: Awaited<ReturnType<typeof outputImage.saveAsync>>;
@@ -282,7 +281,7 @@ export function CameraScreen() {
             crop: `${crop.originX},${crop.originY},${crop.width}x${crop.height}`,
             orientation: orientationAtShutter,
             preview_turn: previewQuarterTurn,
-            viewer_rotation: String(baseRotationDegrees),
+            physical_rotation: String(physicalRotationDegrees),
           });
 
           // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
@@ -293,7 +292,7 @@ export function CameraScreen() {
             capturedAt,
             tradeCode: businessProfile.code,
             businessPortalId: businessPortalId ?? undefined,
-            photoBaseRotationDegrees: baseRotationDegrees,
+            photoBaseRotationDegrees: 0,
           });
           logLatency('capture', { framed: 'true' });
           // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and

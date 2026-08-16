@@ -86,7 +86,7 @@ export interface PendingScan {
   /** Operator-approved half-turn applied to catalogue displays after review. */
   photoRotationDegrees?: 0 | 180;
   /** Historical raw photos need -90° on display; new crops are already upright. */
-  photoBaseRotationDegrees?: -90 | 0 | 90;
+  photoBaseRotationDegrees?: -90 | 0;
   /** Durable atomic review operation; the scan stays visible until it succeeds. */
   finalizeOpId?: string;
   reviewSyncStatus?: 'pending' | 'dead_letter';
@@ -316,7 +316,7 @@ export interface EnqueueScanInput {
   tradeCode?: TradeCode;
   /** Received from authenticated server context; retained locally for isolation only. */
   businessPortalId?: string;
-  photoBaseRotationDegrees?: -90 | 0 | 90;
+  photoBaseRotationDegrees?: -90 | 0;
 }
 
 /**
