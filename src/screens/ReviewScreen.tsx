@@ -596,6 +596,7 @@ export function ReviewScreen() {
           ]),
         ),
         photo_rotation_degrees: photoRotationDegrees,
+        photo_base_rotation_degrees: scan.photoBaseRotationDegrees ?? -90,
       };
       if (!operation) {
         operation = await enqueueFinalizeReview(finalReviewPayload);
@@ -638,6 +639,7 @@ export function ReviewScreen() {
         captured_at: capturedAt ?? savedAt,
         photo_uri: confirmedPhotoUri,
         photo_rotation_degrees: photoRotationDegrees,
+        photo_base_rotation_degrees: scan.photoBaseRotationDegrees ?? -90,
         barcode_raw: barcodeRaw ?? ingestion.barcode_raw ?? null,
         ingestion_status: 'confirmed',
         fields: savedFields,
@@ -724,6 +726,7 @@ export function ReviewScreen() {
               resizeMode="cover"
               style={StyleSheet.absoluteFillObject}
               halfTurn={photoRotationDegrees === 180}
+              baseRotationDegrees={scan.photoBaseRotationDegrees ?? -90}
             />
           </Pressable>
         ) : (
@@ -738,6 +741,7 @@ export function ReviewScreen() {
         photoUri={photoUri}
         allowHalfTurn
         halfTurn={photoRotationDegrees === 180}
+        baseRotationDegrees={scan?.photoBaseRotationDegrees ?? -90}
         onHalfTurn={() => {
           const next = photoRotationDegrees === 0 ? 180 : 0;
           setPhotoRotationDegrees(next);

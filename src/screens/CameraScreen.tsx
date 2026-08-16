@@ -202,11 +202,18 @@ export function CameraScreen() {
         }
         const srcW = crop.width;
         const srcH = crop.height;
+        // The app preview stays portrait. A landscape sensor buffer therefore has
+        // to be turned left after the crop so the stored OCR image is upright.
+        const rotateLeft = screenWidth <= screenHeight && capturedPhoto.width > capturedPhoto.height;
+        const outputWidth = rotateLeft ? srcH : srcW;
+        const outputHeight = rotateLeft ? srcW : srcH;
         const resize =
-          srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
+          outputWidth >= outputHeight
+            ? { width: Math.min(outputWidth, 1600) }
+            : { height: Math.min(outputHeight, 1600) };
         const out = await ImageManipulator.manipulateAsync(
           durableRawUri,
-          captureImageActions(crop, resize),
+          captureImageActions(crop, resize, rotateLeft ? -90 : 0),
           { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
         );
 
@@ -218,6 +225,7 @@ export function CameraScreen() {
           capturedAt,
           tradeCode: businessProfile.code,
           businessPortalId: businessPortalId ?? undefined,
+          photoBaseRotationDegrees: 0,
         });
         logLatency('capture', { framed: 'true' });
         // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and

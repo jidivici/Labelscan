@@ -54,6 +54,7 @@ class FinalizeReviewCommand:
     trace_id: str
     note: str | None = None
     photo_rotation_degrees: int = 0
+    photo_base_rotation_degrees: int = -90
     access: AccessContext | None = None
 
 
@@ -64,6 +65,8 @@ class FinalizeReview:
     def __call__(self, command: FinalizeReviewCommand) -> FinalizedReview:
         if command.photo_rotation_degrees not in (0, 180):
             raise ValueError("photo rotation must be 0 or 180 degrees")
+        if command.photo_base_rotation_degrees not in (-90, 0):
+            raise ValueError("photo base rotation must be -90 or 0 degrees")
         submitted = set(command.fields)
         contracts = [set(profile.fields) for profile in TRADE_PROFILES.values()]
         if submitted not in contracts:
@@ -88,6 +91,7 @@ class FinalizeReview:
             fields=normalized,
             note=command.note,
             photo_rotation_degrees=command.photo_rotation_degrees,
+            photo_base_rotation_degrees=command.photo_base_rotation_degrees,
             idempotency_key=command.idempotency_key,
             audit=AuditContext(
                 actor_id=command.actor_id,

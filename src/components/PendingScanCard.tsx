@@ -154,6 +154,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
                 source={{ uri: scan.photoUri }}
                 style={styles.thumbnailImage}
                 resizeMode="cover"
+                baseRotationDegrees={scan.photoBaseRotationDegrees ?? -90}
               />
             </View>
 

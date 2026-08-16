@@ -22,7 +22,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, spacing } from '../theme';
-import { PHOTO_DISPLAY_ROTATION } from './photoOrientation';
+import { PHOTO_DISPLAY_ROTATION, type PhotoBaseRotationDegrees } from './photoOrientation';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
@@ -36,6 +36,8 @@ export interface PhotoViewerModalProps {
   allowHalfTurn?: boolean;
   halfTurn?: boolean;
   onHalfTurn?: () => void;
+  /** -90 for historical raw captures; 0 for crops already rotated upright. */
+  baseRotationDegrees?: PhotoBaseRotationDegrees;
   onClose: () => void;
 }
 
@@ -46,10 +48,12 @@ export function PhotoViewerModal({
   allowHalfTurn = false,
   halfTurn = false,
   onHalfTurn,
+  baseRotationDegrees = -90,
   onClose,
 }: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const quarterTurn = baseRotationDegrees === -90;
   const scale = useSharedValue(INITIAL_SCALE);
   const savedScale = useSharedValue(INITIAL_SCALE);
   const translateX = useSharedValue(0);
@@ -113,7 +117,7 @@ export function PhotoViewerModal({
   // Keep the same left-facing orientation in the full-screen viewer and thumbnails.
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
-      { rotate: PHOTO_DISPLAY_ROTATION },
+      ...(quarterTurn ? [{ rotate: PHOTO_DISPLAY_ROTATION }] : []),
       ...(halfTurn ? [{ rotate: '180deg' as const }] : []),
       { translateX: translateX.value },
       { translateY: translateY.value },
@@ -132,10 +136,10 @@ export function PhotoViewerModal({
             style={[
               styles.image,
               {
-                left: (windowWidth - windowHeight) / 2,
-                top: (windowHeight - windowWidth) / 2,
-                width: windowHeight,
-                height: windowWidth,
+                left: quarterTurn ? (windowWidth - windowHeight) / 2 : 0,
+                top: quarterTurn ? (windowHeight - windowWidth) / 2 : 0,
+                width: quarterTurn ? windowHeight : windowWidth,
+                height: quarterTurn ? windowWidth : windowHeight,
               },
               imageStyle,
             ]}

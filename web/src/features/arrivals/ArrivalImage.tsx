@@ -10,17 +10,19 @@ export function ArrivalImage({
   alt = '',
   onOpen,
   rotationDegrees = 0,
+  baseRotationDegrees = -90,
 }: {
   batchId: string;
   available: boolean;
   alt?: string;
   onOpen?: (url: string) => void;
   rotationDegrees?: 0 | 180;
+  baseRotationDegrees?: -90 | 0;
 }) {
   const { session } = useAuth();
   const [url, setUrl] = useState<string>();
   const imageStyle = {
-    '--arrival-photo-rotation': `${rotationDegrees - 90}deg`,
+    '--arrival-photo-rotation': `${rotationDegrees + baseRotationDegrees}deg`,
   } as CSSProperties;
 
   useEffect(() => {
