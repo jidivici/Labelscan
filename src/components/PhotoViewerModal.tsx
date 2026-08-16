@@ -27,6 +27,7 @@ import { PHOTO_DISPLAY_ROTATION } from './photoOrientation';
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 const DOUBLE_TAP_SCALE = 2.5;
+const INITIAL_SCALE = 1.15;
 
 export interface PhotoViewerModalProps {
   visible: boolean;
@@ -49,24 +50,24 @@ export function PhotoViewerModal({
 }: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const scale = useSharedValue(1);
-  const savedScale = useSharedValue(1);
+  const scale = useSharedValue(INITIAL_SCALE);
+  const savedScale = useSharedValue(INITIAL_SCALE);
   const translateX = useSharedValue(0);
   const savedTranslateX = useSharedValue(0);
   const translateY = useSharedValue(0);
   const savedTranslateY = useSharedValue(0);
 
   const reset = () => {
-    scale.value = withTiming(1);
-    savedScale.value = 1;
+    scale.value = withTiming(INITIAL_SCALE);
+    savedScale.value = INITIAL_SCALE;
     translateX.value = withTiming(0);
     savedTranslateX.value = 0;
     translateY.value = withTiming(0);
     savedTranslateY.value = 0;
   };
 
-  // Every open starts unzoomed — a stale zoom/pan from a previous photo would be
-  // disorienting on the next one.
+  // Every open starts slightly zoomed and centered. This keeps the label readable
+  // immediately without carrying zoom/pan state over from the previous photo.
   useEffect(() => {
     if (visible) reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -97,7 +98,7 @@ export function PhotoViewerModal({
   const doubleTap = Gesture.Tap()
     .numberOfTaps(2)
     .onEnd(() => {
-      const target = savedScale.value > MIN_SCALE ? MIN_SCALE : DOUBLE_TAP_SCALE;
+      const target = savedScale.value > INITIAL_SCALE ? INITIAL_SCALE : DOUBLE_TAP_SCALE;
       scale.value = withTiming(target);
       savedScale.value = target;
       translateX.value = withTiming(0);
