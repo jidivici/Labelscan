@@ -2347,6 +2347,13 @@ components:
             maxLength: 2000
           - type: 'null'
           title: Note
+        photo_rotation_degrees:
+          type: integer
+          enum:
+          - 0
+          - 180
+          default: 0
+          title: Photo Rotation Degrees
       type: object
       required:
       - fields

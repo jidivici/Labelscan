@@ -75,6 +75,7 @@ export interface FinalizeReviewPayload {
   ingestion_id: string;
   fields: Record<string, string | null>;
   note?: string;
+  photo_rotation_degrees?: 0 | 180;
 }
 
 /** Result recorded on a succeeded create_ingestion op (read by the polling batch). */

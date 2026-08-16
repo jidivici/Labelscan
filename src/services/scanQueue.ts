@@ -83,6 +83,8 @@ export interface PendingScan {
    * are filled and it is validated (then completeScan drops it). Undefined = untouched.
    */
   edits?: Record<string, string>;
+  /** Operator-approved half-turn applied to catalogue displays after review. */
+  photoRotationDegrees?: 0 | 180;
   /** Durable atomic review operation; the scan stays visible until it succeeds. */
   finalizeOpId?: string;
   reviewSyncStatus?: 'pending' | 'dead_letter';
@@ -394,6 +396,11 @@ export async function discardScan(id: string): Promise<void> {
 export function saveScanEdits(id: string, edits: Record<string, string>): void {
   if (!findScan(id)) return;
   updateScan(id, { edits });
+}
+
+export function saveScanPhotoRotation(id: string, photoRotationDegrees: 0 | 180): void {
+  if (!findScan(id)) return;
+  updateScan(id, { photoRotationDegrees });
 }
 
 /** Link the scan to its already-persisted finalization operation. */

@@ -48,6 +48,7 @@ class CatalogArrival:
     recorded_at: str
     updated_at: str
     photo_available: bool
+    photo_rotation_degrees: int = 0
     store_id: str | None = None
     business_portal_id: str | None = None
     profession_code: str = "poissonnerie"

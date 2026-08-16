@@ -63,6 +63,7 @@ import {
   attachFinalizeOperation,
   completeScan,
   saveScanEdits,
+  saveScanPhotoRotation,
 } from '../services/scanQueue';
 import { filledCountFromValues } from '../services/fieldCompleteness';
 import { SkeletonValue } from '../components/SkeletonFieldList';
@@ -423,6 +424,7 @@ export function ReviewScreen() {
 
   const [saving, setSaving] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
   // partially-filled arrivage is restored on re-open (the scan stays "en cours" until
   // all 17 fields are filled and validated). Lazy init — the queue is already hydrated
@@ -593,6 +595,7 @@ export function ReviewScreen() {
               savedFields.find((field) => field.field_name === name)?.value ?? null,
             ]),
           ),
+          photo_rotation_degrees: photoRotationDegrees,
         });
         attachFinalizeOperation(scan.id, operation.id);
       } else if (operation.status === 'dead_letter') {
@@ -676,6 +679,7 @@ export function ReviewScreen() {
     businessPortalId,
     fieldOrder,
     reviewProfile,
+    photoRotationDegrees,
     navigation,
   ]);
 
@@ -709,6 +713,7 @@ export function ReviewScreen() {
               source={{ uri: photoUri }}
               resizeMode="cover"
               style={StyleSheet.absoluteFillObject}
+              halfTurn={photoRotationDegrees === 180}
             />
           </Pressable>
         ) : (
@@ -718,7 +723,18 @@ export function ReviewScreen() {
         )}
       </View>
 
-      <PhotoViewerModal visible={viewerOpen} photoUri={photoUri} onClose={() => setViewerOpen(false)} />
+      <PhotoViewerModal
+        visible={viewerOpen}
+        photoUri={photoUri}
+        allowHalfTurn
+        halfTurn={photoRotationDegrees === 180}
+        onHalfTurn={() => {
+          const next = photoRotationDegrees === 0 ? 180 : 0;
+          setPhotoRotationDegrees(next);
+          saveScanPhotoRotation(pendingScanId, next);
+        }}
+        onClose={() => setViewerOpen(false)}
+      />
 
       <ScrollView
         style={styles.contentCard}

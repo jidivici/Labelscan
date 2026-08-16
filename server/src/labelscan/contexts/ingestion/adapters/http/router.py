@@ -394,9 +394,12 @@ def get_finalize_review() -> FinalizeReview:
 class FinalizeReviewRequest(BaseModel):
     fields: dict[str, str | None]
     note: str | None = Field(None, max_length=2000)
+    photo_rotation_degrees: int = Field(0)
 
     @model_validator(mode="after")
     def values_are_bounded(self):
+        if self.photo_rotation_degrees not in (0, 180):
+            raise ValueError("photo rotation must be 0 or 180 degrees")
         if any(
             value is not None and len(value) > 512 for value in self.fields.values()
         ):
@@ -433,6 +436,7 @@ def finalize_review(
                 organization_id=principal.organization_id,
                 fields=body.fields,
                 note=body.note,
+                photo_rotation_degrees=body.photo_rotation_degrees,
                 idempotency_key=idempotency_key,
                 actor_id=principal.actor_id,
                 correlation_id=request.state.correlation_id,

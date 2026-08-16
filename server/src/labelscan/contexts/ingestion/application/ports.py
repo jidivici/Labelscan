@@ -169,6 +169,7 @@ class ReviewRepository(Protocol):
         organization_id: str,
         fields: dict[str, str | None],
         note: str | None,
+        photo_rotation_degrees: int,
         idempotency_key: str,
         audit: AuditContext,
         action: str,

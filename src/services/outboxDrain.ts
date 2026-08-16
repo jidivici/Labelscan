@@ -78,6 +78,7 @@ async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
       op.payload.ingestion_id,
       op.payload.fields,
       op.payload.note,
+      op.payload.photo_rotation_degrees ?? 0,
       {
         idempotencyKey: op.idempotencyKey,
         correlationId: op.correlationId,

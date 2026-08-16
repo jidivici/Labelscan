@@ -32,6 +32,9 @@ export interface PhotoViewerModalProps {
   visible: boolean;
   photoUri: string | null | undefined;
   headers?: Record<string, string>;
+  allowHalfTurn?: boolean;
+  halfTurn?: boolean;
+  onHalfTurn?: () => void;
   onClose: () => void;
 }
 
@@ -39,6 +42,9 @@ export function PhotoViewerModal({
   visible,
   photoUri,
   headers,
+  allowHalfTurn = false,
+  halfTurn = false,
+  onHalfTurn,
   onClose,
 }: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
@@ -107,6 +113,7 @@ export function PhotoViewerModal({
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
       { rotate: PHOTO_DISPLAY_ROTATION },
+      ...(halfTurn ? [{ rotate: '180deg' as const }] : []),
       { translateX: translateX.value },
       { translateY: translateY.value },
       { scale: scale.value },
@@ -145,6 +152,21 @@ export function PhotoViewerModal({
             <MaterialCommunityIcons name="close" size={22} color={colors.onPrimary} />
           </View>
         </Pressable>
+        {allowHalfTurn ? (
+          <Pressable
+            onPress={() => {
+              onHalfTurn?.();
+            }}
+            hitSlop={12}
+            style={[styles.rotateButton, { top: insets.top + spacing.sm }]}
+            accessibilityRole="button"
+            accessibilityLabel="Tourner la photo d’un demi-tour"
+          >
+            <View style={styles.closeCircle}>
+              <MaterialCommunityIcons name="rotate-left" size={22} color={colors.onPrimary} />
+            </View>
+          </Pressable>
+        ) : null}
       </GestureHandlerRootView>
     </Modal>
   );
@@ -161,6 +183,10 @@ const styles = StyleSheet.create({
   closeButton: {
     position: 'absolute',
     right: spacing.md,
+  },
+  rotateButton: {
+    position: 'absolute',
+    right: spacing.md + 52,
   },
   closeCircle: {
     width: 40,
