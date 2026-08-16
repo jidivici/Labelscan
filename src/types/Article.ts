@@ -34,6 +34,8 @@ export interface Article {
   captured_at: string; // ISO 8601
   photo_uri: string | null; // permanent local path, when a photo was kept
   photo_headers?: Record<string, string>;
+  /** Half-turn approved by the reviewer; the immutable OCR source is unchanged. */
+  photo_rotation_degrees?: 0 | 180;
   barcode_raw: string | null;
   ingestion_status: string; // e.g. 'extracted' | 'needs_review'
   fields: ArticleField[];

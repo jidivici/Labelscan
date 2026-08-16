@@ -1809,6 +1809,9 @@ components:
         photo_available:
           type: boolean
           title: Photo Available
+        photo_rotation_degrees:
+          type: integer
+          title: Photo Rotation Degrees
         store_id:
           anyOf:
           - type: string
@@ -1860,6 +1863,7 @@ components:
       - recorded_at
       - updated_at
       - photo_available
+      - photo_rotation_degrees
       - store_id
       - business_portal_id
       - profession_code
@@ -1955,6 +1959,9 @@ components:
         photo_available:
           type: boolean
           title: Photo Available
+        photo_rotation_degrees:
+          type: integer
+          title: Photo Rotation Degrees
         store_id:
           anyOf:
           - type: string
@@ -2005,6 +2012,7 @@ components:
       - packaging_date
       - recorded_at
       - photo_available
+      - photo_rotation_degrees
       - store_id
       - business_portal_id
       - profession_code

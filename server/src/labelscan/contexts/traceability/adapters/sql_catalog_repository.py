@@ -92,6 +92,7 @@ def _product(row) -> CatalogProduct:
         packaging_date=_text_value(fields, "packaging_date"),
         recorded_at=row["recorded_at"],
         photo_available=bool(row["image_checksum"]),
+        photo_rotation_degrees=int(row["photo_rotation_degrees"]),
         store_id=row["store_id"],
         business_portal_id=row["business_portal_id"],
         profession_code=row["profession_code"],
@@ -210,6 +211,7 @@ class SqlCatalogRepository(CatalogRepository):
         base = (
             "FROM traceability.arrival_projection AS projection "
             "JOIN traceability.batch AS batch ON batch.id = projection.batch_id "
+            "JOIN ingestion.ingestion AS ingestion ON ingestion.id = projection.ingestion_id "
             f"{where}"
         )
         columns = (
@@ -220,6 +222,7 @@ class SqlCatalogRepository(CatalogRepository):
             "projection.trade_profile_version, "
             "projection.captured_by_user_id::text AS captured_by_user_id, "
             "projection.fields, projection.image_checksum, batch.status, "
+            "ingestion.photo_rotation_degrees, "
             "projection.recorded_at::text AS recorded_at, "
             f"{_COMPLETENESS_SQL} AS completeness, "
             f"{_ALERT_STATE_SQL} AS alert_state, "
