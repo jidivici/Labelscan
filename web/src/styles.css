@@ -279,7 +279,18 @@ tbody tr:hover { background: #fafcfb; }
 .product-cell strong { color: var(--ink); font-size: 11px; }
 .product-cell small { color: var(--muted); font-size: 9px; }
 .arrival-image { position: relative; display: block; width: 100%; height: 100%; overflow: hidden; background: var(--surface-soft); container-type: size; }
-.arrival-image > img { position: absolute; top: 50%; left: 50%; display: block; width: 100cqh; height: 100cqw; max-width: none; object-fit: cover; transform: translate(-50%, -50%) rotate(var(--arrival-photo-rotation, -90deg)); }
+.arrival-image > img { position: absolute; inset: 0; display: block; width: 100%; height: 100%; max-width: none; opacity: 0; object-fit: cover; transform: rotate(var(--arrival-photo-rotation, 0deg)); transition: opacity .18s ease; }
+.arrival-image > img.requires-quarter-turn { top: 50%; left: 50%; right: auto; bottom: auto; width: 100cqh; height: 100cqw; transform: translate(-50%, -50%) rotate(var(--arrival-photo-rotation, -90deg)); }
+.arrival-image > img.is-ready { opacity: 1; }
+.arrival-image-loading { position: absolute; inset: 0; display: grid; place-items: center; overflow: hidden; background: linear-gradient(110deg, #e7efec 8%, #f6f9f8 28%, #e7efec 48%); background-size: 220% 100%; color: #78908a; animation: image-shimmer 1.25s linear infinite; }
+.arrival-image-loading .brand-mark { width: 42px; height: 42px; border-radius: 12px; opacity: .42; box-shadow: none; }
+.arrival-image-loading.is-idle { animation: none; }
+.arrival-image-loading.is-error { background: linear-gradient(145deg, #e7efec, #f6f9f8); animation: none; }
+@keyframes image-shimmer { to { background-position-x: -220%; } }
+@media (prefers-reduced-motion: reduce) {
+  .arrival-image-loading { animation: none; }
+  .arrival-image > img { transition: none; }
+}
 .image-placeholder { display: grid; place-items: center; background: linear-gradient(145deg, #e7efec, #f6f9f8); color: #78908a; }
 .image-placeholder .brand-mark { width: 42px; height: 42px; border-radius: 12px; opacity: .72; box-shadow: none; }
 .lot-code { padding: 4px 7px; border-radius: 5px; background: var(--surface-soft); color: #40504c; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px; }

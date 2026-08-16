@@ -15,9 +15,9 @@ ACTOR_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def jpeg_bytes(payload: bytes = b"") -> bytes:
-    """Minimal one-pixel JPEG structure accepted by the upload header validator."""
+    """Minimal 2×1 landscape JPEG structure accepted by the upload validator."""
     return (
-        b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x01\x00\x01"
+        b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x01\x00\x02"
         b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00"
         + payload
         + b"\xff\xd9"

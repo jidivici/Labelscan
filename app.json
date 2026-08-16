@@ -4,7 +4,7 @@
     "slug": "LabelScan",
     "version": "1.0.0",
     "sdkVersion": "54.0.0",
-    "orientation": "portrait",
+    "orientation": "landscape",
     "icon": "./assets/labelscan-logo.png",
     "userInterfaceStyle": "light",
     "ios": {

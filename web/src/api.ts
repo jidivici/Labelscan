@@ -138,6 +138,7 @@ export async function getArrival(
   return request<ArrivalDetail>(`/v1/arrivals/${encodeURIComponent(batchId)}`, session, { signal });
 }
 
-export function arrivalImagePath(batchId: string): string {
-  return `/v1/arrivals/${encodeURIComponent(batchId)}/image`;
+export function arrivalImagePath(batchId: string, variant: 'source' | 'thumbnail' = 'source'): string {
+  const path = `/v1/arrivals/${encodeURIComponent(batchId)}/image`;
+  return variant === 'thumbnail' ? `${path}?variant=thumbnail` : path;
 }

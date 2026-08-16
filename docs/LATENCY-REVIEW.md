@@ -19,8 +19,8 @@
 **Lecture.**
 - **Total perçu ≈ 20 s** — l'estimation §2 (« 3–9 s ») était **trop optimiste de 2–7×**. La latence
   est un **vrai problème**, pas une impression : l'opérateur fixe bien ~20 s de skeletons.
-- **Upload ≈ 6,4 s** vs 0,3–2 s estimé : **anomalie n°1**. Suspect principal, le *fallback plein
-  format* — si `computeFrameCrop` renvoie `null` (mismatch d'orientation, `CameraScreen.tsx:111`),
+- **Upload ≈ 6,4 s** vs 0,3–2 s estimé : **anomalie n°1**. Suspect principal historique, le *fallback plein
+  format* — avant la correction des buffers transposés, si `computeFrameCrop` renvoyait `null`,
   **aucun resize n'est appliqué** → on téléverse le JPEG `quality:1.0` 12 Mpx (~4–8 Mo) au lieu de
   ~300–600 Ko. À confirmer en logguant `bytes`/`cropped` (§6). Second suspect : backend joint via
   tunnel Expo / réseau lent.
@@ -217,15 +217,15 @@ confiance (le gate no-fab s'ancre sur l'OCR) + dépendance native + build. Effor
 > 🐛 **Découvert via les logs : `cropped=false` sur 100 % des scans.** `computeFrameCrop` renvoyait
 > `null` (mismatch d'orientation probable) → le resize, **niché dans le bloc crop, ne tournait jamais**
 > → image **pleine** envoyée à Vision (les `image_bytes` ~1,4–1,8 Mo étaient des images NON croppées).
-> **Corrigé** : resize **INCONDITIONNEL** (crop = bonus), cap du **côté long** (gère portrait ET
-> paysage) ; log `framed` + diagnostic dev `frame_crop_skipped {photo, screen}`.
+> **Corrigé** : crop **obligatoire avant mise en file/OCR**, puis resize du côté long. Aucun
+> fallback plein format n'est autorisé ; un échec demande une reprise.
 >
-> **Diagnostic confirmé** : `photo=1920x886` (PAYSAGE) vs `screen=430x932` (portrait) → le buffer
-> caméra revient **tourné 90°** (886x1920 = ratio écran 0,461 **exact**). `computeFrameCrop` bail à
-> raison (sinon il croppe la mauvaise zone). **✅ Résultat du resize inconditionnel : `image_bytes`
-> ~1,7 Mo → ~0,4 Mo (4×)**, `ocr_ms` ~2 s, `llm_ms` ~8 s (LLM = dominant). **Reste** : pour isoler
-> l'étiquette, **normaliser l'orientation (rotation→portrait) AVANT le crop** — direction
-> device-dépendante (risque image à l'envers), à vérifier **device** ; `TEXT_DETECTION` / ≤1280px si
+> **Diagnostic historique confirmé** : `photo=1920x886` vs `screen=430x932` expliquait l'ancien
+> buffer transposé. **Résolu depuis** : `frameCrop.ts` gère les buffers transposés et recadre le rectangle
+> exact du cadre. **✅ Résultat du resize inconditionnel : `image_bytes`
+> ~1,7 Mo → ~0,4 Mo (4×)**, `ocr_ms` ~2 s, `llm_ms` ~8 s (LLM = dominant). L'application est
+> désormais verrouillée en **paysage** et le serveur refuse les images non paysage ;
+> `TEXT_DETECTION` / ≤1280px si
 > le recall tient.
 
 `≤1600 px` suffit pour l'OCR d'étiquette (base64 plus petit → hop serveur→Vision plus court) ;

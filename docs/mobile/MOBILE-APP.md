@@ -74,20 +74,21 @@ Le **cadre à l'écran est à la fois le guide de placement ET la région de rec
 
 - **Couverture** : le cadre fait **≈96 % de la largeur** et occupe la quasi-totalité de la zone
   utile, pour placer **l'étiquette entière** dedans.
-- **Marge de sécurité** : `computeFrameCrop` élargit le rectangle de **8 % par axe** avant d'inverser
-  la transformation d'affichage « cover », puis **borne** dans les pixels de la photo (jamais hors
-  limites).
+- **Orientation obligatoire** : l'application est verrouillée en **paysage** (`app.json`). Le
+  téléphone et l'étiquette restent donc dans le même sens afin de conserver les petits caractères.
+- **Découpe exacte** : `computeFrameCrop` inverse la transformation d'affichage « cover » et borne
+  le résultat dans les pixels de la photo. Les rares buffers transposés par un capteur sont aussi
+  convertis dans les bonnes coordonnées avant le recadrage.
 - **Fidélité** : `takePictureAsync({ quality: 1.0 })` + recadrage borné à **≤1600 px** sur le grand
   côté, `compress: 0.8` (Tier 7 — l'OCR est co-dominant sur un upload lent ; image plus petite =
   upload et OCR plus rapides sans perte de lisibilité).
-- **Robustesse** : `skipProcessing: false` applique la rotation capteur ; si l'image revient
-  transposée ou le rectangle est dégénéré, on **envoie l'image entière** (repli sans perte).
-- **Zéro cliché perdu (audit prod v2)** : si le pipeline d'arrière-plan échoue (copie durable
-  impossible — disque plein…), un **repli last-ditch** met quand même le scan en file avec l'uri de
-  capture d'origine (non recadrée/pivotée, dégradé mais récupérable) — l'opérateur voit toujours une
-  carte à l'accueil, jamais une photo évaporée. Log `capture … fallback=raw_cache`.
+- **Recadrage obligatoire avant OCR** : `skipProcessing: false` applique la rotation capteur, puis
+  `ImageManipulator` exécute réellement `crop` avant `resize`. Si le cadre ne peut pas être projeté,
+  si la manipulation échoue ou si le résultat n'est pas paysage, **aucun scan n'est mis en file**,
+  aucune image brute n'est envoyée, et l'opérateur doit reprendre la photo.
 - **Côté serveur** : aucun sous-échantillonnage (l'image envoyée par le client est prise telle
-  quelle) — voir [`AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §2.5.
+  quelle) et l'ingestion refuse tout fichier dont `largeur <= hauteur` — voir
+  [`AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §2.5.
 
 ---
 
@@ -219,12 +220,10 @@ deux panneaux.
   pour zoomer/dézoomer, fermeture par bouton. Aucune dépendance nouvelle (`react-native-gesture-handler`
   + `react-native-reanimated` déjà utilisés par `ArticleCard`) ; le `Modal` RN a sa propre racine
   native, donc la visionneuse embarque son propre `GestureHandlerRootView`.
-- **Photo cuite à l'endroit (workflow v2)** : la rotation −90° est désormais **cuite dans le fichier**
-  à la capture (`ImageManipulator`, action `rotate: -90` en fin de pipeline dans `CameraScreen`), au
-  lieu d'une rotation d'affichage. Le composant `RotatedPhoto` est **supprimé** ; Revue, Détail
-  article, vignette « En cours » et visionneuse affichent tous un `Image`/`contain` standard (plus de
-  double rotation). **Caveat** : les articles enregistrés AVANT ce changement (données de test
-  pré-prod) ont un fichier non pivoté → ils s'affichent en portrait ; un re-scan corrige.
+- **Orientation d'affichage versionnée** : les nouvelles captures sont stockées droites en paysage
+  (`photo_base_rotation_degrees = 0`). Les anciennes restent compatibles avec la rotation historique
+  (`-90`). `RotatedPhoto` et les visionneuses utilisent cette métadonnée explicite, jamais les seules
+  dimensions du fichier puisque les deux générations sont paysage.
 - **Nettoyage Revue** : l'**icône agrandir** et le **bouton retour flottant en haut** sont retirés de
   `ReviewScreen` (le tap sur la photo ouvre toujours la visionneuse ; le retour se fait par le bouton
   « Retour » de la barre d'action du bas). `ArticleDetailScreen` conserve son icône d'agrandissement.

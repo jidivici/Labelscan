@@ -596,6 +596,7 @@ export function ReviewScreen() {
             ]),
           ),
           photo_rotation_degrees: photoRotationDegrees,
+          photo_base_rotation_degrees: scan.photoBaseRotationDegrees ?? -90,
         });
         attachFinalizeOperation(scan.id, operation.id);
       } else if (operation.status === 'dead_letter') {
@@ -631,6 +632,7 @@ export function ReviewScreen() {
         captured_at: capturedAt ?? savedAt,
         photo_uri: confirmedPhotoUri,
         photo_rotation_degrees: photoRotationDegrees,
+        photo_base_rotation_degrees: scan.photoBaseRotationDegrees ?? -90,
         barcode_raw: barcodeRaw ?? ingestion.barcode_raw ?? null,
         ingestion_status: 'confirmed',
         fields: savedFields,
@@ -701,8 +703,8 @@ export function ReviewScreen() {
   return (
     <View style={styles.root}>
       {/* Fixed photo header — SAME system as ArticleDetail: the photo stays put while the
-          content sheet scrolls over it. The stored OCR source keeps its capture orientation;
-          RotatedPhoto applies the single left rotation used by every final display. Tap the
+          content sheet scrolls over it. New captures are stored upright in landscape;
+          explicit metadata keeps historical photos compatible. Tap the
           photo to open it full-screen; the return control is the bottom action bar. */}
       <View style={styles.photoContainer}>
         {photoUri ? (
@@ -715,8 +717,10 @@ export function ReviewScreen() {
             <RotatedPhoto
               source={{ uri: photoUri }}
               resizeMode="cover"
+              priority="high"
               style={StyleSheet.absoluteFillObject}
               halfTurn={photoRotationDegrees === 180}
+              baseRotationDegrees={scan.photoBaseRotationDegrees ?? -90}
             />
           </Pressable>
         ) : (
@@ -731,6 +735,7 @@ export function ReviewScreen() {
         photoUri={photoUri}
         allowHalfTurn
         halfTurn={photoRotationDegrees === 180}
+        baseRotationDegrees={scan?.photoBaseRotationDegrees ?? -90}
         onHalfTurn={() => {
           const next = photoRotationDegrees === 0 ? 180 : 0;
           setPhotoRotationDegrees(next);

@@ -6,7 +6,7 @@
  *
  * The window is both the placement guide and the crop region: the full photo is
  * captured, then cropped to this frame before it is sent to the backend (see
- * CameraScreen.computeFrameCrop). Capture happens only when the user taps the
+ * services/frameCrop.computeFrameCrop). Capture happens only when the user taps the
  * shutter (no auto-capture).
  */
 
