@@ -85,8 +85,6 @@ export interface PendingScan {
   edits?: Record<string, string>;
   /** Operator-approved half-turn applied to catalogue displays after review. */
   photoRotationDegrees?: 0 | 180;
-  /** New captures are stored upright landscape (0); absent historical scans use -90. */
-  photoBaseRotationDegrees?: -90 | 0;
   /** Durable atomic review operation; the scan stays visible until it succeeds. */
   finalizeOpId?: string;
   reviewSyncStatus?: 'pending' | 'dead_letter';
@@ -316,7 +314,6 @@ export interface EnqueueScanInput {
   tradeCode?: TradeCode;
   /** Received from authenticated server context; retained locally for isolation only. */
   businessPortalId?: string;
-  photoBaseRotationDegrees?: -90 | 0;
 }
 
 /**
@@ -342,7 +339,6 @@ export async function enqueueScan(input: EnqueueScanInput): Promise<PendingScan>
     capturedAt: input.capturedAt,
     tradeCode: input.tradeCode,
     businessPortalId: input.businessPortalId,
-    photoBaseRotationDegrees: input.photoBaseRotationDegrees ?? 0,
     submitOpId: op.id,
     ingestionId: null,
     status: 'submitting',

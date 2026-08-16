@@ -150,14 +150,9 @@ def submit_ingestion(
     if not data:
         raise ApiError("VALIDATION_ERROR", "empty image payload")
     try:
-        width, height = validate_image(data, media_type)
+        validate_image(data, media_type)
     except InvalidImage as exc:
         raise ApiError("VALIDATION_ERROR", str(exc))
-    if height >= width:
-        raise ApiError(
-            "VALIDATION_ERROR",
-            "only landscape images are accepted; capture the label with width greater than height",
-        )
 
     access = access_context_for_principal(principal)
     portal_id = getattr(principal, "business_portal_id", None)
@@ -400,14 +395,11 @@ class FinalizeReviewRequest(BaseModel):
     fields: dict[str, str | None]
     note: str | None = Field(None, max_length=2000)
     photo_rotation_degrees: int = Field(0)
-    photo_base_rotation_degrees: int = Field(-90)
 
     @model_validator(mode="after")
     def values_are_bounded(self):
         if self.photo_rotation_degrees not in (0, 180):
             raise ValueError("photo rotation must be 0 or 180 degrees")
-        if self.photo_base_rotation_degrees not in (-90, 0):
-            raise ValueError("photo base rotation must be -90 or 0 degrees")
         if any(
             value is not None and len(value) > 512 for value in self.fields.values()
         ):
@@ -445,7 +437,6 @@ def finalize_review(
                 fields=body.fields,
                 note=body.note,
                 photo_rotation_degrees=body.photo_rotation_degrees,
-                photo_base_rotation_degrees=body.photo_base_rotation_degrees,
                 idempotency_key=idempotency_key,
                 actor_id=principal.actor_id,
                 correlation_id=request.state.correlation_id,

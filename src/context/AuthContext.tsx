@@ -14,7 +14,6 @@ import React, {
   useRef,
   useState,
 } from 'react';
-import { Image } from 'expo-image';
 
 import {
   login as apiLogin,
@@ -60,7 +59,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (portalRef.current && nextPortal && portalRef.current !== nextPortal) {
         // Never render cached catalogue data from a previous portal on a shared device.
         queryClient.clear();
-        void Image.clearMemoryCache().catch(() => false);
       }
       portalRef.current = nextPortal;
       setBusinessPortalId(nextPortal);
@@ -89,7 +87,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(null);
       applyOperatorContext(null);
       queryClient.clear();
-      void Image.clearMemoryCache().catch(() => false);
     });
     const unsubscribeContext = onOperatorContextChanged((context) => {
       if (!mounted) return;
@@ -115,7 +112,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await apiLogout();
     } finally {
       queryClient.clear();
-      await Image.clearMemoryCache().catch(() => false);
       setUser(null);
       applyOperatorContext(null);
       setStatus('signedOut');

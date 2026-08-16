@@ -7,8 +7,8 @@
  * article detail — the crop there never loses content because THIS view always
  * shows the full photo (`resizeMode="contain"`).
  *
- * react-native-gesture-handler + react-native-reanimated drive the gestures, while
- * expo-image reuses the protected source from memory. RN's `Modal` renders its
+ * No new dependency: react-native-gesture-handler + react-native-reanimated are
+ * already in the app (ArticleCard's swipe-to-delete). RN's `Modal` renders its
  * content in a separate native root, so gesture-handler needs its OWN
  * `GestureHandlerRootView` inside the modal (the app-root one at App.tsx does
  * not cover it) — a known requirement, not a workaround.
@@ -18,18 +18,16 @@ import React, { useEffect } from 'react';
 import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { Image } from 'expo-image';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, spacing } from '../theme';
-import { PHOTO_DISPLAY_ROTATION, type PhotoBaseRotationDegrees } from './photoOrientation';
+import { PHOTO_DISPLAY_ROTATION } from './photoOrientation';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 const DOUBLE_TAP_SCALE = 2.5;
-const INITIAL_SCALE = 1.4;
-const AnimatedImage = Animated.createAnimatedComponent(Image);
+const INITIAL_SCALE = 1.15;
 
 export interface PhotoViewerModalProps {
   visible: boolean;
@@ -38,8 +36,6 @@ export interface PhotoViewerModalProps {
   allowHalfTurn?: boolean;
   halfTurn?: boolean;
   onHalfTurn?: () => void;
-  /** -90 for historical captures; 0 for landscape captures already stored upright. */
-  baseRotationDegrees?: PhotoBaseRotationDegrees;
   onClose: () => void;
 }
 
@@ -50,12 +46,10 @@ export function PhotoViewerModal({
   allowHalfTurn = false,
   halfTurn = false,
   onHalfTurn,
-  baseRotationDegrees = -90,
   onClose,
 }: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const quarterTurn = baseRotationDegrees === -90;
   const scale = useSharedValue(INITIAL_SCALE);
   const savedScale = useSharedValue(INITIAL_SCALE);
   const translateX = useSharedValue(0);
@@ -75,9 +69,7 @@ export function PhotoViewerModal({
   // Every open starts slightly zoomed and centered. This keeps the label readable
   // immediately without carrying zoom/pan state over from the previous photo.
   useEffect(() => {
-    if (visible) {
-      reset();
-    }
+    if (visible) reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, photoUri]);
 
@@ -121,7 +113,7 @@ export function PhotoViewerModal({
   // Keep the same left-facing orientation in the full-screen viewer and thumbnails.
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
-      ...(quarterTurn ? [{ rotate: PHOTO_DISPLAY_ROTATION }] : []),
+      { rotate: PHOTO_DISPLAY_ROTATION },
       ...(halfTurn ? [{ rotate: '180deg' as const }] : []),
       { translateX: translateX.value },
       { translateY: translateY.value },
@@ -135,23 +127,19 @@ export function PhotoViewerModal({
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <GestureHandlerRootView style={styles.root}>
         <GestureDetector gesture={gesture}>
-          <AnimatedImage
+          <Animated.Image
             source={{ uri: photoUri, headers }}
             style={[
               styles.image,
               {
-                left: quarterTurn ? (windowWidth - windowHeight) / 2 : 0,
-                top: quarterTurn ? (windowHeight - windowWidth) / 2 : 0,
-                width: quarterTurn ? windowHeight : windowWidth,
-                height: quarterTurn ? windowWidth : windowHeight,
+                left: (windowWidth - windowHeight) / 2,
+                top: (windowHeight - windowWidth) / 2,
+                width: windowHeight,
+                height: windowWidth,
               },
               imageStyle,
             ]}
-            contentFit="contain"
-            cachePolicy="memory"
-            priority="high"
-            recyclingKey={photoUri}
-            transition={120}
+            resizeMode="contain"
           />
         </GestureDetector>
         <Pressable

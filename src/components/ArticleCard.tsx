@@ -8,6 +8,7 @@ import {
   StyleSheet,
   View,
   Text,
+  Image,
   Pressable,
   Alert,
 } from 'react-native';
@@ -27,7 +28,6 @@ import { commonName } from '../services/articleGrouping';
 import { displayFieldValue } from '../services/fieldLabels';
 import { colors, spacing, radius, typography } from '../theme';
 import { RotatedPhoto } from './RotatedPhoto';
-import { thumbnailPhotoUri } from '../services/photoVariants';
 
 interface ArticleCardProps {
   article: Article;
@@ -147,14 +147,12 @@ export const ArticleCard = React.memo(function ArticleCard({
             <View style={styles.thumbnail}>
               {article.photo_uri ? (
                 <RotatedPhoto
-                  source={{ uri: thumbnailPhotoUri(article.photo_uri), headers: article.photo_headers }}
+                  source={{ uri: article.photo_uri, headers: article.photo_headers }}
                   style={[
                     styles.thumbnailImage,
                   ]}
                   resizeMode="cover"
                   halfTurn={article.photo_rotation_degrees === 180}
-                  baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
-                  priority="low"
                 />
               ) : (
                 <MaterialCommunityIcons

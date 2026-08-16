@@ -4,12 +4,12 @@
  * Flow: aim → tap shutter → the photo is cropped and enqueued in the SCAN QUEUE
  * (background submit + extraction) → the operator keeps shooting immediately, no
  * modal, no wait. The on-screen frame is BOTH the placement guide AND the crop
- * region applied before the photo is enqueued. Portrait/landscape sensor buffers
- * are both mapped back to the exact visible frame.
+ * region applied before the photo is enqueued (with a safe fallback to the full
+ * image if the frame can't be mapped).
  *
  * The frame is sized to ≈the whole useful zone so the ENTIRE label fits inside, and
- * The frame covers nearly the whole useful zone so the complete label remains easy
- * to place inside the crop.
+ * computeFrameCrop expands the crop by a small safety margin — together these keep
+ * label content that used to overflow a small frame from being cropped away.
  *
  * Review/validation moved OFF this screen entirely: the home screen's "En cours"
  * section (PendingScanCard) is where each queued scan is tracked and opened. This
@@ -30,7 +30,6 @@ import {
   View,
   Text,
   Pressable,
-  Alert,
   useWindowDimensions,
 } from 'react-native';
 import { StatusBar } from 'react-native';
@@ -52,7 +51,6 @@ import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
 import { captureImageActions } from '../services/captureImageActions';
-import { computeFrameCrop } from '../services/frameCrop';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
@@ -67,6 +65,79 @@ const TOP_CONTROL_BAND_H = 56;
 const BOTTOM_CONTROLS_H = 88;
 // Reserve a little room below the frame for the instruction caption.
 const CAPTION_RESERVE = 36;
+
+// Safety margin: expand the mapped crop a touch beyond the frame on every side so a
+// label resting right against the brackets is not clipped at the edges. Clamped to
+// the photo bounds in computeFrameCrop, so it can never read out-of-bounds pixels.
+const CROP_SAFETY_MARGIN = 0.08; // 8% of the frame's width/height per axis
+
+/**
+ * Map the on-screen placement frame to a crop rectangle in the captured photo's own
+ * pixel space, so the submitted photo is EXACTLY what the user framed. The preview
+ * fills the screen edge-to-edge with a "cover" fit (the image is scaled up until it
+ * covers the screen, then centered and the overflow clipped); we invert that
+ * transform to find the photo pixels under the frame.
+ *
+ * This requires the captured photo to be UPRIGHT — i.e. its orientation matches the
+ * portrait preview (guaranteed by takePictureAsync's skipProcessing:false, which
+ * applies sensor rotation). As a safety net, if the buffer still comes back
+ * TRANSPOSED (portrait-vs-landscape mismatch — we then can't know the rotation
+ * direction), or if the mapped rect is degenerate, we return null and the caller
+ * sends the full image rather than crop the wrong region (no data loss).
+ */
+function computeFrameCrop(
+  photoWidth: number,
+  photoHeight: number,
+  geometry: {
+    screenWidth: number;
+    screenHeight: number;
+    frameLeft: number;
+    frameTop: number;
+    frameWidth: number;
+    frameHeight: number;
+  },
+): { originX: number; originY: number; width: number; height: number } | null {
+  if (!photoWidth || !photoHeight) return null;
+  const { screenWidth, screenHeight, frameLeft, frameTop, frameWidth, frameHeight } = geometry;
+
+  // Orientation guard: photo and screen must share orientation for this mapping.
+  if (screenWidth > screenHeight !== photoWidth > photoHeight) return null;
+
+  // Cover fit: one scale factor; the larger axis ratio wins so the photo covers
+  // the whole screen. The centered overflow is the offset we subtract back out.
+  const scale = Math.max(screenWidth / photoWidth, screenHeight / photoHeight);
+  const offsetX = (photoWidth * scale - screenWidth) / 2;
+  const offsetY = (photoHeight * scale - screenHeight) / 2;
+
+  // Expand the frame rect (in screen space) by the safety margin on every side
+  // before inverting the transform, so edges near the brackets aren't clipped.
+  const marginX = frameWidth * CROP_SAFETY_MARGIN;
+  const marginY = frameHeight * CROP_SAFETY_MARGIN;
+  const cropLeft = frameLeft - marginX;
+  const cropTop = frameTop - marginY;
+  const cropWidth = frameWidth + marginX * 2;
+  const cropHeight = frameHeight + marginY * 2;
+
+  let originX = (cropLeft + offsetX) / scale;
+  let originY = (cropTop + offsetY) / scale;
+  let width = cropWidth / scale;
+  let height = cropHeight / scale;
+
+  // Clamp into the photo so we never ask the manipulator for out-of-bounds pixels.
+  originX = Math.max(0, Math.min(originX, photoWidth));
+  originY = Math.max(0, Math.min(originY, photoHeight));
+  width = Math.min(width, photoWidth - originX);
+  height = Math.min(height, photoHeight - originY);
+
+  if (width < 1 || height < 1) return null;
+
+  return {
+    originX: Math.floor(originX),
+    originY: Math.floor(originY),
+    width: Math.floor(width),
+    height: Math.floor(height),
+  };
+}
 
 type NavProp = StackNavigationProp<RootStackParamList, 'Camera'>;
 
@@ -143,8 +214,9 @@ export function CameraScreen() {
         // Max fidelity so small print on the label OCRs well (no source-side
         // recompression beyond the single capture encode).
         quality: 1.0,
-        // Ask the camera pipeline to apply sensor rotation. Some Android devices still
-        // return a transposed buffer; computeFrameCrop maps that orientation explicitly.
+        // Apply sensor rotation (do NOT skip processing) so width/height describe the
+        // UPRIGHT image matching the portrait preview. skipProcessing:true returned an
+        // unrotated buffer on Android, which made computeFrameCrop crop the wrong region.
         skipProcessing: false,
       });
     } catch (err) {
@@ -175,7 +247,6 @@ export function CameraScreen() {
     lastBarcodeRef.current = null;
 
     void (async () => {
-      let durableRawUri: string | null = null;
       try {
         // Durable copy FIRST, before anything else touches the file. expo-camera's raw
         // capture lives in an OS-managed Caches subdirectory that is NOT guaranteed to
@@ -183,10 +254,15 @@ export function CameraScreen() {
         // device: NSCocoaErrorDomain 260 "no such file" at UPLOAD time). Crop from OUR
         // OWN durable copy so a slow crop/enqueue never races a source the OS can reclaim.
         const scanId = uuidv4();
-        durableRawUri = await persistPendingPhoto(`${scanId}-raw`, capturedPhoto.uri);
+        const durableRawUri = await persistPendingPhoto(`${scanId}-raw`, capturedPhoto.uri);
         if (!durableRawUri) throw new Error('Could not persist the captured photo');
 
-        // Cropping is a hard precondition: no raw/full-frame fallback may reach OCR.
+        // ALWAYS produce a downscaled JPEG for upload + Vision OCR, and apply the frame
+        // crop WHEN available. Decoupling the resize from the crop is deliberate: a crop
+        // failure (orientation mismatch → computeFrameCrop null) must NOT ship a full-size
+        // image to Vision. Cap the LONG edge at ~1600px + compress 0.8 (Tier 7).
+        let croppedUri: string | undefined;
+        let framed = false;
         const crop = computeFrameCrop(
           capturedPhoto.width,
           capturedPhoto.height,
@@ -197,47 +273,59 @@ export function CameraScreen() {
             photo: `${capturedPhoto.width}x${capturedPhoto.height}`,
             screen: `${Math.round(screenWidth)}x${Math.round(screenHeight)}`,
           });
-          throw new Error('The visible frame could not be mapped to the captured photo');
         }
-        const srcW = crop.width;
-        const srcH = crop.height;
+        const srcW = crop ? crop.width : capturedPhoto.width;
+        const srcH = crop ? crop.height : capturedPhoto.height;
         const resize =
           srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
-        // The application and capture frame are landscape; preserve that orientation.
-        const out = await ImageManipulator.manipulateAsync(
-          durableRawUri,
-          captureImageActions(crop, resize),
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-        );
-        if (out.width < out.height) throw new Error('Portrait result rejected before ingestion');
+        try {
+          // Keep the captured orientation in the stored/uploaded JPEG. Operators hold
+          // the phone in landscape while the app remains portrait-locked, so the label
+          // is intentionally sideways in this file (like the OCR source). The single
+          // counter-clockwise rotation belongs only to the display components.
+          const out = await ImageManipulator.manipulateAsync(
+            durableRawUri,
+            captureImageActions(crop, resize),
+            { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
+          );
+          croppedUri = out.uri;
+          framed = crop != null;
+        } catch (e) {
+          console.warn('Immediate crop/resize failed; durable raw copy will be used:', e);
+        }
 
-        // Only the verified, cropped output enters the queue and can reach OCR.
+        // Enqueue — the scan queue owns submit + extraction from here. Never throws;
+        // a submit failure surfaces as a 'submit_error' card at home.
         const scan = await enqueueScan({
           id: scanId,
-          tempUri: out.uri,
+          tempUri: croppedUri ?? durableRawUri,
           barcodeRaw,
           capturedAt,
           tradeCode: businessProfile.code,
           businessPortalId: businessPortalId ?? undefined,
-          photoBaseRotationDegrees: 0,
         });
-        logLatency('capture', { framed: 'true', orientation: 'landscape' });
+        logLatency('capture', { framed: String(framed) });
         // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
         // fell back to this exact uri (then it's the scan's only copy; keep it).
         if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
       } catch (err) {
-        // Never send the uncropped source to OCR. Surface a retake instead.
-        console.error('Cropped capture pipeline error — photo not enqueued:', err);
-        if (durableRawUri) void deletePendingPhoto(durableRawUri);
-        if (mountedRef.current) {
-          setFrameState('error');
-          Alert.alert(
-            'Photo non envoyée',
-            'Le découpage selon le cadre a échoué. Reprenez la photo : aucune image complète n’a été envoyée.',
-          );
-          setTimeout(() => {
-            if (mountedRef.current) setFrameState('ready');
-          }, 2500);
+        // A shot must NEVER be lost silently (prod audit): the only throw path here is
+        // the durable-copy failure, so fall back to enqueueing the ORIGINAL cache
+        // capture as-is (uncropped — degraded but recoverable; enqueueScan
+        // retries its own durable copy and tolerates a cache uri). If even that fails,
+        // the error card at home is the operator's signal.
+        console.error('Background capture pipeline error:', err);
+        try {
+          await enqueueScan({
+            tempUri: capturedPhoto.uri,
+            barcodeRaw,
+            capturedAt,
+            tradeCode: businessProfile.code,
+            businessPortalId: businessPortalId ?? undefined,
+          });
+          logLatency('capture', { framed: 'false', fallback: 'raw_cache' });
+        } catch (fallbackErr) {
+          console.error('Capture fallback enqueue failed — shot lost:', fallbackErr);
         }
       }
     })();

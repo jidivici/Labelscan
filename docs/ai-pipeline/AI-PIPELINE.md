@@ -261,11 +261,10 @@ The default adapter is implemented server-side in
   aid** on mixed/accented text (`Cabillaud`, `décongelé`, `pêche`) where auto-detection can
   mis-segment; order is a **priority hint, not a restriction** (other scripts are still detected) and
   it is **never a content change** (the no-fabrication gate, §3.4/§5, is unaffected).
-- **No server-side downsampling.** The server first rejects non-landscape dimensions, then the
-  accepted image bytes are sent **verbatim** (base64) — the
+- **No server-side downsampling.** The uploaded image bytes are sent **verbatim** (base64) — the
   adapter applies **no** resize/crop/quality parameter — so the server never reduces resolution; the
-  OCR sees the **cropped capture** the client uploaded. The client has already cropped to the
-  exact visible placement frame, including transposed sensor buffers ([`../mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md) §2,
+  OCR sees the **full-resolution capture** the client uploaded. The client has already cropped to the
+  placement frame with an 8% safety margin ([`../mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md) §2,
   "Recadrage & fidélité"; historical design notes in
   [`../archive/0011-SYNTHESIS.md`](../archive/0011-SYNTHESIS.md) §D), so "frame coverage" lives on
   the client and "fidelity" is preserved end-to-end.

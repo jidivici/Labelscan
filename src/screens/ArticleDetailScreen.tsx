@@ -648,7 +648,6 @@ export function ArticleDetailScreen() {
         photoUri={article.photo_uri}
         headers={article.photo_headers}
         halfTurn={article.photo_rotation_degrees === 180}
-        baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
         onClose={() => setViewerOpen(false)}
       />
 
@@ -723,9 +722,7 @@ export function ArticleDetailScreen() {
                 <RotatedPhoto
                   source={{ uri: article.photo_uri, headers: article.photo_headers }}
                   resizeMode="cover"
-                  priority="high"
                   halfTurn={article.photo_rotation_degrees === 180}
-                  baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
                   style={StyleSheet.absoluteFillObject}
                 />
                 <View style={styles.photoHint}>
