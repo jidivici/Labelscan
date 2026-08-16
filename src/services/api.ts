@@ -367,7 +367,7 @@ export function finalizeReview(
   fields: Record<string, string | null>,
   note?: string,
   photoRotationDegrees: 0 | 180 = 0,
-  photoBaseRotationDegrees: -90 | 0 = -90,
+  photoBaseRotationDegrees: -90 | 0 | 90 = -90,
   options: RequestOptions = {},
 ): Promise<FinalizeReviewResponse> {
   return apiRequest<FinalizeReviewResponse>(

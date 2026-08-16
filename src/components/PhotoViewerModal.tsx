@@ -22,7 +22,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, spacing } from '../theme';
-import { PHOTO_DISPLAY_ROTATION, type PhotoBaseRotationDegrees } from './photoOrientation';
+import { photoDisplayRotation, type PhotoBaseRotationDegrees } from './photoOrientation';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
@@ -53,7 +53,7 @@ export function PhotoViewerModal({
 }: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
-  const quarterTurn = baseRotationDegrees === -90;
+  const quarterTurn = baseRotationDegrees !== 0;
   const scale = useSharedValue(INITIAL_SCALE);
   const savedScale = useSharedValue(INITIAL_SCALE);
   const translateX = useSharedValue(0);
@@ -117,7 +117,7 @@ export function PhotoViewerModal({
   // Keep the same left-facing orientation in the full-screen viewer and thumbnails.
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
-      ...(quarterTurn ? [{ rotate: PHOTO_DISPLAY_ROTATION }] : []),
+      ...(quarterTurn ? [{ rotate: photoDisplayRotation(baseRotationDegrees) }] : []),
       ...(halfTurn ? [{ rotate: '180deg' as const }] : []),
       { translateX: translateX.value },
       { translateY: translateY.value },

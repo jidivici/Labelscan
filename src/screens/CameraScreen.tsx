@@ -248,6 +248,12 @@ export function CameraScreen() {
             normalizedImage.width > normalizedImage.height
             || (Platform.OS === 'ios' && iOSLandscapeCapture)
           );
+          // `landscapeLeft` is the opposite image basis to `landscapeRight`.
+          // Store the direction explicitly so the viewer can apply the one
+          // correct quarter-turn rather than treating both positions as -90°.
+          const baseRotationDegrees = !needsViewerQuarterTurn
+            ? 0
+            : orientationAtShutter === 'landscapeLeft' ? 90 : -90;
           const outputWidth = srcW;
           const outputHeight = srcH;
           const resize =
@@ -276,7 +282,7 @@ export function CameraScreen() {
             crop: `${crop.originX},${crop.originY},${crop.width}x${crop.height}`,
             orientation: orientationAtShutter,
             preview_turn: previewQuarterTurn,
-            viewer_quarter_turn: String(needsViewerQuarterTurn),
+            viewer_rotation: String(baseRotationDegrees),
           });
 
           // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
@@ -287,7 +293,7 @@ export function CameraScreen() {
             capturedAt,
             tradeCode: businessProfile.code,
             businessPortalId: businessPortalId ?? undefined,
-            photoBaseRotationDegrees: needsViewerQuarterTurn ? -90 : 0,
+            photoBaseRotationDegrees: baseRotationDegrees,
           });
           logLatency('capture', { framed: 'true' });
           // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and

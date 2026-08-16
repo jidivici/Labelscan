@@ -17,7 +17,7 @@ export function ArrivalImage({
   alt?: string;
   onOpen?: (url: string) => void;
   rotationDegrees?: 0 | 180;
-  baseRotationDegrees?: -90 | 0;
+  baseRotationDegrees?: -90 | 0 | 90;
 }) {
   const { session } = useAuth();
   const [url, setUrl] = useState<string>();

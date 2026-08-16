@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0, baseRotationDegrees = -90 }: { url: string; onClose: () => void; rotationDegrees?: 0 | 180; baseRotationDegrees?: -90 | 0 }) {
+export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0, baseRotationDegrees = -90 }: { url: string; onClose: () => void; rotationDegrees?: 0 | 180; baseRotationDegrees?: -90 | 0 | 90 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
