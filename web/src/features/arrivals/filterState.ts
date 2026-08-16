@@ -37,7 +37,7 @@ export function parseArrivalFilters(params: URLSearchParams): ArrivalFilters {
     // Trimming here would remove a just-typed trailing space before the next word.
     query: params.get('q') ?? '',
     storeCode: params.get('store')?.trim() ?? '',
-    status: params.get('status')?.trim() ?? '',
+    status: '',
     supplier: params.get('supplier')?.trim() ?? '',
     lotCode: params.get('lot')?.trim() ?? '',
     gtin: params.get('gtin')?.trim() ?? '',
@@ -103,7 +103,6 @@ export function clearArrivalFilters(current: URLSearchParams): URLSearchParams {
 export function activeArrivalFilterCount(filters: ArrivalFilters): number {
   return [
     filters.storeCode,
-    filters.status,
     filters.supplier,
     filters.lotCode,
     filters.gtin,

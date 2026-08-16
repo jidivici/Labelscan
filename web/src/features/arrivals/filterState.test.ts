@@ -10,7 +10,7 @@ describe('arrival URL filter state', () => {
     expect(filters).toMatchObject({
       query: 'saumon',
       storeCode: 'PARIS-01',
-      status: 'registered',
+      status: '',
       dateFrom: '2026-08-01',
       dateTo: '2026-08-04',
       view: 'cards',
@@ -22,9 +22,9 @@ describe('arrival URL filter state', () => {
   });
 
   it('resets pagination when a business filter changes', () => {
-    const next = updateArrivalFilter(new URLSearchParams('q=thon&page=4&view=cards'), 'status', 'registered');
+    const next = updateArrivalFilter(new URLSearchParams('q=thon&page=4&view=cards'), 'supplier', 'Océan Frais');
 
-    expect(next.get('status')).toBe('registered');
+    expect(next.get('supplier')).toBe('Océan Frais');
     expect(next.has('page')).toBe(false);
     expect(next.get('view')).toBe('cards');
   });
@@ -45,10 +45,11 @@ describe('arrival URL filter state', () => {
 
   it('does not count the search as an active filter', () => {
     const searchOnly = parseArrivalFilters(new URLSearchParams('q=saumon+atlantique'));
-    const searchAndStatus = parseArrivalFilters(new URLSearchParams('q=saumon+atlantique&status=registered'));
+    const searchAndRemovedStatus = parseArrivalFilters(new URLSearchParams('q=saumon+atlantique&status=registered'));
 
     expect(activeArrivalFilterCount(searchOnly)).toBe(0);
-    expect(activeArrivalFilterCount(searchAndStatus)).toBe(1);
+    expect(activeArrivalFilterCount(searchAndRemovedStatus)).toBe(0);
+    expect(searchAndRemovedStatus.status).toBe('');
   });
 
   it('uses cards as the default display', () => {

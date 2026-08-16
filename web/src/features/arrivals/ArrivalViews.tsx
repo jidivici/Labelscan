@@ -7,10 +7,6 @@ import type { PortalSecondaryColumn } from '../../portals/types';
 import type { Arrival, Store } from '../../types';
 import { ArrivalImage } from './ArrivalImage';
 
-const STATUS_LABELS: Record<string, string> = {
-  registered: 'Enregistré',
-};
-
 function storeLabel(stores: Store[], code: string | null): string | null {
   if (!code?.trim()) return null;
   return stores.find((store) => store.code === code)?.name ?? code;
@@ -21,11 +17,6 @@ function date(value: string | null): string | null {
   const parsed = new Date(value);
   if (Number.isNaN(parsed.getTime())) return value;
   return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(parsed);
-}
-
-function StatusBadge({ value }: { value: string }) {
-  if (value !== 'registered') return null;
-  return <span className="status-badge">{STATUS_LABELS[value]}</span>;
 }
 
 function professionLabel(arrival: Arrival): string | null {
@@ -72,7 +63,7 @@ export function ArrivalTable({ arrivals, stores, portal }: { arrivals: Arrival[]
   const showStore = arrivals.some((arrival) => storeLabel(stores, arrival.store_code));
   const showSupplier = arrivals.some((arrival) => arrival.supplier_name?.trim());
   return <div className="data-panel table-panel"><div className="table-scroll"><table>
-    <thead><tr><th>Produit</th>{showProfession && <th>Métier</th>}{showLot && <th>Lot</th>}{showStore && <th>Magasin</th>}{showSupplier && <th>Fournisseur</th>}{secondaryColumns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Statut</th><th>Enregistrement</th><th><span className="sr-only">Détail</span></th></tr></thead>
+    <thead><tr><th>Produit</th>{showProfession && <th>Métier</th>}{showLot && <th>Lot</th>}{showStore && <th>Magasin</th>}{showSupplier && <th>Fournisseur</th>}{secondaryColumns.map((column) => <th key={column.key}>{column.label}</th>)}<th>Enregistrement</th><th><span className="sr-only">Détail</span></th></tr></thead>
     <tbody>{arrivals.map((arrival) => {
       const detailPath = `/o/${organizationSlug}/portails/${profession}/arrivages/${arrival.batch_id}${query}`;
       const openDetail = () => navigate(detailPath);
@@ -83,7 +74,6 @@ export function ArrivalTable({ arrivals, stores, portal }: { arrivals: Arrival[]
       {showStore && <td>{storeLabel(stores, arrival.store_code)}</td>}
       {showSupplier && <td>{arrival.supplier_name}</td>}
       {secondaryColumns.map((column) => <td key={column.key}>{secondaryValue(arrival, column)}</td>)}
-      <td><StatusBadge value={arrival.status} /></td>
       <td>{date(arrival.recorded_at)}</td>
       <td><Link className="row-action" to={detailPath} onClick={(event) => event.stopPropagation()} aria-label={`Ouvrir ${productTitle(arrival)}`}>→</Link></td>
     </tr>;
