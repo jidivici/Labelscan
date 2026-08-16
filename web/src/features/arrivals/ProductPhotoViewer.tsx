@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0 }: { url: string; onClose: () => void; rotationDegrees?: 0 | 180 }) {
+export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0, baseRotationDegrees = -90 }: { url: string; onClose: () => void; rotationDegrees?: 0 | 180; baseRotationDegrees?: -90 | 0 }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -31,7 +31,11 @@ export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0 }: { url:
         <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Fermer la photo agrandie">×</button>
       </div>
       <div className="photo-viewer-stage" onMouseDown={(event) => event.stopPropagation()}>
-        <img src={url} alt="Étiquette du produit agrandie" style={{ transform: `rotate(${rotationDegrees - 90}deg)` }} />
+        <img
+          src={url}
+          alt="Étiquette du produit agrandie"
+          style={{ transform: `rotate(${rotationDegrees + baseRotationDegrees}deg) scale(1.4)` }}
+        />
       </div>
     </div>,
     document.body,

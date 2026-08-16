@@ -1267,6 +1267,14 @@ paths:
           minLength: 1
           maxLength: 128
           title: Batch Id
+      - name: variant
+        in: query
+        required: false
+        schema:
+          type: string
+          enum: [source, thumbnail]
+          default: source
+          title: Variant
       responses:
         '200':
           description: Successful Response
