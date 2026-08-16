@@ -85,7 +85,13 @@ function AppNavigator() {
       <RootStack.Screen
         name="Review"
         component={ReviewScreen}
-        options={{ presentation: 'modal' }}
+        options={{
+          presentation: 'modal',
+          gestureEnabled: true,
+          // Let the downward dismiss gesture start well below the small top handle.
+          // The default vertical response area is only 135 px in this stack version.
+          gestureResponseDistance: 320,
+        }}
       />
     </RootStack.Navigator>
   );

@@ -1,0 +1,21 @@
+{
+  "exceptions": [
+    {
+      "advisories": [
+        "GHSA-3jxr-9vmj-r5cp",
+        "GHSA-mh99-v99m-4gvg",
+        "GHSA-rgw5-rvv9-x895",
+        "GHSA-h67p-54hq-rp68",
+        "GHSA-52cp-r559-cp3m",
+        "GHSA-qx2v-qp2m-jg93",
+        "GHSA-6g55-p6wh-862q",
+        "GHSA-r28c-9q8g-f849",
+        "GHSA-fxqj-rqcc-2cmp",
+        "GHSA-395f-4hp3-45gv"
+      ],
+      "owner": "engineering",
+      "expires": "2026-09-02",
+      "rationale": "Expo SDK 54 transitive build-tool dependencies reviewed again on 2026-08-03 after GHSA-rgw5-rvv9-x895 and GHSA-fxqj-rqcc-2cmp were published. The shipped React Native application does not run these Node build tools or pass attacker-controlled YAML, CSS/sourceMappingURL, shell expressions, or glob/brace patterns to them. Upgrade within SDK 54 when Expo publishes compatible fixes; do not force Expo 57."
+    }
+  ]
+}

@@ -14,13 +14,16 @@ fallback.
 from __future__ import annotations
 
 import os
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import jwt
 
+from labelscan.platform.config import jwt_audience, jwt_issuer, secret_value
+
 _ALGORITHM = "HS256"
-_DEFAULT_TTL_SECONDS = 12 * 3600  # 12h
+_DEFAULT_TTL_SECONDS = 15 * 60  # 15 minutes
 
 
 class TokenError(Exception):
@@ -31,7 +34,7 @@ _MIN_SECRET_BYTES = 32  # RFC 7518 §3.2 floor for HS256 (PyJWT warns below this
 
 
 def _secret() -> str:
-    secret = os.environ.get("LABELSCAN_JWT_SECRET")
+    secret = secret_value("LABELSCAN_JWT_SECRET")
     if not secret:
         raise RuntimeError(
             "LABELSCAN_JWT_SECRET is not set. A signing secret is required for JWT auth."
@@ -71,6 +74,9 @@ def encode(claims: dict[str, Any], *, ttl_seconds: int | None = None) -> str:
     ttl = ttl_seconds if ttl_seconds is not None else default_ttl_seconds()
     payload = {
         **claims,
+        "jti": claims.get("jti") or str(uuid.uuid4()),
+        "iss": claims.get("iss") or jwt_issuer(),
+        "aud": claims.get("aud") or jwt_audience(),
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(seconds=ttl)).timestamp()),
     }
@@ -80,6 +86,13 @@ def encode(claims: dict[str, Any], *, ttl_seconds: int | None = None) -> str:
 def decode(token: str) -> dict[str, Any]:
     """Verify signature + expiry and return the claims. Raises ``TokenError`` on any failure."""
     try:
-        return jwt.decode(token, _secret(), algorithms=[_ALGORITHM])
+        return jwt.decode(
+            token,
+            _secret(),
+            algorithms=[_ALGORITHM],
+            issuer=jwt_issuer(),
+            audience=jwt_audience(),
+            options={"require": ["exp", "iat", "jti", "iss", "aud"]},
+        )
     except jwt.PyJWTError as exc:
         raise TokenError(str(exc)) from exc

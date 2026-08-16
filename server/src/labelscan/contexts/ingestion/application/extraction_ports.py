@@ -49,7 +49,12 @@ class LlmExtractor(Protocol):
     correctness never depends on it (the reconciliation layer always lets GS1 win)."""
 
     def run(
-        self, ocr_text: str, known_field_names: tuple[str, ...] = ()
+        self,
+        ocr_text: str,
+        known_field_names: tuple[str, ...] = (),
+        *,
+        trade_code: str = "poissonnerie",
+        trade_profile_version: str = "1",
     ) -> LlmResult: ...
 
     @property

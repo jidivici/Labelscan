@@ -14,11 +14,15 @@
  * Pure + framework-free so it is unit-tested without React.
  */
 
-import { FIELD_ORDER } from './fieldOrder';
+import { fieldOrderForTrade } from './fieldOrder';
 import type { ExtractionField } from '../types/api';
 
 /** The closed field set length — the "/17" denominator shown in the UI. */
-export const CANONICAL_FIELD_COUNT = FIELD_ORDER.length;
+export const CANONICAL_FIELD_COUNT = fieldOrderForTrade('poissonnerie').length;
+
+export function canonicalFieldCount(tradeCode?: string | null): number {
+  return fieldOrderForTrade(tradeCode).length;
+}
 
 /** A field value counts as "filled" when it is a non-blank string. */
 function isFilledValue(value: string | null | undefined): boolean {
@@ -37,11 +41,12 @@ function isFilledValue(value: string | null | undefined): boolean {
 export function filledCountFromRun(
   fields: ExtractionField[] | null | undefined,
   edits?: Record<string, string>,
+  tradeCode?: string | null,
 ): number {
   const byName = new Map<string, ExtractionField>();
   for (const f of fields ?? []) byName.set(f.field_name, f);
   let count = 0;
-  for (const name of FIELD_ORDER) {
+  for (const name of fieldOrderForTrade(tradeCode)) {
     if (edits && name in edits) {
       if (isFilledValue(edits[name])) count += 1;
       continue;
@@ -63,9 +68,10 @@ export function filledCountFromRun(
 export function filledCountFromInterim(
   interim: Record<string, string> | null | undefined,
   edits?: Record<string, string>,
+  tradeCode?: string | null,
 ): number {
-  if (!edits) return filledCountFromValues(interim);
-  return filledCountFromValues({ ...(interim ?? {}), ...edits });
+  if (!edits) return filledCountFromValues(interim, tradeCode);
+  return filledCountFromValues({ ...(interim ?? {}), ...edits }, tradeCode);
 }
 
 /**
@@ -74,10 +80,13 @@ export function filledCountFromInterim(
  * each field's live draft (operator edit taking priority over the extracted value), so
  * the count reflects exactly what will be saved. A blank/whitespace value never counts.
  */
-export function filledCountFromValues(values: Record<string, string> | null | undefined): number {
+export function filledCountFromValues(
+  values: Record<string, string> | null | undefined,
+  tradeCode?: string | null,
+): number {
   if (!values) return 0;
   let count = 0;
-  for (const name of FIELD_ORDER) {
+  for (const name of fieldOrderForTrade(tradeCode)) {
     if (isFilledValue(values[name])) count += 1;
   }
   return count;

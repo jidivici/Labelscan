@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
 import { API_BASE_URL } from '../config';
-import { FIELD_ORDER } from './fieldOrder';
+import { businessProfileFor } from './businessProfiles';
 import { apiRequest } from './api';
 import { getToken } from './authStorage';
 import type { Article, ArticleField } from '../types/Article';
@@ -21,6 +21,9 @@ interface ArrivalSummary {
   packaging_date: string | null;
   recorded_at: string;
   photo_available: boolean;
+  business_portal_id: string | null;
+  profession_code: string;
+  trade_profile_version: string;
 }
 
 interface ArrivalPage {
@@ -47,13 +50,21 @@ interface ArrivalDetail {
   recorded_at: string;
   updated_at: string;
   photo_available: boolean;
+  business_portal_id: string | null;
+  profession_code: string;
+  trade_profile_version: string;
 }
 
 function fieldsFromValues(
   values: Record<string, string | null>,
   validation: ArrivalDetail['validation'] = {},
+  tradeCode?: string | null,
 ): ArticleField[] {
-  return FIELD_ORDER.map((field_name) => {
+  const canonical = businessProfileFor(tradeCode).fields;
+  // Profile fields first, then unexpected historical keys verbatim so old records
+  // remain inspectable after profile evolution.
+  const names = [...canonical, ...Object.keys(values).filter((name) => !canonical.includes(name))];
+  return names.map((field_name) => {
     const metadata = validation[field_name];
     return {
       field_name,
@@ -80,15 +91,17 @@ export async function listCatalogArticles(): Promise<Article[]> {
   return page.items.map((arrival) => {
     const values: Record<string, string | null> = {
       commercial_designation: arrival.product_name,
-      scientific_name: arrival.scientific_name,
       reseller_brand: arrival.supplier_name,
       batch_number: arrival.lot_code,
-      FAO_area: arrival.fao_area_code,
-      production_method: arrival.production_method,
       expiry_date: arrival.use_by,
       packaging_date: arrival.packaging_date,
       gtin: arrival.gtin,
     };
+    if (arrival.profession_code === 'poissonnerie') {
+      values.scientific_name = arrival.scientific_name;
+      values.FAO_area = arrival.fao_area_code;
+      values.production_method = arrival.production_method;
+    }
     return {
       id: arrival.batch_id,
       source: 'backend_extraction',
@@ -101,9 +114,12 @@ export async function listCatalogArticles(): Promise<Article[]> {
       photo_headers: headers,
       barcode_raw: arrival.gtin,
       ingestion_status: arrival.status,
-      fields: fieldsFromValues(values),
+      fields: fieldsFromValues(values, {}, arrival.profession_code),
       saved_at: arrival.recorded_at,
       saved_by: null,
+      business_portal_id: arrival.business_portal_id,
+      trade_code: arrival.profession_code,
+      trade_profile_version: arrival.trade_profile_version,
     };
   });
 }
@@ -126,9 +142,16 @@ export async function getCatalogArticle(batchId: string): Promise<Article | null
       photo_headers: headers,
       barcode_raw: arrival.fields.gtin ?? null,
       ingestion_status: arrival.status,
-      fields: fieldsFromValues(arrival.fields, arrival.validation),
+      fields: fieldsFromValues(
+        arrival.fields,
+        arrival.validation,
+        arrival.profession_code,
+      ),
       saved_at: arrival.updated_at,
       saved_by: null,
+      business_portal_id: arrival.business_portal_id,
+      trade_code: arrival.profession_code,
+      trade_profile_version: arrival.trade_profile_version,
     };
   } catch {
     return null;

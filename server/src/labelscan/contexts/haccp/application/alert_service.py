@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from labelscan.contexts.haccp.domain.alert import AlertState, acknowledge, resolve
+from labelscan.platform.http.access import AccessContext
 
 
 @dataclass(frozen=True)
@@ -20,6 +21,7 @@ class AuditContext:
     actor_id: str
     correlation_id: str
     trace_id: str
+    access: AccessContext | None = None
 
 
 class AlertNotFound(Exception):

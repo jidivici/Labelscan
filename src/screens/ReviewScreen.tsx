@@ -28,7 +28,7 @@ import * as Haptics from 'expo-haptics';
 
 import { getAllArticles } from '../services/storage';
 import { queryClient } from '../services/queryClient';
-import { FIELD_GROUPS, FIELD_ORDER } from '../services/fieldOrder';
+import { businessProfileFor } from '../services/businessProfiles';
 import { suggestAllergen } from '../services/allergenSuggestions';
 import { buildFieldHistory, suggestForField, type FieldHistory } from '../services/fieldHistory';
 import {
@@ -67,6 +67,7 @@ import {
 import { filledCountFromValues } from '../services/fieldCompleteness';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
+import { RotatedPhoto } from '../components/RotatedPhoto';
 import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
@@ -401,7 +402,7 @@ export function ReviewScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RouteType>();
-  const { user } = useAuth();
+  const { user, businessPortalId, tradeCode } = useAuth();
   const { pendingScanId } = route.params;
 
   // Single source of truth (workflow v1): photo, barcode, ingestion id and the
@@ -416,6 +417,9 @@ export function ReviewScreen() {
   const ingestionId = scan?.ingestionId ?? null;
   const photoUri = scan?.photoUri;
   const barcodeRaw = scan?.barcodeRaw;
+  const reviewProfile = businessProfileFor(scan?.tradeCode ?? tradeCode);
+  const fieldGroups = reviewProfile.groups;
+  const fieldOrder = reviewProfile.fields;
 
   const [saving, setSaving] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
@@ -512,7 +516,7 @@ export function ReviewScreen() {
   // divergence between the count and what's on screen).
   const effectiveValues = useMemo(() => {
     const out: Record<string, string> = {};
-    for (const name of FIELD_ORDER) {
+    for (const name of fieldOrder) {
       const field = fields.find((f) => f.field_name === name);
       const extracted = field
         ? isDateField(name)
@@ -522,10 +526,13 @@ export function ReviewScreen() {
       out[name] = edits[name] ?? extracted;
     }
     return out;
-  }, [fields, edits]);
+  }, [fields, edits, fieldOrder]);
   // How many of the 17 fields are filled (non-blank). "Enregistrer l'arrivage" unlocks
   // only at 17/17 — until then the arrivage stays "en cours" and is never counted.
-  const filledCount = useMemo(() => filledCountFromValues(effectiveValues), [effectiveValues]);
+  const filledCount = useMemo(
+    () => filledCountFromValues(effectiveValues, reviewProfile.code),
+    [effectiveValues, reviewProfile.code],
+  );
 
   // GS1 wins on lot/DLC at T+0; the backend reconciles the same way, so the values stay
   // stable once the run lands.
@@ -581,7 +588,7 @@ export function ReviewScreen() {
         operation = await enqueueFinalizeReview({
           ingestion_id: ingestionId,
           fields: Object.fromEntries(
-            FIELD_ORDER.map((name) => [
+            fieldOrder.map((name) => [
               name,
               savedFields.find((field) => field.field_name === name)?.value ?? null,
             ]),
@@ -622,6 +629,9 @@ export function ReviewScreen() {
         fields: savedFields,
         saved_at: savedAt,
         saved_by: user ?? null,
+        business_portal_id: businessPortalId,
+        trade_code: reviewProfile.code,
+        trade_profile_version: reviewProfile.version,
         raw_extraction_run: run,
       };
       queryClient.setQueryData<Article[]>(['catalog', 'arrivals'], (current = []) => [
@@ -663,13 +673,16 @@ export function ReviewScreen() {
     photoUri,
     barcodeRaw,
     user,
+    businessPortalId,
+    fieldOrder,
+    reviewProfile,
     navigation,
   ]);
 
   // Save is gated on 17/17 (workflow v2): the arrivage is only recorded — and counted —
   // once every field is filled. Below that the button stays disabled and reads "Compléter
   // (n/17)"; the modifications made so far are still persisted on leave.
-  const complete = filledCount === FIELD_ORDER.length;
+  const complete = filledCount === fieldOrder.length;
   const waitingForSync = scan?.reviewSyncStatus === 'pending';
   const canSave =
     ready &&
@@ -681,8 +694,8 @@ export function ReviewScreen() {
   return (
     <View style={styles.root}>
       {/* Fixed photo header — SAME system as ArticleDetail: the photo stays put while the
-          content sheet scrolls over it. The captured file is already rotated upright
-          (baked client-side at capture), so a plain cover Image reads landscape. Tap the
+          content sheet scrolls over it. The stored OCR source keeps its capture orientation;
+          RotatedPhoto applies the single left rotation used by every final display. Tap the
           photo to open it full-screen; the return control is the bottom action bar. */}
       <View style={styles.photoContainer}>
         {photoUri ? (
@@ -692,7 +705,11 @@ export function ReviewScreen() {
             accessibilityRole="button"
             accessibilityLabel="Voir la photo en plein écran"
           >
-            <Image source={{ uri: photoUri }} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
+            <RotatedPhoto
+              source={{ uri: photoUri }}
+              resizeMode="cover"
+              style={StyleSheet.absoluteFillObject}
+            />
           </Pressable>
         ) : (
           <View style={[styles.photoCard, styles.photoPlaceholder]}>
@@ -713,7 +730,9 @@ export function ReviewScreen() {
         {/* Épuré au maximum : au plus l'admin + la date d'enregistrement, un point. */}
         {user || capturedAt ? (
           <Text style={[typography.bodySmall, styles.metaLine]} numberOfLines={1}>
-            {[user, capturedAt ? formatDate(capturedAt) : null].filter(Boolean).join('  ·  ')}
+            {[reviewProfile.displayName, user, capturedAt ? formatDate(capturedAt) : null]
+              .filter(Boolean)
+              .join('  ·  ')}
           </Text>
         ) : null}
 
@@ -746,9 +765,20 @@ export function ReviewScreen() {
             // place, qui deviennent éditables au ready — SANS cascade, sans compteur.
             <>
               {ready ? null : (
-                <ExtractionProgress startedAt={mountedAt} ready={false} ocrDone={ocrDone} />
+                <ExtractionProgress
+                  startedAt={mountedAt}
+                  ready={false}
+                  ocrDone={ocrDone}
+                  analysisLabel={
+                    reviewProfile.code === 'poissonnerie'
+                      ? 'Analyse de l’espèce'
+                      : reviewProfile.code === 'boucherie'
+                        ? 'Analyse de la viande'
+                        : 'Analyse du produit préparé'
+                  }
+                />
               )}
-              {FIELD_GROUPS.map((group) => (
+              {fieldGroups.map((group) => (
                 <View key={group.id} style={styles.fieldGroup}>
                   <View style={styles.fieldGroupHeader}>
                     <View style={styles.fieldGroupIcon}>
@@ -823,7 +853,7 @@ export function ReviewScreen() {
                 : !ready
                   ? 'Analyse en cours…'
                   : !complete
-                    ? `Compléter (${filledCount}/${FIELD_ORDER.length})`
+                    ? `Compléter (${filledCount}/${fieldOrder.length})`
                     : 'Enregistrer l’arrivage'}
             </Text>
           </Pressable>

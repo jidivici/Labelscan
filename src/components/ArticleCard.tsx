@@ -27,6 +27,7 @@ import { formatDateShort } from '../services/dates';
 import { commonName } from '../services/articleGrouping';
 import { displayFieldValue } from '../services/fieldLabels';
 import { colors, spacing, radius, typography } from '../theme';
+import { RotatedPhoto } from './RotatedPhoto';
 
 interface ArticleCardProps {
   article: Article;
@@ -145,9 +146,11 @@ export const ArticleCard = React.memo(function ArticleCard({
             {/* Product image stays in one fixed frame for a stable list rhythm. */}
             <View style={styles.thumbnail}>
               {article.photo_uri ? (
-                <Image
+                <RotatedPhoto
                   source={{ uri: article.photo_uri, headers: article.photo_headers }}
-                  style={styles.thumbnailImage}
+                  style={[
+                    styles.thumbnailImage,
+                  ]}
                   resizeMode="cover"
                 />
               ) : (

@@ -18,17 +18,15 @@ from labelscan.contexts.identity.application.ports import (
 from labelscan.contexts.identity.application.store_ports import StoreRequired
 from labelscan.contexts.identity.domain.password import hash_password
 from labelscan.contexts.identity.domain.store import normalize_store_code
-from labelscan.contexts.identity.domain.user import (
-    OPERATOR_ROLE,
-    USER_ROLES,
-    ManagedUser,
-)
+from labelscan.contexts.identity.domain.user import USER_ROLES, ManagedUser
 
 
 def _username(value: str) -> str:
     normalized = value.strip()
     if not normalized:
         raise ValueError("username must not be blank")
+    if len(normalized) > 254:
+        raise ValueError("username must be at most 254 characters")
     return normalized
 
 
@@ -48,9 +46,7 @@ def _role(value: str) -> str:
 
 
 def _password_hash(password: str) -> str:
-    if not password:
-        raise ValueError("password must not be empty")
-    return hash_password(password)
+    return hash_password(password, min_length=1, reject_known_placeholder=False)
 
 
 def _store_code(value: str | None) -> str | None:
@@ -93,7 +89,7 @@ class UserAdminService:
     def create(self, command: CreateUserCommand) -> ManagedUser:
         role = _role(command.role)
         store_code = _store_code(command.store_code)
-        if role == OPERATOR_ROLE and store_code is None:
+        if role == "manager" and store_code is None:
             raise StoreRequired()
         audit = AdminAuditContext(
             actor_id=command.actor_id,

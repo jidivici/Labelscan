@@ -30,6 +30,7 @@ import { enqueueCapture, executeCreateIngestionOp, type SubmitOutcome } from './
 import { getOperation } from './outbox';
 import { deletePendingPhoto, persistPendingPhoto, sweepPendingPhotos } from './storage';
 import type { ExtractionRunResponse, IngestionStatusResponse } from '../types/api';
+import type { TradeCode } from './businessProfiles';
 
 const QUEUE_KEY = '@labelscan:scanQueue';
 
@@ -66,6 +67,10 @@ export interface PendingScan {
   photoUri: string; // durable pending/<id>.jpg (original cache uri if the copy failed)
   barcodeRaw?: string;
   capturedAt: string; // ISO 8601 (client capture time, sent to the backend)
+  /** Local presentation snapshot only; never copied into the ingestion request. */
+  tradeCode?: TradeCode;
+  /** Local queue owner received from auth; never copied into the ingestion request. */
+  businessPortalId?: string;
   submitOpId: string; // outbox create_ingestion op (transport linkage)
   ingestionId: string | null; // null until the submit succeeded
   status: PendingScanStatus;
@@ -303,6 +308,10 @@ export interface EnqueueScanInput {
   tempUri: string; // cropped capture (ImageManipulator cache uri), or an already-durable uri
   barcodeRaw?: string;
   capturedAt: string; // ISO 8601
+  /** Received from authenticated server context; retained locally for review UX only. */
+  tradeCode?: TradeCode;
+  /** Received from authenticated server context; retained locally for isolation only. */
+  businessPortalId?: string;
 }
 
 /**
@@ -326,6 +335,8 @@ export async function enqueueScan(input: EnqueueScanInput): Promise<PendingScan>
     photoUri,
     barcodeRaw: input.barcodeRaw,
     capturedAt: input.capturedAt,
+    tradeCode: input.tradeCode,
+    businessPortalId: input.businessPortalId,
     submitOpId: op.id,
     ingestionId: null,
     status: 'submitting',

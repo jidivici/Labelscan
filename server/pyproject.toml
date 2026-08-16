@@ -5,6 +5,7 @@ description = "LabelScan — HACCP seafood traceability backend (modular monolit
 requires-python = ">=3.11"
 dependencies = [
     "sqlalchemy>=2.0",
+    "greenlet>=3.0",  # Explicit for cross-platform hashed locks (Linux CPython).
     "alembic>=1.13",
     "psycopg[binary]>=3.1",
     "fastapi>=0.115",
@@ -22,6 +23,9 @@ dev = [
     "pytest>=8.0",
     "import-linter>=2.0",
     "ruff>=0.6",
+    "pip-audit>=2.9",
+    "pip-tools>=7.5",
+    "pip<26",  # pip-tools 7.6 imports a pip API removed in pip 26
 ]
 
 # src layout: the importable package is `labelscan` under src/.
@@ -46,7 +50,24 @@ src = ["src"]
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "TID"]
+select = ["E", "F", "I", "S608", "TID"]
+ignore = ["E501"]  # Legacy SQL/prompts exceed 88 chars; formatting is not a security gate.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S608"]
+"migrations/**" = ["S608"]
+# These repositories interpolate only fixed column fragments selected in code;
+# all caller-controlled values remain SQLAlchemy bind parameters.
+"src/labelscan/contexts/haccp/adapters/http/read_router.py" = ["S608"]
+"src/labelscan/contexts/haccp/adapters/sql_alert_repository.py" = ["S608"]
+"src/labelscan/contexts/identity/adapters/sql_store_repository.py" = ["S608"]
+"src/labelscan/contexts/identity/adapters/sql_user_repository.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/extraction_consumer.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/http/read_router.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/sql_confirm_repository.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/sql_field_override_repository.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/sql_review_repository.py" = ["S608"]
+"src/labelscan/contexts/traceability/adapters/sql_catalog_repository.py" = ["S608"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"

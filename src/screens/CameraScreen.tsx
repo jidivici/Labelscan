@@ -50,8 +50,10 @@ import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
 import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
+import { captureImageActions } from '../services/captureImageActions';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
+import { useAuth } from '../context/AuthContext';
 
 // Label-placement frame — both the VISUAL GUIDE and the crop region. The full
 // photo is captured, then cropped to this rectangle before submit (see
@@ -140,6 +142,7 @@ function computeFrameCrop(
 type NavProp = StackNavigationProp<RootStackParamList, 'Camera'>;
 
 export function CameraScreen() {
+  const { businessPortalId, businessProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation<NavProp>();
@@ -276,13 +279,13 @@ export function CameraScreen() {
         const resize =
           srcW >= srcH ? { width: Math.min(srcW, 1600) } : { height: Math.min(srcH, 1600) };
         try {
-          // Bake the −90° (counter-clockwise) rotation INTO the file (workflow v2): labels
-          // are shot in portrait but read landscape, so the stored/uploaded JPEG is now
-          // already upright — no display-time RotatedPhoto anywhere. Rotation is applied
-          // LAST, after crop+resize (the crop math needs the upright pixel space).
+          // Keep the captured orientation in the stored/uploaded JPEG. Operators hold
+          // the phone in landscape while the app remains portrait-locked, so the label
+          // is intentionally sideways in this file (like the OCR source). The single
+          // counter-clockwise rotation belongs only to the display components.
           const out = await ImageManipulator.manipulateAsync(
             durableRawUri,
-            crop ? [{ crop }, { resize }, { rotate: -90 }] : [{ resize }, { rotate: -90 }],
+            captureImageActions(crop, resize),
             { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
           );
           croppedUri = out.uri;
@@ -298,6 +301,8 @@ export function CameraScreen() {
           tempUri: croppedUri ?? durableRawUri,
           barcodeRaw,
           capturedAt,
+          tradeCode: businessProfile.code,
+          businessPortalId: businessPortalId ?? undefined,
         });
         logLatency('capture', { framed: String(framed) });
         // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
@@ -306,19 +311,32 @@ export function CameraScreen() {
       } catch (err) {
         // A shot must NEVER be lost silently (prod audit): the only throw path here is
         // the durable-copy failure, so fall back to enqueueing the ORIGINAL cache
-        // capture as-is (uncropped/unrotated — degraded but recoverable; enqueueScan
+        // capture as-is (uncropped — degraded but recoverable; enqueueScan
         // retries its own durable copy and tolerates a cache uri). If even that fails,
         // the error card at home is the operator's signal.
         console.error('Background capture pipeline error:', err);
         try {
-          await enqueueScan({ tempUri: capturedPhoto.uri, barcodeRaw, capturedAt });
+          await enqueueScan({
+            tempUri: capturedPhoto.uri,
+            barcodeRaw,
+            capturedAt,
+            tradeCode: businessProfile.code,
+            businessPortalId: businessPortalId ?? undefined,
+          });
           logLatency('capture', { framed: 'false', fallback: 'raw_cache' });
         } catch (fallbackErr) {
           console.error('Capture fallback enqueue failed — shot lost:', fallbackErr);
         }
       }
     })();
-  }, [taking, frameGeometry, screenWidth, screenHeight]);
+  }, [
+    taking,
+    frameGeometry,
+    screenWidth,
+    screenHeight,
+    businessPortalId,
+    businessProfile.code,
+  ]);
 
   // ── Barcode detected — store for the next capture, no auto-shoot ───────────
   const handleBarcodeScanned = useCallback(

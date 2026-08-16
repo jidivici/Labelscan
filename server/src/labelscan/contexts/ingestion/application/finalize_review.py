@@ -1,35 +1,19 @@
-"""Atomic finalization of the complete 17-field mobile review."""
+"""Atomic finalization of a complete versioned trade-profile review."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 
+from labelscan.business_profiles import TRADE_PROFILES, trade_profile
 from labelscan.contexts.ingestion.application.override_field import FIELD_NAMES
 from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
     FinalizedReview,
     ReviewRepository,
 )
+from labelscan.platform.http.access import AccessContext
 
-FINAL_REVIEW_FIELDS: tuple[str, ...] = (
-    "commercial_designation",
-    "scientific_name",
-    "producer_name",
-    "reseller_brand",
-    "batch_number",
-    "origin_country",
-    "FAO_area",
-    "production_method",
-    "fishing_gear_or_farming_method",
-    "expiry_date",
-    "packaging_date",
-    "storage_temperature",
-    "allergens",
-    "health_mark",
-    "weight",
-    "price",
-    "gtin",
-)
+FINAL_REVIEW_FIELDS: tuple[str, ...] = trade_profile("poissonnerie").fields
 
 assert set(FINAL_REVIEW_FIELDS).issubset(FIELD_NAMES)
 
@@ -47,7 +31,7 @@ class ReviewNotAllowed(Exception):
 
 
 class InvalidReviewFields(Exception):
-    """The submitted field set is not exactly the canonical 17-field contract."""
+    """The submitted field set is not an exact supported trade-profile contract."""
 
     def __init__(self, *, missing: set[str], extra: set[str]) -> None:
         self.missing = missing
@@ -69,6 +53,7 @@ class FinalizeReviewCommand:
     correlation_id: str
     trace_id: str
     note: str | None = None
+    access: AccessContext | None = None
 
 
 class FinalizeReview:
@@ -76,19 +61,22 @@ class FinalizeReview:
         self._repository = repository
 
     def __call__(self, command: FinalizeReviewCommand) -> FinalizedReview:
-        expected = set(FINAL_REVIEW_FIELDS)
         submitted = set(command.fields)
-        if submitted != expected:
+        contracts = [set(profile.fields) for profile in TRADE_PROFILES.values()]
+        if submitted not in contracts:
+            # Report the closest versioned contract. This preserves the useful
+            # missing/unknown response before a DB lookup while allowing every
+            # supported trade to submit its own exact field set.
+            expected = min(
+                contracts,
+                key=lambda candidate: len(candidate ^ submitted),
+            )
             raise InvalidReviewFields(
                 missing=expected - submitted,
                 extra=submitted - expected,
             )
         normalized = {
-            name: (
-                value.strip()
-                if isinstance(value, str) and value.strip()
-                else None
-            )
+            name: (value.strip() if isinstance(value, str) and value.strip() else None)
             for name, value in command.fields.items()
         }
         result = self._repository.finalize(
@@ -103,6 +91,7 @@ class FinalizeReview:
                 trace_id=command.trace_id,
             ),
             action="ingestion.review_finalized",
+            access=command.access,
         )
         if result is None:
             raise ReviewNotFound(command.ingestion_id)

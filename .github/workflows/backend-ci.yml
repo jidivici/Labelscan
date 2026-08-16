@@ -3,9 +3,9 @@ name: backend-ci
 # PG-0 + PG-1 gates. Runs on every push/PR touching the backend.
 on:
   push:
-    paths: ["server/**", ".github/workflows/backend-ci.yml"]
+    paths: ["server/**", "deploy/**", "docs/backend/openapi.v1.yaml", ".github/workflows/backend-ci.yml"]
   pull_request:
-    paths: ["server/**", ".github/workflows/backend-ci.yml"]
+    paths: ["server/**", "deploy/**", "docs/backend/openapi.v1.yaml", ".github/workflows/backend-ci.yml"]
 
 jobs:
   foundations:
@@ -32,7 +32,14 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install
-        run: python -m pip install -e ".[dev]"
+        run: |
+          python -m pip install --require-hashes -r requirements-dev.lock
+          python -m pip install --no-deps -e .
+
+      - name: Dependency audit
+        # requirements.lock is a complete, transitively resolved and hashed graph;
+        # audit it directly instead of executing pip in a temporary environment.
+        run: pip-audit --no-deps --disable-pip -r requirements.lock
 
       # G-ARCH — dependency-boundary enforcement (PG-0). Fails the build on any
       # layering / context-independence / domain-purity violation.
@@ -41,6 +48,9 @@ jobs:
 
       - name: Lint (ruff)
         run: ruff check .
+
+      - name: API inventory is current
+        run: python scripts/export_openapi.py --check
 
       # G-MIG — migrations must apply AND be reversible (expand-and-contract).
       - name: Migrate up
@@ -53,3 +63,25 @@ jobs:
       # PG-1 proofs — immutability / same-transaction audit / rollback.
       - name: Proofs
         run: pytest -v
+
+  production-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -f server/Dockerfile -t labelscan:ci .
+      - name: Validate production Compose contract
+        env:
+          LABELSCAN_IMAGE: registry.example/labelscan@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          LABELSCAN_EDGE_NETWORK: labelscan_edge
+          LABELSCAN_BACKEND_NETWORK: labelscan_backend
+          LABELSCAN_VERSION: ci-test-sha
+          LABELSCAN_PUBLIC_ORIGIN: https://labelscan.example
+          LABELSCAN_ALLOWED_HOSTS: labelscan.example
+          LABELSCAN_TRUSTED_PROXIES: 172.20.0.10
+          LABELSCAN_JWT_ISSUER: https://labelscan.example
+          LABELSCAN_JWT_AUDIENCE: labelscan-clients
+          LABELSCAN_S3_BUCKET: labelscan-production
+          LABELSCAN_S3_REGION: eu-west-3
+          LABELSCAN_S3_KMS_KEY_ID: test-config-key
+        run: docker compose -f deploy/compose/production.yml config --quiet

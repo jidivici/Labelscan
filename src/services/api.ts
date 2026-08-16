@@ -19,7 +19,15 @@ import { v4 as uuidv4 } from 'uuid';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { API_BASE_URL } from '../config';
-import { clearToken, emitUnauthenticated, getToken } from './authStorage';
+import {
+  clearSessionTokens,
+  emitUnauthenticated,
+  getRefreshToken,
+  getToken,
+  setOperatorContext,
+  setTokens,
+} from './authStorage';
+import { isTradeCode } from './businessProfiles';
 import type {
   CreateIngestionResponse,
   ExtractionRunResponse,
@@ -64,6 +72,52 @@ export interface RequestOptions {
   headers?: Record<string, string>;
   /** Caller-controlled AbortSignal, composed with the timeout. */
   signal?: AbortSignal;
+  /** Internal guard: an authenticated request is retried at most once. */
+  authRetried?: boolean;
+}
+
+let refreshPromise: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshPromise) return refreshPromise;
+  refreshPromise = (async () => {
+    const refreshToken = await getRefreshToken();
+    if (!refreshToken) return null;
+    try {
+      const response = await fetch(resolveUrl('/v1/mobile/auth/refresh'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+      if (!response.ok) return null;
+      const body = await response.json();
+      if (typeof body.access_token !== 'string' || typeof body.refresh_token !== 'string') {
+        return null;
+      }
+      if (
+        body.user?.role !== 'manager' ||
+        typeof body.user.business_portal_id !== 'string' ||
+        !isTradeCode(body.user.trade_code)
+      ) {
+        return null;
+      }
+      await Promise.all([
+        setTokens(body.access_token, body.refresh_token),
+        setOperatorContext({
+          businessPortalId: body.user.business_portal_id,
+          tradeCode: body.user.trade_code,
+        }),
+      ]);
+      return body.access_token;
+    } catch {
+      return null;
+    }
+  })();
+  try {
+    return await refreshPromise;
+  } finally {
+    refreshPromise = null;
+  }
 }
 
 /** RN file part for multipart uploads. */
@@ -138,13 +192,19 @@ async function send<T>(
   try {
     const response = await fetch(url, { ...init, headers, signal: controller.signal });
     if (!response.ok) {
+      if (response.status === 401 && !opts.skipAuth && !opts.authRetried) {
+        const refreshed = await refreshAccessToken();
+        if (refreshed) {
+          return send<T>(path, init, { ...opts, authRetried: true }, baseHeaders);
+        }
+      }
       const apiError = await parseError(response, correlationId);
       // An authenticated request rejected with 401 => the session is no longer
       // valid: clear it and signal the auth layer (drops back to the login
       // screen). The login call sets skipAuth, so a bad-credentials 401 there
       // does NOT trigger a sign-out loop.
       if (response.status === 401 && !opts.skipAuth) {
-        await clearToken();
+        await clearSessionTokens();
         emitUnauthenticated();
       }
       throw apiError;

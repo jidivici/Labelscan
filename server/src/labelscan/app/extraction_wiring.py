@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 
+from labelscan.business_profiles import trade_profile
 from labelscan.contexts.ingestion.adapters.extraction_consumer import ExtractionConsumer
 from labelscan.contexts.ingestion.application.extraction_ports import OcrProvider
 from labelscan.contexts.ingestion.domain.extraction import (
@@ -21,9 +22,12 @@ from labelscan.platform.outbox.worker import OutboxWorker
 
 # PLACEHOLDER rule set — pending BLOCKER B2 (Compliance authors the versioned
 # RequiredFieldRuleSet). This is configuration data, never fabricated regulatory truth.
+_POISSONNERIE_PROFILE = trade_profile("poissonnerie")
 _PLACEHOLDER_RULESET = RuleSet(
-    version="placeholder-pending-B2",
-    required_fields=frozenset({"scientific_name", "expiry_date", "production_method"}),
+    version=(
+        f"trade-profile:{_POISSONNERIE_PROFILE.code}:v{_POISSONNERIE_PROFILE.version}"
+    ),
+    required_fields=frozenset(_POISSONNERIE_PROFILE.required_fields),
 )
 
 

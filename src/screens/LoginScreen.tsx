@@ -26,15 +26,21 @@ import { ApiError } from '../services/api';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 
 function messageForError(err: unknown): string {
-  if (err instanceof Error && err.message === 'MOBILE_OPERATOR_ONLY') {
-    return 'L’application mobile est réservée aux opérateurs.';
+  if (err instanceof Error && err.message === 'MOBILE_ACCESS_DENIED') {
+    return 'Ce compte ne peut pas accéder à l’application mobile.';
+  }
+  if (err instanceof Error && err.message === 'MOBILE_CONTEXT_MISSING') {
+    return 'Ce compte opérateur n’est pas rattaché à un portail métier compatible.';
   }
   if (err instanceof ApiError) {
     if (err.code === 'FORBIDDEN' || err.status === 403) {
-      return 'L’application mobile est réservée aux opérateurs.';
+      return 'Ce compte ne peut pas accéder à l’application mobile.';
     }
     if (err.code === 'UNAUTHENTICATED' || err.status === 401) {
       return 'Identifiant ou mot de passe incorrect.';
+    }
+    if (err.code === 'VALIDATION_ERROR' || err.status === 422) {
+      return 'Vérifiez les informations saisies.';
     }
     if (err.code === 'CONFIG_ERROR') {
       return 'L’application n’est pas configurée pour joindre le serveur. Contactez le développeur.';
@@ -68,7 +74,12 @@ export function LoginScreen() {
       setError(messageForError(err));
       setSubmitting(false); // keep the form mounted to show the error
     }
-  }, [canSubmit, signIn, username, password]);
+  }, [
+    canSubmit,
+    password,
+    signIn,
+    username,
+  ]);
 
   return (
     <KeyboardAvoidingView
@@ -84,7 +95,7 @@ export function LoginScreen() {
           />
           <Text style={[typography.headlineSmall, styles.title]}>LabelScan</Text>
           <Text style={[typography.bodyMedium, styles.subtitle]}>
-            Traçabilité des produits de la mer
+            Traçabilité des métiers de bouche
           </Text>
         </View>
 
@@ -142,7 +153,9 @@ export function LoginScreen() {
             {submitting ? (
               <ActivityIndicator size="small" color={colors.onPrimary} />
             ) : (
-              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>Se connecter</Text>
+              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>
+                Se connecter
+              </Text>
             )}
           </Pressable>
         </View>

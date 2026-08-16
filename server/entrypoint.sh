@@ -1,8 +1,29 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+set -eu
 
-echo "==> Running Alembic migrations..."
-alembic upgrade head
+role="${1:-api}"
 
-echo "==> Starting server..."
-exec uvicorn labelscan.app.http_app:create_app --factory --host 0.0.0.0 --port 8000
+case "$role" in
+  migrate)
+    echo "==> Applying database migrations"
+    exec alembic upgrade head
+    ;;
+  api)
+    echo "==> Starting API"
+    exec uvicorn labelscan.app.http_app:create_app --factory \
+      --host 0.0.0.0 --port 8000 --no-proxy-headers \
+      --no-server-header --no-date-header
+    ;;
+  worker)
+    echo "==> Starting extraction worker"
+    exec python -m labelscan.app.worker_runtime
+    ;;
+  demo)
+    echo "==> Installing demonstration data"
+    exec python /app/scripts/seed_demo.py
+    ;;
+  *)
+    echo "unsupported process role: $role" >&2
+    exit 64
+    ;;
+esac

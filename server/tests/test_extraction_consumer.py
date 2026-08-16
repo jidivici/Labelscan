@@ -260,9 +260,11 @@ def test_reextraction_is_a_new_append_only_run(submit, engine, raw_store):
         c.execute(
             text(
                 "INSERT INTO platform.outbox (event_type, payload, correlation_id, trace_id) "
-                "VALUES ('ingestion.raw_stored', CAST(:p AS jsonb), 'corr-ext', 'trace-ext')"
+                "SELECT 'ingestion.raw_stored', jsonb_build_object("
+                "'ingestion_id', id::text, 'organization_id', organization_id::text), "
+                "'corr-ext', 'trace-ext' FROM ingestion.ingestion WHERE id = :id"
             ),
-            {"p": f'{{"ingestion_id": "{res.ingestion_id}"}}'},
+            {"id": res.ingestion_id},
         )
     worker.run_once()
 
@@ -278,6 +280,49 @@ def test_reextraction_is_a_new_append_only_run(submit, engine, raw_store):
                 {"id": first[0]["id"]},
             )
     assert "append-only" in str(ei.value).lower()
+
+
+def test_worker_rejects_an_ingestion_event_with_a_mismatched_tenant(
+    submit, engine, raw_store
+):
+    _quiesce(engine)
+    res = submit(_cmd(b"extract-tenant-mismatch"))
+    _quiesce(engine)
+    with engine.begin() as conn:
+        event_id = conn.execute(
+            text(
+                "INSERT INTO platform.outbox "
+                "(event_type, payload, correlation_id, trace_id) "
+                "VALUES ('ingestion.raw_stored', jsonb_build_object("
+                "'ingestion_id', CAST(:ingestion_id AS text), "
+                "'organization_id', CAST(:organization_id AS text)), "
+                "'tenant-mismatch', 'tenant-mismatch') RETURNING id::text"
+            ),
+            {
+                "ingestion_id": res.ingestion_id,
+                "organization_id": "22222222-2222-2222-2222-222222222222",
+            },
+        ).scalar_one()
+
+    worker = _worker_with(
+        engine,
+        _consumer(engine, raw_store, FakeOcr(), FakeLlm(good_fields())),
+    )
+    assert worker.run_once() == 1
+    assert _runs(engine, res.ingestion_id) == []
+    with engine.connect() as conn:
+        event = (
+            conn.execute(
+                text(
+                    "SELECT attempts, published_at FROM platform.outbox WHERE id = :id"
+                ),
+                {"id": event_id},
+            )
+            .mappings()
+            .one()
+        )
+    assert event["attempts"] == 1
+    assert event["published_at"] is None
 
 
 # ----- OCR-quality gate (cost saver) ------------------------------------------
@@ -313,4 +358,3 @@ def test_garbage_ocr_skips_llm_and_routes_to_review(submit, engine, raw_store):
         ).scalar_one()
     assert status == "ocr_skipped_garbage"
     assert llm_artifacts == 0
-

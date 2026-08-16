@@ -26,6 +26,7 @@ from labelscan.contexts.ingestion.application.ports import (
 )
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.http.access import AccessContext, postgres_scope
 
 _CONFIRMABLE = ("extracted", "needs_review", "ocr_skipped_garbage")
 
@@ -35,19 +36,35 @@ class SqlConfirmRepository(ConfirmIngestionRepository):
         self._engine = engine
 
     def confirm(
-        self, *, ingestion_id: str, audit: AuditContext, action: str
+        self,
+        *,
+        ingestion_id: str,
+        audit: AuditContext,
+        action: str,
+        access: AccessContext | None = None,
     ) -> ConfirmedIngestion | None:
         with self._engine.begin() as conn:
             if audit.organization_id:
                 set_tenant_context(conn, audit.organization_id)
+            params: dict[str, object] = {
+                "id": ingestion_id,
+                "organization_id": audit.organization_id,
+            }
+            conditions = [
+                "ingestion.id = :id",
+                "(CAST(:organization_id AS text) IS NULL "
+                "OR ingestion.organization_id::text = :organization_id)",
+            ]
+            if access is not None and access.organization_id:
+                predicate, access_params = postgres_scope(access, alias="ingestion")
+                conditions.append(predicate)
+                params.update(access_params)
             status = conn.execute(
                 text(
-                    "SELECT status FROM ingestion.ingestion WHERE id = :id "
-                    "AND (CAST(:organization_id AS text) IS NULL "
-                    "OR organization_id::text = :organization_id) "
-                    "FOR UPDATE"
+                    "SELECT ingestion.status FROM ingestion.ingestion AS ingestion "
+                    f"WHERE {' AND '.join(conditions)} FOR UPDATE"
                 ),
-                {"id": ingestion_id, "organization_id": audit.organization_id},
+                params,
             ).scalar_one_or_none()
             if status is None:
                 return None
@@ -69,10 +86,10 @@ class SqlConfirmRepository(ConfirmIngestionRepository):
             conn.execute(
                 text(
                     "UPDATE ingestion.ingestion SET status = 'confirmed' WHERE id = :id "
-                    "AND (CAST(:organization_id AS text) IS NULL "
-                    "OR organization_id::text = :organization_id)"
+                    "AND id IN (SELECT ingestion.id FROM ingestion.ingestion AS ingestion "
+                    f"WHERE {' AND '.join(conditions)})"
                 ),
-                {"id": ingestion_id, "organization_id": audit.organization_id},
+                params,
             )
             return ConfirmedIngestion(
                 ingestion_id=ingestion_id, status="confirmed", replayed=False

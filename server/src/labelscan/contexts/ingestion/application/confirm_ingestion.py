@@ -20,6 +20,7 @@ from labelscan.contexts.ingestion.application.ports import (
     ConfirmedIngestion,
     ConfirmIngestionRepository,
 )
+from labelscan.platform.http.access import AccessContext
 
 _ACTION = "ingestion.confirmed"
 
@@ -35,6 +36,7 @@ class ConfirmIngestionCommand:
     correlation_id: str
     trace_id: str
     organization_id: str | None = None
+    access: AccessContext | None = None
 
 
 class ConfirmIngestion:
@@ -51,6 +53,7 @@ class ConfirmIngestion:
                 organization_id=cmd.organization_id,
             ),
             action=_ACTION,
+            access=cmd.access,
         )
         if result is None:
             raise IngestionNotFound(cmd.ingestion_id)

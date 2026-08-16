@@ -20,12 +20,13 @@ from __future__ import annotations
 import os
 
 from labelscan.contexts.ingestion.application.extraction_ports import OcrProvider
+from labelscan.platform.config import secret_value
 
 
 def build_ocr_provider() -> OcrProvider:
     provider = (os.environ.get("LABELSCAN_OCR_PROVIDER") or "").strip().lower()
     if provider == "google":
-        api_key = os.environ.get("LABELSCAN_GOOGLE_VISION_API_KEY")
+        api_key = secret_value("LABELSCAN_GOOGLE_VISION_API_KEY")
         if not api_key:
             raise RuntimeError(
                 "LABELSCAN_OCR_PROVIDER=google requires LABELSCAN_GOOGLE_VISION_API_KEY "

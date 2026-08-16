@@ -11,6 +11,8 @@ def normalize_store_code(value: str) -> str:
     normalized = value.strip().upper()
     if not normalized:
         raise ValueError("store code must not be blank")
+    if len(normalized) > 64:
+        raise ValueError("store code must be at most 64 characters")
     if not re.fullmatch(r"[A-Z0-9][A-Z0-9._-]*", normalized):
         raise ValueError(
             "store code may contain only letters, numbers, dots, dashes and underscores"
@@ -23,6 +25,8 @@ def normalize_store_name(value: str) -> str:
     normalized = " ".join(value.split())
     if not normalized:
         raise ValueError("store name must not be blank")
+    if len(normalized) > 120:
+        raise ValueError("store name must be at most 120 characters")
     return normalized
 
 

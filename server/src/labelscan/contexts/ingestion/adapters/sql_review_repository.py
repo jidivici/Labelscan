@@ -8,7 +8,9 @@ import json
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from labelscan.business_profiles import trade_profile
 from labelscan.contexts.ingestion.application.finalize_review import (
+    InvalidReviewFields,
     ReviewIdempotencyConflict,
     ReviewNotAllowed,
 )
@@ -19,6 +21,7 @@ from labelscan.contexts.ingestion.application.ports import (
 )
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.http.access import AccessContext, postgres_scope
 
 _REVIEWABLE = ("extracted", "needs_review", "ocr_skipped_garbage")
 
@@ -37,6 +40,7 @@ class SqlReviewRepository(ReviewRepository):
         idempotency_key: str,
         audit: AuditContext,
         action: str,
+        access: AccessContext | None = None,
     ) -> FinalizedReview | None:
         request_hash = hashlib.sha256(
             json.dumps(
@@ -55,10 +59,7 @@ class SqlReviewRepository(ReviewRepository):
             # Serialize identical keys before inspecting the append-only ledger.
             # This closes the race where two mobile retries arrive concurrently.
             conn.execute(
-                text(
-                    "SELECT pg_advisory_xact_lock("
-                    "hashtextextended(:lock_key, 0))"
-                ),
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
                 {"lock_key": f"finalize_review:{audit.actor_id}:{idempotency_key}"},
             )
             seen = (
@@ -88,14 +89,29 @@ class SqlReviewRepository(ReviewRepository):
                     replayed=True,
                 )
 
+            access_predicate = ""
+            access_params: dict[str, object] = {}
+            if access is not None and access.organization_id:
+                predicate, access_params = postgres_scope(access, alias="ingestion")
+                access_predicate = f" AND {predicate}"
             ingestion = (
                 conn.execute(
                     text(
-                        "SELECT status FROM ingestion.ingestion "
-                        "WHERE id = :id AND organization_id = :organization_id "
+                        "SELECT status, store_id::text AS store_id, "
+                        "business_portal_id::text AS business_portal_id, "
+                        "trade_code_snapshot, trade_profile_version, "
+                        "captured_by_user_id::text AS captured_by_user_id "
+                        "FROM ingestion.ingestion "
+                        "AS ingestion WHERE id = :id "
+                        "AND organization_id = :organization_id "
+                        f"{access_predicate} "
                         "FOR UPDATE"
                     ),
-                    {"id": ingestion_id, "organization_id": organization_id},
+                    {
+                        "id": ingestion_id,
+                        "organization_id": organization_id,
+                        **access_params,
+                    },
                 )
                 .mappings()
                 .first()
@@ -104,6 +120,17 @@ class SqlReviewRepository(ReviewRepository):
                 return None
             if ingestion["status"] not in _REVIEWABLE:
                 raise ReviewNotAllowed(ingestion["status"])
+            profile = trade_profile(
+                ingestion["trade_code_snapshot"],
+                ingestion["trade_profile_version"],
+            )
+            expected_fields = set(profile.fields)
+            submitted_fields = set(fields)
+            if submitted_fields != expected_fields:
+                raise InvalidReviewFields(
+                    missing=expected_fields - submitted_fields,
+                    extra=submitted_fields - expected_fields,
+                )
 
             latest = (
                 conn.execute(
@@ -253,6 +280,11 @@ class SqlReviewRepository(ReviewRepository):
                             "organization_id": organization_id,
                             "ingestion_id": ingestion_id,
                             "run_id": run_id,
+                            "store_id": ingestion["store_id"],
+                            "business_portal_id": ingestion["business_portal_id"],
+                            "trade_code_snapshot": ingestion["trade_code_snapshot"],
+                            "trade_profile_version": ingestion["trade_profile_version"],
+                            "captured_by_user_id": ingestion["captured_by_user_id"],
                         }
                     ),
                     "correlation_id": audit.correlation_id,

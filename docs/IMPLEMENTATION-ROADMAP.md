@@ -1,4 +1,4 @@
-# LabelScan — Plan d'implémentation (état au 3 juillet 2026)
+# LabelScan — Plan d'implémentation (état au 3 août 2026)
 
 **Objectif :** passer de l'état actuel (cœur métier complet, testé, mono-site, mono-compte)
 à un produit déployable chez un grand compte, en répondant aux exigences de l'application :
@@ -24,35 +24,34 @@ prises en spike AVANT d'écrire les migrations qu'elles conditionnent.
 
 ---
 
-## Phase 1 — Identité nominative + RBAC (~2 semaines) — LE bloquant n°1
+## Phase 1 — Identité nominative + RBAC — **LIVRÉE**
 
-> Exigence servie : **l'audit HACCP doit nommer QUI a scanné/validé/confirmé.** Aujourd'hui
-> tous les acteurs sont le même admin. C'est à la fois l'exigence réglementaire et la
-> première question d'un acheteur grand compte.
+> Exigence servie : **l'audit HACCP nomme QUI a scanné/validé/confirmé.** Les comptes
+> admin/opérateur, leur cycle de vie, les scopes, les affectations magasin et les tests
+> de régression sont en place.
 
 Le socle existe déjà — c'est une **extension**, pas une construction :
 `identity.app_user` (migration 0007, hash, login JWT), `actor_id` porté par le token jusqu'à
 l'audit trail non contournable, scopes déjà vérifiés par `require_scope` sur chaque endpoint.
 
-1. **Migration 0014** : élargir `ck_app_user_role` → `('admin','operator')`
+1. [x] **Migration 0014** : élargir `ck_app_user_role` → `('admin','operator')`
    + colonnes `display_name`, `active`, `created_by`. (Pattern exact de la 0011 : élargir un
    CHECK sans casser l'existant.)
-2. **Mapping rôle → scopes** (à l'émission du JWT, dans `login.py`) :
+2. [x] **Mapping rôle → scopes** (à l'émission du JWT, dans `login.py`) :
    - `operator` : `ingestion:write ingestion:read extraction:review` (scan + revue + confirm) ;
    - `admin` : tous les scopes métier + gestion des utilisateurs.
    Aucune modification des endpoints : `require_scope` fait déjà le travail.
-3. **Endpoints de gestion** (`identity/adapters/http`) : `POST/GET /v1/users`,
-   `PATCH /v1/users/{id}` (désactivation, reset mot de passe), scope `identity:admin`,
-   audités. Provisioning simple maintenant, SCIM/SSO en phase 5.
-4. **Mobile** : l'écran de login existe — afficher l'utilisateur courant (déjà fait via
-   `useAuth`), expiration/refresh du token (aujourd'hui : expiration sèche → re-login),
-   verrouillage PIN rapide pour device partagé en criée (re-login opérateur en 4 chiffres).
-5. **Tests** : chaque rôle sur chaque endpoint clé (matrice), audit `actor_id` distinct
+3. [x] **Endpoints de gestion typés** (`identity/adapters/http`) : `/v1/admins`,
+   `/v1/managers` et `/v1/portals/{id}/operators`. Le routeur générique
+   `/v1/users` n'est plus enregistré; les credentials opérateur restent sous le
+   contrôle exclusif du manager et l'administration des admins du super-admin.
+4. [x] **Mobile** : access/refresh dans SecureStore, restauration à froid, refresh sérialisé,
+   retry unique et nettoyage en `finally`. Le PIN/kiosque reste un suivi MDM.
+5. [x] **Tests** : chaque rôle sur chaque endpoint clé (matrice), audit `actor_id` distinct
    vérifié sur scan → override → confirm.
 
-**Spike parallèle (2 jours, décision phase 5) :** isolation multi-tenant — prototype RLS
-`tenant_id` sur une table clone vs schéma-par-tenant. Trancher MAINTENANT pour que toute
-migration écrite après la 0014 soit compatible avec le choix.
+**Décision livrée :** isolation `organization_id` + RLS PostgreSQL (migration 0018 et
+suivantes), avec contexte tenant transactionnel et tests croisés.
 
 **Jalon : chaque geste de traçabilité est nominatif — condition du pilote payant.**
 
@@ -122,14 +121,12 @@ migration écrite après la 0014 soit compatible avec le choix.
 
 ---
 
-## Phase 5 — Contrat groupe : multi-tenant, SSO, intégration SI (~6-10 semaines)
+## Phase 5 — Contrat groupe : fonctions groupe, SSO, intégration SI (~4-8 semaines)
 
 > Exigences servies : **multi-sites cloisonné, SSO d'entreprise, la donnée rejoint l'ERP.**
 
-1. **Multi-tenant** selon le spike de phase 1 (recommandation a priori : `tenant_id` + RLS
-   Postgres — le moins invasif vu les triggers/append-only existants) : modèle
-   organisation → sites → utilisateurs, chaque ingestion rattachée à un site, agrégations
-   groupe pour l'administrateur national.
+1. [x] **Socle multi-tenant** : organisation → magasins → utilisateurs, données rattachées
+   et isolées par RLS. [ ] Restent les agrégations et privilèges de l'administrateur groupe.
 2. **SSO OIDC** (Entra ID en premier) à côté du login local — la couche JWT/scopes de la
    phase 1 reste, seul l'émetteur change ; provisioning SCIM si exigé.
 3. **API d'intégration** : compléter l'OpenAPI, webhooks (arrivage confirmé, alerte,

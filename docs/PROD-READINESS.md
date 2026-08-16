@@ -1,6 +1,6 @@
 # LabelScan — Synthèse prod-readiness : ce qui manque pour vendre à un grand groupe
 
-**Date :** 3 juillet 2026
+**Date :** 3 août 2026 (security refresh V3)
 **Public :** décision produit/technique interne (préparation d'un dossier commercial grand compte)
 **Hypothèse de vente :** un groupe agroalimentaire / GMS multi-sites (criées, ateliers de marée,
 plateformes logistiques) qui déploie LabelScan comme outil de traçabilité HACCP à la réception.
@@ -22,7 +22,8 @@ Le cœur métier est **complet, testé et architecturé au-dessus des standards 
   outbox durable côté mobile avec drain au foreground et **idempotence de bout en bout**
   (clé client stable → dédup serveur, migration 0013).
 - **Qualité d'ingénierie** : monolithe modulaire 6 bounded contexts, import-linter,
-  239 tests backend + 144 tests mobile, CI, migrations Alembic (13), contrats documentés.
+  312 tests backend + 221 tests mobile, CI séparée, migrations Alembic jusqu'à `0024`,
+  contrat OpenAPI généré et architecture de sécurité pré-pentest documentée.
 
 C'est un **excellent pilote mono-site**. Ce qui suit est ce qui sépare ce pilote d'un
 contrat grand compte.
@@ -31,32 +32,35 @@ contrat grand compte.
 
 ## 2. Les manques, par domaine (bloquant → différable)
 
-### 2.1 Identité & contrôle d'accès — **BLOQUANT**
-État actuel : **un seul compte admin** (`LABELSCAN_ADMIN_USERNAME`/`PASSWORD` en env), JWT
-signé par un secret partagé, pas de gestion d'utilisateurs.
-Un grand groupe exigera :
-- [ ] **Comptes opérateurs individuels** (l'audit HACCP doit nommer QUI a validé — aujourd'hui
-  tous les scans portent le même actor). C'est aussi une exigence réglementaire d'auditabilité.
+### 2.1 Identité & contrôle d'accès — **SOCLE MVP LIVRÉ ; SSO EXTERNE RESTE BLOQUANT GROUPE**
+État actuel : comptes nominatifs admin/opérateur, gestion de cycle de vie, scopes par rôle,
+affectation magasin, sessions serveur révocables, access JWT 15 minutes et refresh opaque
+rotatif sept jours. Logout, changement de mot de passe/rôle/magasin et désactivation
+invalident immédiatement les accès. Il reste pour un contrat groupe :
+- [x] **Comptes opérateurs individuels** et attribution nominale de l'audit HACCP.
 - [ ] **SSO d'entreprise** (SAML/OIDC — Entra ID est le standard de facto en agro) + provisioning
   (SCIM ou a minima admin UI).
-- [ ] **RBAC** : opérateur (scan/revue), admin site, admin groupe. Les scopes JWT existent déjà — c'est le bon socle, il manque la
-  couche de gestion.
-- [ ] Rotation des secrets (JWT, clés API) sans redéploiement ; verrouillage/expiration de session.
-**Effort : L (2-4 semaines). C'est le manque n°1.**
+- [x] **RBAC local** : opérateur (scan/revue) et administrateur (gestion + scopes métier).
+  Les rôles site/groupe plus fins restent à cadrer avec le SSO.
+- [x] Expiration, rotation et révocation de session.
+- [ ] Rotation des secrets de signature sans redéploiement et fédération OIDC/JWKS.
+**Effort résiduel : M-L selon le fournisseur SSO.**
 
-### 2.2 Multi-tenant / multi-sites — **BLOQUANT**
-État actuel : une base = un déploiement = un site. Aucune notion d'organisation, de site,
-ni de cloisonnement.
-- [ ] Modèle **organisation → sites → utilisateurs** ; chaque ingestion rattachée à un site.
-- [ ] Choix d'isolation : schéma-par-tenant ou colonne `tenant_id` + RLS Postgres. Vu
-  l'architecture append-only + triggers existante, **RLS + tenant_id** est le chemin le moins
-  invasif ; à décider AVANT d'écrire la migration (coûteux à changer après).
-- [ ] Agrégations groupe : un administrateur national veut voir tous les sites.
-**Effort : L-XL (3-6 semaines selon l'option d'isolation).**
+### 2.2 Multi-tenant / multi-sites — **SOCLE D'ISOLATION LIVRÉ**
+État actuel : modèle **organisation → magasins → utilisateurs**, propriété tenant sur les
+ingestions/artefacts/projections, claims organisation/magasin, contexte transactionnel et
+RLS PostgreSQL. Les tests d'isolation et de RBAC sont conservés.
+- [x] Modèle organisation/site/utilisateur et rattachement des données.
+- [x] Isolation colonne `organization_id` + RLS PostgreSQL.
+- [ ] Vues/agrégations groupe et modèle d'administrateur national selon le contrat.
+**Effort résiduel : M pour les fonctions groupe, sans refonte du cloisonnement.**
 
 ### 2.3 Infrastructure & exploitation — **BLOQUANT**
-État actuel : docker-compose local, Postgres non managé, raw store sur volume disque,
-secrets dans `.env`, pas de métriques agrégées, pas d'alerting.
+État actuel : un contrat de déploiement production-shaped existe dans
+`deploy/compose/production.yml` avec rôles migration/API/worker séparés, image immuable,
+secrets fichier, conteneurs restreints, DB TLS vérifiée et stockage S3/KMS exigés au
+démarrage. Cela ne crée pas les services managés : métriques agrégées, alerting, réseau,
+TLS et preuves de restauration restent externes. Voir `docs/security/`.
 - [ ] **Hébergement production UE** (exigence quasi systématique) : Postgres managé + backups
   testés (PITR), stockage objet S3-compatible pour le raw store (le port existe), secrets
   manager, IaC (Terraform), environnements dev/staging/prod.
