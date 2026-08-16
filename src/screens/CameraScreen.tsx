@@ -58,7 +58,6 @@ import { FlashOverlay, FlashOverlayRef } from '../components/FlashOverlay';
 import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
-import { captureImageActions } from '../services/captureImageActions';
 import { computeFrameCrop } from '../services/frameCrop';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
@@ -208,57 +207,87 @@ export function CameraScreen() {
         durableRawUri = await persistPendingPhoto(`${scanId}-raw`, capturedPhoto.uri);
         if (!durableRawUri) throw new Error('Could not persist the captured photo');
 
-        // Cropping is mandatory: the raw/full-frame image must never reach OCR.
-        const crop = computeFrameCrop(
-          capturedPhoto.width,
-          capturedPhoto.height,
-          frameGeometry,
-        );
-        if (!crop) {
-          logLatency('frame_crop_skipped', {
-            photo: `${capturedPhoto.width}x${capturedPhoto.height}`,
-            screen: `${Math.round(screenWidth)}x${Math.round(screenHeight)}`,
-          });
-          throw new Error('The visible frame could not be mapped to the captured photo');
-        }
-        const srcW = crop.width;
-        const srcH = crop.height;
-        // The app preview stays portrait. On iOS, use Expo Camera's physical
-        // orientation signal rather than the JPEG dimensions: with an orientation
-        // lock, those dimensions are not a trustworthy proxy. A landscape-held
-        // phone is always transformed left before OCR, exactly as requested.
-        const iOSLandscapeCapture =
-          orientationAtShutter === 'landscapeLeft'
-          || orientationAtShutter === 'landscapeRight';
-        const rotateLeft = Platform.OS === 'ios'
-          ? iOSLandscapeCapture
-          : screenWidth <= screenHeight && capturedPhoto.width > capturedPhoto.height;
-        const outputWidth = rotateLeft ? srcH : srcW;
-        const outputHeight = rotateLeft ? srcW : srcH;
-        const resize =
-          outputWidth >= outputHeight
-            ? { width: Math.min(outputWidth, 1600) }
-            : { height: Math.min(outputHeight, 1600) };
-        const out = await ImageManipulator.manipulateAsync(
-          durableRawUri,
-          captureImageActions(crop, resize, rotateLeft ? -90 : 0),
-          { compress: 0.8, format: ImageManipulator.SaveFormat.JPEG },
-        );
+        // expo-image-manipulator first bakes the EXIF rotation into the pixels on
+        // iOS. Calculate the frame crop only *after* that normalization; using the
+        // dimensions returned by CameraView before this step caused the observed
+        // horizontal drift because crop coordinates referred to a different basis.
+        const normalizeContext = ImageManipulator.ImageManipulator.manipulate(durableRawUri);
+        const normalizedImage = await normalizeContext.renderAsync();
+        try {
+          // Cropping is mandatory: the raw/full-frame image must never reach OCR.
+          const crop = computeFrameCrop(
+            normalizedImage.width,
+            normalizedImage.height,
+            frameGeometry,
+          );
+          if (!crop) {
+            logLatency('frame_crop_skipped', {
+              photo: `${normalizedImage.width}x${normalizedImage.height}`,
+              screen: `${Math.round(screenWidth)}x${Math.round(screenHeight)}`,
+            });
+            throw new Error('The visible frame could not be mapped to the captured photo');
+          }
+          const srcW = crop.width;
+          const srcH = crop.height;
+          // The app preview stays portrait. On iOS, use Expo Camera's physical
+          // orientation signal rather than the JPEG dimensions: with an orientation
+          // lock, those dimensions are not a trustworthy proxy. A landscape-held
+          // phone is always transformed left before OCR, exactly as requested.
+          const iOSLandscapeCapture =
+            orientationAtShutter === 'landscapeLeft'
+            || orientationAtShutter === 'landscapeRight';
+          const rotateLeft = Platform.OS === 'ios'
+            ? iOSLandscapeCapture
+            : screenWidth <= screenHeight && normalizedImage.width > normalizedImage.height;
+          const outputWidth = rotateLeft ? srcH : srcW;
+          const outputHeight = rotateLeft ? srcW : srcH;
+          const resize =
+            outputWidth >= outputHeight
+              ? { width: Math.min(outputWidth, 1600) }
+              : { height: Math.min(outputHeight, 1600) };
 
-        // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
-        const scan = await enqueueScan({
-          id: scanId,
-          tempUri: out.uri,
-          barcodeRaw,
-          capturedAt,
-          tradeCode: businessProfile.code,
-          businessPortalId: businessPortalId ?? undefined,
-          photoBaseRotationDegrees: 0,
-        });
-        logLatency('capture', { framed: 'true' });
-        // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
-        // fell back to this exact uri (then it's the scan's only copy; keep it).
-        if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
+          const outputContext = ImageManipulator.ImageManipulator.manipulate(normalizedImage);
+          outputContext.crop(crop);
+          if (rotateLeft) outputContext.rotate(-90);
+          outputContext.resize(resize);
+          const outputImage = await outputContext.renderAsync();
+          let out: Awaited<ReturnType<typeof outputImage.saveAsync>>;
+          try {
+            out = await outputImage.saveAsync({
+              compress: 0.8,
+              format: ImageManipulator.SaveFormat.JPEG,
+            });
+          } finally {
+            outputImage.release();
+            outputContext.release();
+          }
+
+          logLatency('capture_geometry', {
+            source: `${capturedPhoto.width}x${capturedPhoto.height}`,
+            normalized: `${normalizedImage.width}x${normalizedImage.height}`,
+            crop: `${crop.originX},${crop.originY},${crop.width}x${crop.height}`,
+            orientation: orientationAtShutter,
+            rotate_left: String(rotateLeft),
+          });
+
+          // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
+          const scan = await enqueueScan({
+            id: scanId,
+            tempUri: out.uri,
+            barcodeRaw,
+            capturedAt,
+            tradeCode: businessProfile.code,
+            businessPortalId: businessPortalId ?? undefined,
+            photoBaseRotationDegrees: 0,
+          });
+          logLatency('capture', { framed: 'true' });
+          // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
+          // fell back to this exact uri (then it's the scan's only copy; keep it).
+          if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
+        } finally {
+          normalizedImage.release();
+          normalizeContext.release();
+        }
       } catch (err) {
         console.error('Cropped capture pipeline error — photo not enqueued:', err);
         if (durableRawUri) void deletePendingPhoto(durableRawUri);
