@@ -37,7 +37,7 @@ export interface Article {
   /** Half-turn approved by the reviewer; the immutable OCR source is unchanged. */
   photo_rotation_degrees?: 0 | 180;
   /** Historical raw photos need -90° on display; new crops are already upright. */
-  photo_base_rotation_degrees?: -90 | 0;
+  photo_base_rotation_degrees?: -90 | 0 | 90;
   barcode_raw: string | null;
   ingestion_status: string; // e.g. 'extracted' | 'needs_review'
   fields: ArticleField[];

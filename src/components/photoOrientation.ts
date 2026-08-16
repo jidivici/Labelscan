@@ -1,5 +1,6 @@
-/** The one and only product-photo rotation, applied at display time (never ingestion). */
-export const PHOTO_DISPLAY_ROTATION = '-90deg' as const;
+/** The quarter-turn applied at display time, never a second image transformation. */
+export type PhotoBaseRotationDegrees = -90 | 0 | 90;
 
-/** Historical files need a quarter turn; new cropped captures are physically upright. */
-export type PhotoBaseRotationDegrees = -90 | 0;
+export function photoDisplayRotation(baseRotationDegrees: PhotoBaseRotationDegrees): string {
+  return `${baseRotationDegrees}deg`;
+}

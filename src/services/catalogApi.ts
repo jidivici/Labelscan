@@ -22,7 +22,7 @@ interface ArrivalSummary {
   recorded_at: string;
   photo_available: boolean;
   photo_rotation_degrees?: 0 | 180;
-  photo_base_rotation_degrees?: -90 | 0;
+  photo_base_rotation_degrees?: -90 | 0 | 90;
   business_portal_id: string | null;
   profession_code: string;
   trade_profile_version: string;
@@ -53,7 +53,7 @@ interface ArrivalDetail {
   updated_at: string;
   photo_available: boolean;
   photo_rotation_degrees?: 0 | 180;
-  photo_base_rotation_degrees?: -90 | 0;
+  photo_base_rotation_degrees?: -90 | 0 | 90;
   business_portal_id: string | null;
   profession_code: string;
   trade_profile_version: string;

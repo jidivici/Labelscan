@@ -65,8 +65,8 @@ class FinalizeReview:
     def __call__(self, command: FinalizeReviewCommand) -> FinalizedReview:
         if command.photo_rotation_degrees not in (0, 180):
             raise ValueError("photo rotation must be 0 or 180 degrees")
-        if command.photo_base_rotation_degrees not in (-90, 0):
-            raise ValueError("photo base rotation must be -90 or 0 degrees")
+        if command.photo_base_rotation_degrees not in (-90, 0, 90):
+            raise ValueError("photo base rotation must be -90, 0, or 90 degrees")
         submitted = set(command.fields)
         contracts = [set(profile.fields) for profile in TRADE_PROFILES.values()]
         if submitted not in contracts:
