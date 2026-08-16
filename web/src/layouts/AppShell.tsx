@@ -40,7 +40,8 @@ function ShellContent({ children }: { children: ReactNode }) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarBrandRef = useRef<HTMLButtonElement>(null);
   const currentPortal = portalDefinition(profession);
-  const allProfessions = profession === 'tous' || location.includes('/administration');
+  const administrationWorkspace = location.includes('/administration');
+  const allProfessions = profession === 'tous';
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -139,7 +140,7 @@ function ShellContent({ children }: { children: ReactNode }) {
           ? <SidebarScopeSelect
               label="Métier"
               placeholder="Choisir un métier"
-              value={allProfessions ? 'tous' : currentPortal?.code ?? ''}
+              value={administrationWorkspace ? '' : allProfessions ? 'tous' : currentPortal?.code ?? ''}
               options={[{ value: 'tous', label: 'Tous les métiers' }, ...availablePortals.map((portal) => ({ value: portal.code, label: portal.shortLabel }))]}
               onChange={(next) => changeProfession(next as ProfessionCode | 'tous')}
             />
