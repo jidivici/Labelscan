@@ -215,10 +215,14 @@ export function CameraScreen() {
         const normalizedImage = await normalizeContext.renderAsync();
         try {
           // Cropping is mandatory: the raw/full-frame image must never reach OCR.
+          const previewQuarterTurn = orientationAtShutter === 'landscapeLeft'
+            ? 'clockwise'
+            : 'counterclockwise';
           const crop = computeFrameCrop(
             normalizedImage.width,
             normalizedImage.height,
             frameGeometry,
+            previewQuarterTurn,
           );
           if (!crop) {
             logLatency('frame_crop_skipped', {
@@ -271,6 +275,7 @@ export function CameraScreen() {
             normalized: `${normalizedImage.width}x${normalizedImage.height}`,
             crop: `${crop.originX},${crop.originY},${crop.width}x${crop.height}`,
             orientation: orientationAtShutter,
+            preview_turn: previewQuarterTurn,
             viewer_quarter_turn: String(needsViewerQuarterTurn),
           });
 

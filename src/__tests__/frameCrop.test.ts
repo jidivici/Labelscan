@@ -28,6 +28,20 @@ describe('computeFrameCrop', () => {
     });
   });
 
+  it('uses the opposite source mapping when the landscape preview is clockwise', () => {
+    expect(computeFrameCrop(2000, 1000, {
+      ...geometry,
+      frameLeft: 20,
+      frameTop: 300,
+      frameHeight: 500,
+    }, 'clockwise')).toEqual({
+      originX: 600,
+      originY: 160,
+      width: 1000,
+      height: 800,
+    });
+  });
+
   it('inverts the centered cover overflow', () => {
     expect(computeFrameCrop(1200, 2000, geometry)).toEqual({
       originX: 200,

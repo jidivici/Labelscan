@@ -14,6 +14,9 @@ export interface CropRect {
   height: number;
 }
 
+/** Direction in which the landscape source is displayed in the portrait preview. */
+export type PreviewQuarterTurn = 'counterclockwise' | 'clockwise';
+
 function cropInPreviewOrientation(
   photoWidth: number,
   photoHeight: number,
@@ -55,6 +58,7 @@ export function computeFrameCrop(
   photoWidth: number,
   photoHeight: number,
   geometry: FrameGeometry,
+  previewQuarterTurn: PreviewQuarterTurn = 'counterclockwise',
 ): CropRect | null {
   const screenIsLandscape = geometry.screenWidth > geometry.screenHeight;
   const photoIsLandscape = photoWidth > photoHeight;
@@ -64,6 +68,14 @@ export function computeFrameCrop(
 
   const oriented = cropInPreviewOrientation(photoHeight, photoWidth, geometry);
   if (!oriented) return null;
+  if (previewQuarterTurn === 'clockwise') {
+    return {
+      originX: oriented.originY,
+      originY: photoHeight - oriented.originX - oriented.width,
+      width: oriented.height,
+      height: oriented.width,
+    };
+  }
   return {
     originX: photoWidth - oriented.originY - oriented.height,
     originY: oriented.originX,
