@@ -2,6 +2,12 @@ name: deploy-hostinger
 
 on:
   workflow_dispatch:
+    inputs:
+      reset_demo:
+        description: "Type RESET_DEMO to delete all current LabelScan data and seed the demo dataset"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -39,4 +45,15 @@ jobs:
 
       - name: Deploy with backup and health check
         shell: bash
-        run: sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA"
+        env:
+          RESET_DEMO: ${{ inputs.reset_demo }}
+        run: |
+          set -Eeuo pipefail
+          if [[ -z "$RESET_DEMO" ]]; then
+            sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA"
+          elif [[ "$RESET_DEMO" == "RESET_DEMO" ]]; then
+            sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA" --reset-demo
+          else
+            echo "reset_demo must be empty or exactly RESET_DEMO" >&2
+            exit 1
+          fi
