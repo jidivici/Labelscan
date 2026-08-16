@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 
 import { arrivalImagePath, authorizedFetch } from '../../api';
 import { useAuth } from '../../auth/AuthContext';
@@ -19,6 +19,9 @@ export function ArrivalImage({
 }) {
   const { session } = useAuth();
   const [url, setUrl] = useState<string>();
+  const imageStyle = {
+    '--arrival-photo-rotation': `${rotationDegrees - 90}deg`,
+  } as CSSProperties;
 
   useEffect(() => {
     if (!available || !session) return;
@@ -39,12 +42,12 @@ export function ArrivalImage({
 
   if (url && onOpen) {
     return <button className="arrival-image arrival-image-button" type="button" onClick={() => onOpen(url)} aria-label="Agrandir la photo du produit">
-      <img src={url} alt={alt} style={{ transform: `translate(-50%, -50%) rotate(${rotationDegrees - 90}deg)` }} />
+      <img src={url} alt={alt} style={imageStyle} />
       <span className="arrival-image-hint" aria-hidden="true">Agrandir ↗</span>
     </button>;
   }
 
   return url
-    ? <span className="arrival-image"><img src={url} alt={alt} /></span>
+    ? <span className="arrival-image"><img src={url} alt={alt} style={imageStyle} /></span>
     : <div className="image-placeholder" aria-label="Photo indisponible"><BrandMark /></div>;
 }
