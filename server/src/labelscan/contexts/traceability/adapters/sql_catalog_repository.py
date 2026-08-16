@@ -316,12 +316,15 @@ class SqlCatalogRepository(CatalogRepository):
                         "projection.recorded_at::text AS recorded_at, "
                         "projection.updated_at::text AS updated_at, "
                         "(projection.image_checksum <> '') AS photo_available, "
+                        "ingestion.photo_rotation_degrees, "
                         f"{_COMPLETENESS_SQL} AS completeness, "
                         f"{_ALERT_STATE_SQL} AS alert_state, "
                         f"{_ALERT_SEVERITY_SQL} AS alert_severity "
                         "FROM traceability.arrival_projection AS projection "
                         "JOIN traceability.batch AS batch "
                         "ON batch.id = projection.batch_id "
+                        "JOIN ingestion.ingestion AS ingestion "
+                        "ON ingestion.id = projection.ingestion_id "
                         "LEFT JOIN identity.app_user AS captured_by "
                         "ON captured_by.id = projection.captured_by_user_id "
                         "AND captured_by.organization_id = projection.organization_id "
@@ -346,6 +349,7 @@ class SqlCatalogRepository(CatalogRepository):
             recorded_at=row["recorded_at"],
             updated_at=row["updated_at"],
             photo_available=bool(row["photo_available"]),
+            photo_rotation_degrees=int(row["photo_rotation_degrees"]),
             store_id=row["store_id"],
             business_portal_id=row["business_portal_id"],
             profession_code=row["profession_code"],

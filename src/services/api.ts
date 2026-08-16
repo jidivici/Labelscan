@@ -366,13 +366,14 @@ export function finalizeReview(
   ingestionId: string,
   fields: Record<string, string | null>,
   note?: string,
+  photoRotationDegrees: 0 | 180 = 0,
   options: RequestOptions = {},
 ): Promise<FinalizeReviewResponse> {
   return apiRequest<FinalizeReviewResponse>(
     `/v1/ingestions/${encodeURIComponent(ingestionId)}/reviews`,
     {
       method: 'POST',
-      body: { fields, ...(note ? { note } : {}) },
+      body: { fields, photo_rotation_degrees: photoRotationDegrees, ...(note ? { note } : {}) },
       ...options,
     },
   );

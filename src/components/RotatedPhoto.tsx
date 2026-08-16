@@ -17,6 +17,7 @@ interface RotatedPhotoProps {
   style?: StyleProp<ViewStyle>;
   resizeMode?: ImageResizeMode;
   accessibilityLabel?: ImageProps['accessibilityLabel'];
+  halfTurn?: boolean;
 }
 
 /**
@@ -28,6 +29,7 @@ export function RotatedPhoto({
   style,
   resizeMode = 'cover',
   accessibilityLabel,
+  halfTurn = false,
 }: RotatedPhotoProps) {
   const [frame, setFrame] = useState({ width: 0, height: 0 });
 
@@ -50,7 +52,7 @@ export function RotatedPhoto({
             top: (frame.height - frame.width) / 2,
             width: frame.height,
             height: frame.width,
-            transform: [{ rotate: PHOTO_DISPLAY_ROTATION }],
+            transform: [{ rotate: PHOTO_DISPLAY_ROTATION }, ...(halfTurn ? [{ rotate: '180deg' as const }] : [])],
           }}
         />
       ) : null}
