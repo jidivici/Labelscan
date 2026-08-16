@@ -24,7 +24,6 @@ class CatalogProduct:
     recorded_at: str
     photo_available: bool = True
     photo_rotation_degrees: int = 0
-    photo_base_rotation_degrees: int = -90
     store_id: str | None = None
     business_portal_id: str | None = None
     profession_code: str = "poissonnerie"
@@ -51,7 +50,6 @@ class CatalogArrival:
     updated_at: str
     photo_available: bool
     photo_rotation_degrees: int = 0
-    photo_base_rotation_degrees: int = -90
     store_id: str | None = None
     business_portal_id: str | None = None
     profession_code: str = "poissonnerie"

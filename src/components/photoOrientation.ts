@@ -1,3 +1,2 @@
-/** Historical captures were stored landscape but displayed with a compatibility left turn. */
+/** The one and only product-photo rotation, applied at display time (never ingestion). */
 export const PHOTO_DISPLAY_ROTATION = '-90deg' as const;
-export type PhotoBaseRotationDegrees = -90 | 0;

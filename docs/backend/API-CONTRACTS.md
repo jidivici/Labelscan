@@ -164,15 +164,13 @@ The organization, store, portal, profession code, profile version, and capture
 actor are snapshotted through ingestion, batch, and arrival projection. Historical
 products therefore do not move or change trade if a user is later reassigned.
 
-`GET /v1/arrivals/{batch_id}/image` returns the persisted source photo. The optional
-`variant=thumbnail` returns a display derivative capped at 480 px; it follows the
-same `no-store` policy, `catalog:read` scope, and store isolation as the source.
+`GET /v1/arrivals/{batch_id}/image` returns the persisted source photo. It uses
+the same `catalog:read` scope and store isolation as the arrivals feed.
 
 `GET /v1/arrivals/{batch_id}` returns the current append-only projection:
 the profile-specific field set (17 Poissonnerie, 22 Boucherie, or 22
 Charcuterie–Traiteur fields), validation metadata, revision date and
-`photo_available`. Photo responses expose `photo_base_rotation_degrees`
-(`-90` for historical files, `0` for new upright landscape captures). Unknown and invisible identifiers both return `404`,
+`photo_available`. Unknown and invisible identifiers both return `404`,
 preventing IDOR probing across organizations, stores, and portals. `403` is
 reserved for an authenticated actor attempting a known operation outside its
 role or requested portal perimeter.
@@ -239,11 +237,6 @@ paths:
         '503': { $ref: '#/components/responses/DependencyUnavailable' }
 ```
 
-The decoded image must be strictly landscape (`width > height`). Portrait and
-square payloads fail with `400 VALIDATION_ERROR` before raw storage or OCR. The
-mobile client additionally requires a successful crop to the visible frame
-before it creates the ingestion request.
-
 ---
 
 ## 2. Extraction status — `GET /v1/ingestions/{id}/extraction`  (Capabilities 2, 3)
@@ -287,9 +280,8 @@ before it creates the ingestion request.
 ## 3. Atomic review — `POST /v1/ingestions/{id}/reviews` (Capability 4)
 
 The mobile production flow submits the final review in one transaction. The
-request contains the exact versioned trade-profile `fields`, requires a durable
-`Idempotency-Key`, and stores `photo_base_rotation_degrees` (`0` for new upright
-landscape captures; omitted legacy requests default to `-90`).
+request contains `fields`, whose keys must be exactly the 17 canonical fields,
+and requires a durable `Idempotency-Key`.
 
 The transaction:
 

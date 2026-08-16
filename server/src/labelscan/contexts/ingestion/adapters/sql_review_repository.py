@@ -38,7 +38,6 @@ class SqlReviewRepository(ReviewRepository):
         fields: dict[str, str | None],
         note: str | None,
         photo_rotation_degrees: int,
-        photo_base_rotation_degrees: int,
         idempotency_key: str,
         audit: AuditContext,
         action: str,
@@ -51,7 +50,6 @@ class SqlReviewRepository(ReviewRepository):
                     "fields": fields,
                     "note": note,
                     "photo_rotation_degrees": photo_rotation_degrees,
-                    "photo_base_rotation_degrees": photo_base_rotation_degrees,
                 },
                 ensure_ascii=False,
                 separators=(",", ":"),
@@ -243,16 +241,10 @@ class SqlReviewRepository(ReviewRepository):
             conn.execute(
                 text(
                     "UPDATE ingestion.ingestion SET status = 'confirmed', "
-                    "photo_rotation_degrees = :photo_rotation_degrees, "
-                    "photo_base_rotation_degrees = :photo_base_rotation_degrees "
+                    "photo_rotation_degrees = :photo_rotation_degrees "
                     "WHERE id = :id AND organization_id = :organization_id"
                 ),
-                {
-                    "id": ingestion_id,
-                    "organization_id": organization_id,
-                    "photo_rotation_degrees": photo_rotation_degrees,
-                    "photo_base_rotation_degrees": photo_base_rotation_degrees,
-                },
+                {"id": ingestion_id, "organization_id": organization_id, "photo_rotation_degrees": photo_rotation_degrees},
             )
             conn.execute(
                 text(

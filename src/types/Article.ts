@@ -36,8 +36,6 @@ export interface Article {
   photo_headers?: Record<string, string>;
   /** Half-turn approved by the reviewer; the immutable OCR source is unchanged. */
   photo_rotation_degrees?: 0 | 180;
-  /** Storage-orientation compatibility: old files need -90°, new landscape captures need 0°. */
-  photo_base_rotation_degrees?: -90 | 0;
   barcode_raw: string | null;
   ingestion_status: string; // e.g. 'extracted' | 'needs_review'
   fields: ArticleField[];

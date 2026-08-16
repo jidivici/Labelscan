@@ -29,7 +29,6 @@ from labelscan.contexts.traceability.domain.catalog import (
 from labelscan.platform.http.access import access_context_for_principal
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
-from labelscan.platform.image_variants import ImageVariantError, thumbnail_cache
 from labelscan.platform.observability import get_logger
 from labelscan.platform.raw_images import RawImageNotFound
 
@@ -108,7 +107,6 @@ class CatalogProductResponse(BaseModel):
     recorded_at: str
     photo_available: bool
     photo_rotation_degrees: int
-    photo_base_rotation_degrees: int
     store_id: str | None
     business_portal_id: str | None
     profession_code: str
@@ -142,7 +140,6 @@ class CatalogArrivalResponse(BaseModel):
     updated_at: str
     photo_available: bool
     photo_rotation_degrees: int
-    photo_base_rotation_degrees: int
     store_id: str | None
     business_portal_id: str | None
     profession_code: str
@@ -351,7 +348,6 @@ def get_arrival(
 @router.get("/v1/arrivals/{batch_id}/image", response_class=Response)
 def get_arrival_image(
     batch_id: str = Path(min_length=1, max_length=128),
-    variant: Literal["source", "thumbnail"] = Query(default="source"),
     principal: Principal = Depends(require_scope("catalog:read")),
     service: CatalogService = Depends(get_catalog_service),
     reader=Depends(get_raw_image_reader),
@@ -377,13 +373,6 @@ def get_arrival_image(
             image = reader.read(checksum)
     except RawImageNotFound:
         raise ApiError("NOT_FOUND", "arrival image not found")
-    if variant == "thumbnail":
-        try:
-            image = thumbnail_cache.get_or_create(checksum, image)
-        except ImageVariantError:
-            # Historical/HEIC objects can be unsupported by the thumbnail codec.
-            # Keep the photo usable and fall back to the immutable source bytes.
-            pass
     return Response(
         content=image.content,
         media_type=image.media_type,

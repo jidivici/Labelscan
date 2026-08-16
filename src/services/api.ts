@@ -367,19 +367,13 @@ export function finalizeReview(
   fields: Record<string, string | null>,
   note?: string,
   photoRotationDegrees: 0 | 180 = 0,
-  photoBaseRotationDegrees: -90 | 0 = -90,
   options: RequestOptions = {},
 ): Promise<FinalizeReviewResponse> {
   return apiRequest<FinalizeReviewResponse>(
     `/v1/ingestions/${encodeURIComponent(ingestionId)}/reviews`,
     {
       method: 'POST',
-      body: {
-        fields,
-        photo_rotation_degrees: photoRotationDegrees,
-        photo_base_rotation_degrees: photoBaseRotationDegrees,
-        ...(note ? { note } : {}),
-      },
+      body: { fields, photo_rotation_degrees: photoRotationDegrees, ...(note ? { note } : {}) },
       ...options,
     },
   );

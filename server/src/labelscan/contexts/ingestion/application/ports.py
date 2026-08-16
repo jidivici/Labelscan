@@ -170,7 +170,6 @@ class ReviewRepository(Protocol):
         fields: dict[str, str | None],
         note: str | None,
         photo_rotation_degrees: int,
-        photo_base_rotation_degrees: int,
         idempotency_key: str,
         audit: AuditContext,
         action: str,

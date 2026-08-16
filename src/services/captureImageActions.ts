@@ -1,11 +1,12 @@
 import type { Action, ActionCrop, ActionResize } from 'expo-image-manipulator';
 
 /**
- * Crop and resize the landscape OCR/storage file without changing orientation.
+ * Prepare the OCR/storage file without changing its capture orientation.
+ * Product photos receive their single left rotation only when rendered.
  */
 export function captureImageActions(
-  crop: ActionCrop['crop'],
+  crop: ActionCrop['crop'] | null,
   resize: ActionResize['resize'],
 ): Action[] {
-  return [{ crop }, { resize }];
+  return crop ? [{ crop }, { resize }] : [{ resize }];
 }
