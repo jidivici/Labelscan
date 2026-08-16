@@ -8,7 +8,7 @@ interface FilterPanelProps {
   filters: ArrivalFilters;
   stores: Store[];
   onUpdate: (key: ScalarArrivalFilterKey, value: string | number) => void;
-  onDateRangeChange: (fromKey: 'dateFrom' | 'expiryFrom', toKey: 'dateTo' | 'expiryTo', from: string, to: string) => void;
+  onDateRangeChange: (from: string, to: string) => void;
   onFieldFilter: (field: string, value: string) => void;
   onReset: () => void;
 }
@@ -35,8 +35,7 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onDateRangeChan
         <label className="field"><span>Fournisseur</span><input value={filters.supplier} onChange={(event) => onUpdate('supplier', event.target.value)} placeholder="Nom du fournisseur" /></label>
         <label className="field"><span>Lot</span><input value={filters.lotCode} onChange={(event) => onUpdate('lotCode', event.target.value)} placeholder="Numéro de lot" /></label>
         <label className="field"><span>GTIN</span><input value={filters.gtin} onChange={(event) => onUpdate('gtin', event.target.value)} placeholder="Code GTIN" /></label>
-        <DateRangeCalendar label="Date d’enregistrement" description="Période de création de la fiche" from={filters.dateFrom} to={filters.dateTo} disableFuture onChange={(from, to) => onDateRangeChange('dateFrom', 'dateTo', from, to)} />
-        <DateRangeCalendar label="Date d’expiration" description="Période de date limite" from={filters.expiryFrom} to={filters.expiryTo} onChange={(from, to) => onDateRangeChange('expiryFrom', 'expiryTo', from, to)} />
+        <DateRangeCalendar label="Arrivage" from={filters.dateFrom} to={filters.dateTo} disableFuture onChange={onDateRangeChange} />
       </div>
     </div>
 
