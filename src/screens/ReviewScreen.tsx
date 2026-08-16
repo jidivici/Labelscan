@@ -35,6 +35,7 @@ import {
   enqueueFinalizeReview,
   getOperation,
   requeueDeadLetter,
+  updatePendingFinalizeReview,
 } from '../services/outbox';
 import { drainOutbox } from '../services/outboxDrain';
 import {
@@ -586,20 +587,26 @@ export function ReviewScreen() {
       let operation = scan.finalizeOpId
         ? await getOperation(scan.finalizeOpId)
         : null;
+      const finalReviewPayload = {
+        ingestion_id: ingestionId,
+        fields: Object.fromEntries(
+          fieldOrder.map((name) => [
+            name,
+            savedFields.find((field) => field.field_name === name)?.value ?? null,
+          ]),
+        ),
+        photo_rotation_degrees: photoRotationDegrees,
+      };
       if (!operation) {
-        operation = await enqueueFinalizeReview({
-          ingestion_id: ingestionId,
-          fields: Object.fromEntries(
-            fieldOrder.map((name) => [
-              name,
-              savedFields.find((field) => field.field_name === name)?.value ?? null,
-            ]),
-          ),
-          photo_rotation_degrees: photoRotationDegrees,
-        });
+        operation = await enqueueFinalizeReview(finalReviewPayload);
         attachFinalizeOperation(scan.id, operation.id);
-      } else if (operation.status === 'dead_letter') {
-        operation = await requeueDeadLetter(operation.id);
+      } else {
+        // A manager can correct the photo after a first offline/failed attempt.
+        // Reuse the durable operation, but never resend its stale orientation.
+        operation = (await updatePendingFinalizeReview(operation.id, finalReviewPayload)) ?? operation;
+        if (operation.status === 'dead_letter') {
+          operation = await requeueDeadLetter(operation.id);
+        }
         if (operation) attachFinalizeOperation(scan.id, operation.id);
       }
       await drainOutbox();
