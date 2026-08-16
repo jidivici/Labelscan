@@ -7,6 +7,7 @@ import type { Action, ActionCrop, ActionResize } from 'expo-image-manipulator';
 export function captureImageActions(
   crop: ActionCrop['crop'],
   resize: ActionResize['resize'],
+  rotationDegrees: 0 | -90 = 0,
 ): Action[] {
-  return [{ crop }, { resize }];
+  return [{ crop }, ...(rotationDegrees ? [{ rotate: rotationDegrees }] : []), { resize }];
 }

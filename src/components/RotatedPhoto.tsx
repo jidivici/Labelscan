@@ -10,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { PHOTO_DISPLAY_ROTATION } from './photoOrientation';
+import { PHOTO_DISPLAY_ROTATION, type PhotoBaseRotationDegrees } from './photoOrientation';
 
 interface RotatedPhotoProps {
   source: ImageSourcePropType;
@@ -18,6 +18,8 @@ interface RotatedPhotoProps {
   resizeMode?: ImageResizeMode;
   accessibilityLabel?: ImageProps['accessibilityLabel'];
   halfTurn?: boolean;
+  /** -90 for historical raw captures; 0 for crops already rotated upright. */
+  baseRotationDegrees?: PhotoBaseRotationDegrees;
 }
 
 /**
@@ -30,8 +32,10 @@ export function RotatedPhoto({
   resizeMode = 'cover',
   accessibilityLabel,
   halfTurn = false,
+  baseRotationDegrees = -90,
 }: RotatedPhotoProps) {
   const [frame, setFrame] = useState({ width: 0, height: 0 });
+  const quarterTurn = baseRotationDegrees === -90;
 
   return (
     <View
@@ -48,11 +52,14 @@ export function RotatedPhoto({
           accessibilityLabel={accessibilityLabel}
           style={{
             position: 'absolute',
-            left: (frame.width - frame.height) / 2,
-            top: (frame.height - frame.width) / 2,
-            width: frame.height,
-            height: frame.width,
-            transform: [{ rotate: PHOTO_DISPLAY_ROTATION }, ...(halfTurn ? [{ rotate: '180deg' as const }] : [])],
+            left: quarterTurn ? (frame.width - frame.height) / 2 : 0,
+            top: quarterTurn ? (frame.height - frame.width) / 2 : 0,
+            width: quarterTurn ? frame.height : frame.width,
+            height: quarterTurn ? frame.width : frame.height,
+            transform: [
+              ...(quarterTurn ? [{ rotate: PHOTO_DISPLAY_ROTATION }] : []),
+              ...(halfTurn ? [{ rotate: '180deg' as const }] : []),
+            ],
           }}
         />
       ) : null}

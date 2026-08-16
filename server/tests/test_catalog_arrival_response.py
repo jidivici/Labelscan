@@ -2,7 +2,10 @@ from labelscan.contexts.traceability.adapters.http.catalog_router import (
     CatalogArrivalResponse,
     CatalogProductResponse,
 )
-from labelscan.contexts.traceability.domain.catalog import CatalogArrival, CatalogProduct
+from labelscan.contexts.traceability.domain.catalog import (
+    CatalogArrival,
+    CatalogProduct,
+)
 
 
 def test_arrival_response_exposes_persisted_photo_rotation() -> None:
@@ -19,11 +22,13 @@ def test_arrival_response_exposes_persisted_photo_rotation() -> None:
         updated_at="2026-08-16T10:00:00Z",
         photo_available=True,
         photo_rotation_degrees=180,
+        photo_base_rotation_degrees=0,
     )
 
     response = CatalogArrivalResponse.from_domain(arrival)
 
     assert response.photo_rotation_degrees == 180
+    assert response.photo_base_rotation_degrees == 0
 
 
 def test_catalog_summary_exposes_persisted_photo_rotation() -> None:
@@ -42,8 +47,10 @@ def test_catalog_summary_exposes_persisted_photo_rotation() -> None:
         packaging_date=None,
         recorded_at="2026-08-16T10:00:00Z",
         photo_rotation_degrees=180,
+        photo_base_rotation_degrees=0,
     )
 
     response = CatalogProductResponse.from_domain(product)
 
     assert response.photo_rotation_degrees == 180
+    assert response.photo_base_rotation_degrees == 0

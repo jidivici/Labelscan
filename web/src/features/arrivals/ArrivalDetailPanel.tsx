@@ -139,7 +139,7 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
       {detail && <>
         <section className="detail-hero">
           <div className="detail-visual">
-            <ArrivalImage batchId={detail.batch_id} available={detail.photo_available} alt="Étiquette du produit" rotationDegrees={detail.photo_rotation_degrees} onOpen={setPhotoViewerUrl} />
+            <ArrivalImage batchId={detail.batch_id} available={detail.photo_available} alt="Étiquette du produit" rotationDegrees={detail.photo_rotation_degrees} baseRotationDegrees={detail.photo_base_rotation_degrees} onOpen={setPhotoViewerUrl} />
           </div>
           <div className="detail-identity">
             <span className="detail-identity-eyebrow">{detailPortal?.shortLabel ?? display(detail.profession_code) ?? 'Produit'} · produit enregistré</span>
@@ -162,6 +162,6 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
         <DetailSections sections={detailSections} fields={detail.fields} validation={detail.validation} />
       </>}
     </aside>
-    {photoViewerUrl && <ProductPhotoViewer url={photoViewerUrl} rotationDegrees={detail?.photo_rotation_degrees} onClose={() => setPhotoViewerUrl(undefined)} />}
+    {photoViewerUrl && <ProductPhotoViewer url={photoViewerUrl} rotationDegrees={detail?.photo_rotation_degrees} baseRotationDegrees={detail?.photo_base_rotation_degrees} onClose={() => setPhotoViewerUrl(undefined)} />}
   </div>;
 }

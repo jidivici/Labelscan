@@ -93,6 +93,7 @@ def _product(row) -> CatalogProduct:
         recorded_at=row["recorded_at"],
         photo_available=bool(row["image_checksum"]),
         photo_rotation_degrees=int(row["photo_rotation_degrees"]),
+        photo_base_rotation_degrees=int(row["photo_base_rotation_degrees"]),
         store_id=row["store_id"],
         business_portal_id=row["business_portal_id"],
         profession_code=row["profession_code"],
@@ -222,7 +223,7 @@ class SqlCatalogRepository(CatalogRepository):
             "projection.trade_profile_version, "
             "projection.captured_by_user_id::text AS captured_by_user_id, "
             "projection.fields, projection.image_checksum, batch.status, "
-            "ingestion.photo_rotation_degrees, "
+            "ingestion.photo_rotation_degrees, ingestion.photo_base_rotation_degrees, "
             "projection.recorded_at::text AS recorded_at, "
             f"{_COMPLETENESS_SQL} AS completeness, "
             f"{_ALERT_STATE_SQL} AS alert_state, "
@@ -320,6 +321,7 @@ class SqlCatalogRepository(CatalogRepository):
                         "projection.updated_at::text AS updated_at, "
                         "(projection.image_checksum <> '') AS photo_available, "
                         "ingestion.photo_rotation_degrees, "
+                        "ingestion.photo_base_rotation_degrees, "
                         f"{_COMPLETENESS_SQL} AS completeness, "
                         f"{_ALERT_STATE_SQL} AS alert_state, "
                         f"{_ALERT_SEVERITY_SQL} AS alert_severity "
@@ -353,6 +355,7 @@ class SqlCatalogRepository(CatalogRepository):
             updated_at=row["updated_at"],
             photo_available=bool(row["photo_available"]),
             photo_rotation_degrees=int(row["photo_rotation_degrees"]),
+            photo_base_rotation_degrees=int(row["photo_base_rotation_degrees"]),
             store_id=row["store_id"],
             business_portal_id=row["business_portal_id"],
             profession_code=row["profession_code"],

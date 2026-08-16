@@ -107,6 +107,7 @@ class CatalogProductResponse(BaseModel):
     recorded_at: str
     photo_available: bool
     photo_rotation_degrees: int
+    photo_base_rotation_degrees: int
     store_id: str | None
     business_portal_id: str | None
     profession_code: str
@@ -140,6 +141,7 @@ class CatalogArrivalResponse(BaseModel):
     updated_at: str
     photo_available: bool
     photo_rotation_degrees: int
+    photo_base_rotation_degrees: int
     store_id: str | None
     business_portal_id: str | None
     profession_code: str
@@ -164,6 +166,7 @@ class CatalogArrivalResponse(BaseModel):
             updated_at=arrival.updated_at,
             photo_available=arrival.photo_available,
             photo_rotation_degrees=arrival.photo_rotation_degrees,
+            photo_base_rotation_degrees=arrival.photo_base_rotation_degrees,
             store_id=arrival.store_id,
             business_portal_id=arrival.business_portal_id,
             profession_code=arrival.profession_code,
