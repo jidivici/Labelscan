@@ -180,6 +180,7 @@ export function ConfirmDialog({
   open,
   title,
   description,
+  error = '',
   confirmLabel = 'Supprimer',
   busy,
   onClose,
@@ -188,6 +189,7 @@ export function ConfirmDialog({
   open: boolean;
   title: string;
   description: string;
+  error?: string;
   confirmLabel?: string;
   busy: boolean;
   onClose: () => void;
@@ -228,6 +230,7 @@ export function ConfirmDialog({
       <div className="access-mark" aria-hidden="true">!</div>
       <h2 id={titleId}>{title}</h2>
       <p id={descriptionId}>{description}</p>
+      {error && <div className="confirm-dialog-message" role="alert">{error}</div>}
       <div className="form-actions">
         <button className="button secondary" type="button" autoFocus disabled={busy} onClick={onClose}>Annuler</button>
         <button className="button danger" type="button" disabled={busy} onClick={() => void onConfirm()}>{busy ? 'Suppression…' : confirmLabel}</button>

@@ -88,6 +88,7 @@ export function AdminPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [pendingDeletion, setPendingDeletion] = useState<{ kind: 'manager'; item: IamUser } | { kind: 'store'; item: StoreItem } | null>(null);
+  const [deletionError, setDeletionError] = useState('');
 
   const stores = useMemo(
     () => overview?.stores.filter((store): store is typeof store & { id: string } => Boolean(store.id)) ?? [],
@@ -110,8 +111,8 @@ export function AdminPage() {
       setOverview(access);
       setManagers(users);
       setError('');
-    } catch (cause) {
-      setError(message(cause));
+    } catch {
+      setDeletionError('Ce manager ne peut pas être supprimé pour le moment. Vérifiez ses accès, puis réessayez.');
     } finally {
       setLoading(false);
     }
@@ -193,8 +194,8 @@ export function AdminPage() {
       setError('');
       await load();
       setPendingDeletion(null);
-    } catch (cause) {
-      setError(message(cause));
+    } catch {
+      setDeletionError('Ce manager ne peut pas être supprimé pour le moment. Vérifiez ses accès, puis réessayez.');
     } finally {
       setSaving(false);
     }
@@ -253,8 +254,8 @@ export function AdminPage() {
       await refreshAccess();
       await load();
       setPendingDeletion(null);
-    } catch (cause) {
-      setError(message(cause));
+    } catch {
+      setDeletionError('Ce magasin ne peut pas être supprimé tant que des managers ou des accès actifs lui sont associés. Retirez d’abord ces affectations.');
     } finally {
       setSaving(false);
     }
@@ -271,12 +272,14 @@ export function AdminPage() {
 
     {canManageManagers &&
       <IdentityPanel title="Nouveau manager" description="Le compte sera actif dès sa création.">
-        <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
+        {portals.length === 0
+          ? <IdentityEmpty title="Créez d’abord un magasin" description="Ajoutez un magasin et activez au moins un métier avant de créer votre premier manager." />
+          : <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
           <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
           <PasswordField value={password} onChange={setPassword} />
           <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={portals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
           <button className="button primary" disabled={saving || !selectedPortalId || password.length === 0}>{saving ? 'Création…' : 'Créer le compte'}</button>
-        </form>
+        </form>}
       </IdentityPanel>
     }
 
@@ -299,7 +302,7 @@ export function AdminPage() {
         : <IdentityPanel title="Managers" description="Un manager est rattaché à un seul magasin et un seul métier.">
           <div className="table-scroll paged-content" key={`managers-${managerPage}`}><table className="identity-admin-table">
             <thead><tr><th>Identifiant</th><th>Magasin et métier</th><th>Statut</th><th>Actions</th></tr></thead>
-            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={portals} saving={saving} onAssignments={saveAssignments} onDelete={(item) => setPendingDeletion({ kind: 'manager', item })} />)}</tbody>
+            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={portals} saving={saving} onAssignments={saveAssignments} onDelete={(item) => { setDeletionError(''); setPendingDeletion({ kind: 'manager', item }); }} />)}</tbody>
           </table></div>
           <CompactPager page={managerPage} total={managers.length} onChange={setManagerPage} label="des managers" />
         </IdentityPanel>}
@@ -313,7 +316,7 @@ export function AdminPage() {
             <td><strong>{store.name}</strong></td>
             <td><ActiveBadge active={store.active} /></td>
             <td><div className="table-actions">
-              <button className={`button ${store.active ? 'text danger-text' : 'secondary'} small`} type="button" disabled={saving} onClick={() => store.active ? setPendingDeletion({ kind: 'store', item: store }) : void toggleStore(store)}>{store.active ? 'Supprimer' : 'Réactiver'}</button>
+              <button className={`button ${store.active ? 'text danger-text' : 'secondary'} small`} type="button" disabled={saving} onClick={() => { if (store.active) { setDeletionError(''); setPendingDeletion({ kind: 'store', item: store }); } else void toggleStore(store); }}>{store.active ? 'Supprimer' : 'Réactiver'}</button>
             </div></td>
           </tr>)}</tbody>
         </table></div>
@@ -342,8 +345,9 @@ export function AdminPage() {
         : pendingDeletion?.kind === 'store'
           ? `Le magasin « ${pendingDeletion.item.name} » sera désactivé. Son historique de traçabilité sera conservé.`
           : ''}
+      error={deletionError}
       busy={saving}
-      onClose={() => setPendingDeletion(null)}
+      onClose={() => { setDeletionError(''); setPendingDeletion(null); }}
       onConfirm={() => pendingDeletion?.kind === 'manager' ? removeManager(pendingDeletion.item) : pendingDeletion ? toggleStore(pendingDeletion.item) : Promise.resolve()}
     />
   </section>;

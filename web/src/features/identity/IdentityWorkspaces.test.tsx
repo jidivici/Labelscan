@@ -248,6 +248,28 @@ describe('IAM bounded actions', () => {
     await waitFor(() => expect(deleteManager).toHaveBeenCalledWith(adminSession, manager.id));
   });
 
+  it('keeps a refused deletion inside the confirmation dialog without a global technical alert', async () => {
+    const user = userEvent.setup();
+    vi.mocked(deleteManager).mockRejectedValueOnce(new Error('technical backend detail'));
+    renderAt('/o/labelscan/administration', adminSession);
+    const section = (await screen.findByRole('heading', { name: 'Managers' })).closest('section')!;
+    await user.click(within(section).getByRole('button', { name: 'Supprimer' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Supprimer ce manager ?' });
+    await user.click(within(dialog).getByRole('button', { name: 'Supprimer' }));
+
+    expect(await within(dialog).findByText(/ne peut pas être supprimé pour le moment/)).toBeInTheDocument();
+    expect(screen.queryByText('technical backend detail')).not.toBeInTheDocument();
+  });
+
+  it('presents the absence of a store as an onboarding state instead of an error', async () => {
+    vi.mocked(getIamOverview).mockResolvedValueOnce({ ...overview, stores: [], business_portals: [] });
+    renderAt('/o/labelscan/administration', adminSession);
+
+    expect(await screen.findByRole('heading', { name: 'Créez d’abord un magasin' })).toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Identifiant')).not.toBeInTheDocument();
+  });
+
   it('shows discreet ten-item pages for managers and stores', async () => {
     const user = userEvent.setup();
     const manyManagers = Array.from({ length: 11 }, (_, index) => iamUser({
