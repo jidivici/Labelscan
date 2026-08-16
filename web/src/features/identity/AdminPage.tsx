@@ -18,6 +18,7 @@ import {
 import {
   ActiveBadge,
   CompactPager,
+  ConfirmDialog,
   ErrorNotice,
   IDENTITY_PAGE_SIZE,
   IdentityEmpty,
@@ -28,6 +29,8 @@ import {
 } from './components';
 import { ManagerPortalSelect } from './ManagerPortalSelect';
 import type { IamOverview, IamPortal, IamUser } from './types';
+
+type StoreItem = IamOverview['stores'][number] & { id: string };
 
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'L’opération a échoué.';
@@ -44,7 +47,7 @@ function ManagerRow({
   portals: IamPortal[];
   saving: boolean;
   onAssignments: (manager: IamUser, portalIds: string[]) => Promise<boolean>;
-  onDelete: (manager: IamUser) => Promise<void>;
+  onDelete: (manager: IamUser) => void;
 }) {
   const activePortalIds = portals.filter((portal) => portal.active).map((portal) => portal.id);
   const assignedActivePortalId = manager.business_portal_ids.find((id) => activePortalIds.includes(id)) ?? '';
@@ -60,7 +63,7 @@ function ManagerRow({
     <td><ManagerPortalSelect portals={portals} selected={selected} onChange={(portalId) => void changeAssignment(portalId)} name={`manager-${manager.id}`} ariaLabel={`Magasin et métier de ${manager.username}`} inTable disabled={saving} /></td>
     <td><ActiveBadge active={manager.active} /></td>
     <td><div className="table-actions">
-      <button className="button text small danger-text" type="button" disabled={saving} onClick={() => void onDelete(manager)}>Supprimer</button>
+      <button className="button text small danger-text" type="button" disabled={saving} onClick={() => onDelete(manager)}>Supprimer</button>
     </div></td>
   </tr>;
 }
@@ -84,6 +87,7 @@ export function AdminPage() {
   const [storePage, setStorePage] = useState(1);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [pendingDeletion, setPendingDeletion] = useState<{ kind: 'manager'; item: IamUser } | { kind: 'store'; item: StoreItem } | null>(null);
 
   const stores = useMemo(
     () => overview?.stores.filter((store): store is typeof store & { id: string } => Boolean(store.id)) ?? [],
@@ -180,7 +184,6 @@ export function AdminPage() {
 
   async function removeManager(manager: IamUser) {
     if (!session) return;
-    if (!window.confirm(`Supprimer définitivement le manager « ${manager.username} » de l’interface ? Son historique restera associé aux étiquettes.`)) return;
     setSaving(true);
     setSuccess('');
     try {
@@ -189,6 +192,7 @@ export function AdminPage() {
       setSuccess(`Le manager ${manager.username} a été supprimé. Cet identifiant peut être réutilisé.`);
       setError('');
       await load();
+      setPendingDeletion(null);
     } catch (cause) {
       setError(message(cause));
     } finally {
@@ -240,7 +244,6 @@ export function AdminPage() {
 
   async function toggleStore(store: (typeof stores)[number]) {
     if (!session) return;
-    if (store.active && !window.confirm(`Supprimer le magasin « ${store.name} » ?`)) return;
     setSaving(true);
     setSuccess('');
     try {
@@ -249,6 +252,7 @@ export function AdminPage() {
       setError('');
       await refreshAccess();
       await load();
+      setPendingDeletion(null);
     } catch (cause) {
       setError(message(cause));
     } finally {
@@ -293,7 +297,7 @@ export function AdminPage() {
         : <IdentityPanel title="Managers" description="Un manager est rattaché à un seul magasin et un seul métier.">
           <div className="table-scroll paged-content" key={`managers-${managerPage}`}><table className="identity-admin-table">
             <thead><tr><th>Identifiant</th><th>Magasin et métier</th><th>Statut</th><th>Actions</th></tr></thead>
-            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={portals} saving={saving} onAssignments={saveAssignments} onDelete={removeManager} />)}</tbody>
+            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={portals} saving={saving} onAssignments={saveAssignments} onDelete={(item) => setPendingDeletion({ kind: 'manager', item })} />)}</tbody>
           </table></div>
           <CompactPager page={managerPage} total={managers.length} onChange={setManagerPage} label="des managers" />
         </IdentityPanel>}
@@ -308,7 +312,7 @@ export function AdminPage() {
             <td><span className="subtle">{store.code}</span></td>
             <td><ActiveBadge active={store.active} /></td>
             <td><div className="table-actions">
-              <button className={`button ${store.active ? 'text danger-text' : 'secondary'} small`} type="button" disabled={saving} onClick={() => void toggleStore(store)}>{store.active ? 'Supprimer' : 'Réactiver'}</button>
+              <button className={`button ${store.active ? 'text danger-text' : 'secondary'} small`} type="button" disabled={saving} onClick={() => store.active ? setPendingDeletion({ kind: 'store', item: store }) : void toggleStore(store)}>{store.active ? 'Supprimer' : 'Réactiver'}</button>
             </div></td>
           </tr>)}</tbody>
         </table></div>
@@ -329,5 +333,17 @@ export function AdminPage() {
         </table></div>}
       </IdentityPanel>
     </>}
+    <ConfirmDialog
+      open={pendingDeletion !== null}
+      title={pendingDeletion?.kind === 'manager' ? 'Supprimer ce manager ?' : 'Supprimer ce magasin ?'}
+      description={pendingDeletion?.kind === 'manager'
+        ? `Le manager « ${pendingDeletion.item.username} » n’aura plus accès au portail. Son historique restera associé aux étiquettes.`
+        : pendingDeletion?.kind === 'store'
+          ? `Le magasin « ${pendingDeletion.item.name} » sera désactivé. Son historique de traçabilité sera conservé.`
+          : ''}
+      busy={saving}
+      onClose={() => setPendingDeletion(null)}
+      onConfirm={() => pendingDeletion?.kind === 'manager' ? removeManager(pendingDeletion.item) : pendingDeletion ? toggleStore(pendingDeletion.item) : Promise.resolve()}
+    />
   </section>;
 }

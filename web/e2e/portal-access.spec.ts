@@ -173,8 +173,10 @@ test('admin adds a store with a chosen profession and can remove a store', async
   expect(backend.requests).toContain('POST /v1/stores');
 
   const storesPanel = page.locator('.data-panel').filter({ has: page.getByRole('heading', { name: 'Magasins', exact: true }) });
-  page.once('dialog', (dialog) => void dialog.accept());
   await storesPanel.getByRole('button', { name: 'Supprimer' }).first().click();
+  const deleteDialog = page.getByRole('alertdialog', { name: 'Supprimer ce magasin ?' });
+  await expect(deleteDialog).toBeVisible();
+  await deleteDialog.getByRole('button', { name: 'Supprimer' }).click();
   await expect.poll(() => backend.requests.some((request) => request.startsWith('PATCH /v1/stores/'))).toBe(true);
 });
 
