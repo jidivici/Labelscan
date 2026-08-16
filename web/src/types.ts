@@ -21,7 +21,7 @@ export const CAPABILITIES = {
 } as const;
 
 export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
-export type Role = 'super_admin' | 'admin' | 'manager' | 'operator';
+export type Role = 'super_admin' | 'admin' | 'manager';
 
 export interface Store {
   organization_id?: string;
@@ -117,8 +117,6 @@ export interface Arrival {
   trade_profile_version?: string;
   captured_by_user_id?: string | null;
   completeness?: number;
-  alert_state?: string | null;
-  alert_severity?: string | null;
   operator_id?: string | null;
   operator_name?: string | null;
 }
@@ -139,9 +137,8 @@ export interface ArrivalDetail {
   business_portal_id?: string | null;
   trade_profile_version?: string;
   captured_by_user_id?: string | null;
+  captured_by_user_name?: string | null;
   completeness?: number;
-  alert_state?: string | null;
-  alert_severity?: string | null;
 }
 
 export interface Page<T> {
@@ -158,8 +155,6 @@ export interface ArrivalFilters {
   supplier: string;
   lotCode: string;
   gtin: string;
-  alertState: string;
-  completenessMin: string;
   dateFrom: string;
   dateTo: string;
   expiryFrom: string;
@@ -174,11 +169,4 @@ export interface ArrivalFilters {
 export interface ArrivalFieldFilter {
   field: string;
   value: string;
-}
-
-export interface ArrivalMetrics {
-  total: number;
-  flagged: number;
-  openAlerts: number;
-  incomplete: number;
 }

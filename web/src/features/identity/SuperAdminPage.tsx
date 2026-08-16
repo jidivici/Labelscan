@@ -4,13 +4,16 @@ import { useAuth } from '../../auth/AuthContext';
 import { createAdmin, deactivateAdmin, listAdmins } from './client';
 import {
   ActiveBadge,
+  CompactPager,
   ErrorNotice,
+  IDENTITY_PAGE_SIZE,
   IdentityEmpty,
   IdentityPanel,
   LoadingState,
-  OneTimeGrant,
+  PasswordField,
+  SuccessNotice,
 } from './components';
-import type { ActivationGrant, IamUser } from './types';
+import type { IamUser } from './types';
 
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'L’opération a échoué.';
@@ -20,11 +23,12 @@ export function SuperAdminPage() {
   const { session } = useAuth();
   const [admins, setAdmins] = useState<IamUser[]>([]);
   const [username, setUsername] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [grant, setGrant] = useState<ActivationGrant | null>(null);
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [adminPage, setAdminPage] = useState(1);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -41,19 +45,27 @@ export function SuperAdminPage() {
 
   useEffect(() => { void load(); }, [load]);
 
+  const adminPageCount = Math.max(1, Math.ceil(admins.length / IDENTITY_PAGE_SIZE));
+  const visibleAdmins = admins.slice((adminPage - 1) * IDENTITY_PAGE_SIZE, adminPage * IDENTITY_PAGE_SIZE);
+
+  useEffect(() => {
+    if (adminPage > adminPageCount) setAdminPage(adminPageCount);
+  }, [adminPage, adminPageCount]);
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session) return;
     setSaving(true);
-    setGrant(null);
+    setSuccess('');
     try {
-      const created = await createAdmin(session, {
+      await createAdmin(session, {
         username,
-        display_name: displayName,
+        password,
       });
-      setGrant(created);
       setUsername('');
-      setDisplayName('');
+      setPassword('');
+      setSuccess('Le compte administrateur est créé et peut se connecter immédiatement.');
+      setError('');
       await load();
     } catch (cause) {
       setError(message(cause));
@@ -77,32 +89,33 @@ export function SuperAdminPage() {
 
   return <section className="page-stack">
     <header className="page-header">
-      <div><span className="eyebrow">Super-administration</span><h1>Administrateurs</h1><p>Cycle de vie des administrateurs limité à votre organisation.</p></div>
+      <div><h1>Administrateurs</h1><p>Gérez les personnes autorisées à administrer l’organisation.</p></div>
       <div className="heading-stat"><strong>{admins.length}</strong><span>administrateur{admins.length > 1 ? 's' : ''}</span></div>
     </header>
     <ErrorNotice message={error} />
-    <OneTimeGrant grant={grant} title="Code d’activation administrateur" onDismiss={() => setGrant(null)} />
+    <SuccessNotice message={success} />
 
-    <IdentityPanel title="Ajouter un administrateur" description="Aucun mot de passe n’est saisi ici; le compte est créé inactif.">
-      <form className="filter-panel" onSubmit={(event) => void submit(event)}>
+    <IdentityPanel title="Nouvel administrateur" description="Le compte sera actif dès sa création.">
+      <form className="identity-form" onSubmit={(event) => void submit(event)}>
         <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-        <label className="field"><span>Nom affiché</span><input required maxLength={120} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
-        <button className="button primary" disabled={saving}>Créer l’invitation</button>
+        <PasswordField value={password} onChange={setPassword} minLength={8} hint="8 caractères minimum, une majuscule et un caractère spécial." />
+        <button className="button primary" disabled={saving || password.length < 8 || !/[A-Z]/.test(password) || !/[^A-Za-z0-9]/.test(password)}>{saving ? 'Création…' : 'Créer le compte'}</button>
       </form>
     </IdentityPanel>
 
     {loading ? <LoadingState label="Chargement des administrateurs…" /> : admins.length === 0
       ? <IdentityEmpty title="Aucun administrateur" description="Ajoutez un administrateur pour cette organisation." />
-      : <IdentityPanel title="Comptes administrateurs" description="La désactivation est réversible en base et n’expose aucun credential.">
-        <div className="table-scroll"><table>
-          <thead><tr><th>Administrateur</th><th>Statut</th><th>Créé le</th><th>Action</th></tr></thead>
-          <tbody>{admins.map((admin) => <tr key={admin.id}>
-            <td><strong>{admin.display_name}</strong><br /><small className="subtle">{admin.username}</small></td>
+      : <IdentityPanel title="Comptes administrateurs" description="Suspendez un compte qui ne doit plus accéder au portail.">
+        <div className="table-scroll paged-content" key={`admins-${adminPage}`}><table>
+          <thead><tr><th>Identifiant</th><th>Statut</th><th>Créé le</th><th>Action</th></tr></thead>
+          <tbody>{visibleAdmins.map((admin) => <tr key={admin.id}>
+            <td><strong>{admin.username}</strong></td>
             <td><ActiveBadge active={admin.active} /></td>
             <td>{new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium' }).format(new Date(admin.created_at))}</td>
-            <td>{admin.active ? <button className="button secondary" disabled={saving} onClick={() => void disable(admin)}>Désactiver</button> : <span className="subtle">Compte désactivé</span>}</td>
+            <td>{admin.active ? <button className="button secondary small" type="button" disabled={saving} onClick={() => void disable(admin)}>Désactiver</button> : <span className="subtle">Aucune action</span>}</td>
           </tr>)}</tbody>
         </table></div>
+        <CompactPager page={adminPage} total={admins.length} onChange={setAdminPage} label="des administrateurs" />
       </IdentityPanel>}
   </section>;
 }

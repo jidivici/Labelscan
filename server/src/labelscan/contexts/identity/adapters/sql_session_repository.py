@@ -7,7 +7,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from labelscan.contexts.identity.adapters.sql_user_repository import _portal_context
+from labelscan.contexts.identity.adapters.sql_user_repository import _identity_context
 from labelscan.contexts.identity.application.sessions import InvalidRefreshToken
 from labelscan.contexts.identity.domain.user import (
     AuthenticatedUser,
@@ -154,8 +154,11 @@ class SqlSessionRepository:
                 )
                 rejected = True
             if not rejected:
-                portal_context = _portal_context(
-                    conn, session["organization_id"], session["user_id"]
+                portal_context = _identity_context(
+                    conn,
+                    session["organization_id"],
+                    session["user_id"],
+                    user_row["role"],
                 )
                 replacement_id = str(uuid.uuid4())
                 conn.execute(

@@ -105,8 +105,8 @@ production n'utilise que les fichiers montés dans `/run/secrets`.
 - Mobile : les deux tokens sont dans SecureStore avec
   `WHEN_UNLOCKED_THIS_DEVICE_ONLY`. Navigateur : access token en mémoire, refresh dans un
   cookie `HttpOnly`, `SameSite=Strict`, `Secure` en production, limité à `/v1/auth`.
-- Chaque session porte `client_type=browser|mobile`. Le navigateur accepte
-  `manager`, `admin` et `super_admin`; le mobile accepte uniquement `operator`.
+- Chaque session porte `client_type=browser|mobile`. Le navigateur accepte les
+  quatre rôles; le mobile accepte uniquement `operator`.
   Login et refresh refusent tout changement de surface.
 - Logout, changement de mot de passe/rôle/affectation, reset de credential,
   désactivation de compte ou de portail révoquent les sessions concernées.
@@ -114,7 +114,7 @@ production n'utilise que les fichiers montés dans `/run/secrets`.
   sont append-only; le tenant est imposé par ownership et RLS PostgreSQL.
 - Aucun GUC applicatif n'active un accès multi-tenant. Les politiques RLS restent
   organisation-scopées même si `labelscan.system_access` est falsifié. La résolution
-  initiale d'un refresh ou code d'activation passe par trois fonctions
+  initiale d'un refresh passe par deux fonctions
   `SECURITY DEFINER` à `search_path` fixe qui ne renvoient que l'UUID d'organisation;
   les lignes et hashes restent ensuite protégés par RLS.
 
@@ -127,9 +127,9 @@ affectations persistés : des claims JWT plus larges ou périmés ne suffisent p
 | Rôle | Surface | Périmètre | Administration autorisée |
 |---|---|---|---|
 | `super_admin` | Navigateur | Tous les magasins et portails de son organisation | Seul rôle pouvant créer et soft-supprimer un admin; possède aussi les droits admin |
-| `admin` | Navigateur | Tous les magasins et portails de son organisation | Invite/désactive les managers, affecte leurs portails, active/désactive les portails magasin; ne manipule jamais le credential d'autrui |
+| `admin` | Navigateur | Tous les magasins et portails de son organisation | Ajoute/désactive les magasins, choisit leurs métiers, crée/désactive les managers et affecte leurs portails |
 | `manager` | Navigateur | Portails affectés et magasins dérivés | Crée, liste, désactive, réaffecte et réinitialise les opérateurs de ses seuls portails |
-| `operator` | Mobile | Un portail actif et son magasin | Aucune administration et aucun accès web |
+| `operator` | Navigateur et mobile | Un portail actif et son magasin | Consultation des arrivages, aucune administration |
 
 `super_admin` reste strictement lié à une organisation : il n'existe pas de rôle
 global traversant les tenants.
@@ -159,16 +159,15 @@ FORBIDDEN` est réservé à une action connue interdite par le rôle/scope ou à
 demande explicite de portail hors affectation. Les filtres ne peuvent jamais
 élargir le périmètre signé.
 
-### 5.3 Activation et credentials
+### 5.3 Credentials
 
-La création d'un admin, manager ou opérateur produit un compte inactif et un
-jeton d'activation opaque communiqué une seule fois. Seul son SHA-256 est stocké;
-le jeton expire après 24 heures et `POST /v1/auth/activate` le consomme lors de
-la définition du mot de passe. Le reset opérateur invalide d'abord le credential
-et les sessions, puis utilise le même mécanisme à usage unique.
+La création d'un admin, manager ou opérateur exige un mot de passe et produit un
+compte immédiatement actif. Le minimum est de huit caractères pour un opérateur
+et douze pour les autres rôles. Le reset opérateur remplace directement le mot
+de passe et révoque les sessions.
 
 Un utilisateur peut changer uniquement son propre mot de passe via
-`POST /v1/me/password`. Un manager peut émettre le reset d'un opérateur dans son
+`POST /v1/me/password`, en fournissant obligatoirement son mot de passe actuel. Un manager peut réinitialiser un opérateur dans son
 périmètre. Un admin n'a aucune route de lecture, déplacement ou réinitialisation
 des credentials; un super-admin gère le cycle de vie des admins, pas leur mot de
 passe. Les réponses API n'exposent jamais un hash ou un ancien secret.

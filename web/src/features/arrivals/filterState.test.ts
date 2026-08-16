@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { arrivalQueryParams } from '../../api';
-import { clearArrivalFilters, parseArrivalFilters, updateArrivalFilter, updatePortalFieldFilter } from './filterState';
+import { activeArrivalFilterCount, clearArrivalFilters, parseArrivalFilters, updateArrivalFilter, updatePortalFieldFilter } from './filterState';
 
 describe('arrival URL filter state', () => {
   it('reads filters from a shareable URL', () => {
@@ -22,17 +22,37 @@ describe('arrival URL filter state', () => {
   });
 
   it('resets pagination when a business filter changes', () => {
-    const next = updateArrivalFilter(new URLSearchParams('q=thon&page=4&view=cards'), 'status', 'flagged');
+    const next = updateArrivalFilter(new URLSearchParams('q=thon&page=4&view=cards'), 'status', 'registered');
 
-    expect(next.get('status')).toBe('flagged');
+    expect(next.get('status')).toBe('registered');
     expect(next.has('page')).toBe(false);
     expect(next.get('view')).toBe('cards');
   });
 
-  it('clears filters while preserving the display preference', () => {
+  it('clears filters while preserving the independent search and display preference', () => {
     const next = clearArrivalFilters(new URLSearchParams('q=thon&store=LYON-02&view=cards'));
 
-    expect(next.toString()).toBe('view=cards');
+    expect(next.toString()).toBe('q=thon');
+  });
+
+  it('preserves spaces while the search field is being edited and trims only the API query', () => {
+    const filters = parseArrivalFilters(new URLSearchParams('q=saumon+atlantique+'));
+    const params = arrivalQueryParams('poissonnerie', filters, { limit: 50, offset: 0 });
+
+    expect(filters.query).toBe('saumon atlantique ');
+    expect(params.get('q')).toBe('saumon atlantique');
+  });
+
+  it('does not count the search as an active filter', () => {
+    const searchOnly = parseArrivalFilters(new URLSearchParams('q=saumon+atlantique'));
+    const searchAndStatus = parseArrivalFilters(new URLSearchParams('q=saumon+atlantique&status=registered'));
+
+    expect(activeArrivalFilterCount(searchOnly)).toBe(0);
+    expect(activeArrivalFilterCount(searchAndStatus)).toBe(1);
+  });
+
+  it('uses cards as the default display', () => {
+    expect(parseArrivalFilters(new URLSearchParams()).view).toBe('cards');
   });
 
   it('keeps repeated field_filter values in the URL and API query', () => {
@@ -52,5 +72,13 @@ describe('arrival URL filter state', () => {
     const next = updatePortalFieldFilter(current, 'animal_species', 'ovin');
 
     expect(next.getAll('field_filter')).toEqual(['cut_name:bavette', 'animal_species:ovin']);
+  });
+
+  it('omits the profession parameter for the admin all-professions view', () => {
+    const filters = parseArrivalFilters(new URLSearchParams('q=saumon'));
+    const params = arrivalQueryParams(undefined, filters, { limit: 50, offset: 0 });
+
+    expect(params.has('profession')).toBe(false);
+    expect(params.get('q')).toBe('saumon');
   });
 });

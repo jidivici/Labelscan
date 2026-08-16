@@ -37,7 +37,7 @@ describe('API access-token refresh', () => {
             access_token: 'access-new',
             refresh_token: 'refresh-new',
             user: {
-              role: 'operator',
+              role: 'manager',
               business_portal_id: 'portal-1',
               trade_code: 'poissonnerie',
             },

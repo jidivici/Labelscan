@@ -14,6 +14,7 @@ interface AuthContextValue {
   session: Session | null;
   restoring: boolean;
   login: (organizationSlug: string, username: string, password: string) => Promise<Session>;
+  refreshAccess: () => Promise<Session | null>;
   logout: () => Promise<void>;
 }
 
@@ -71,7 +72,17 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
     }
   }, []);
 
-  const value = useMemo(() => ({ session, restoring, login, logout }), [login, logout, restoring, session]);
+  const refreshAccess = useCallback(async () => {
+    if (!session) return null;
+    const next = applyAccessOverview(session, await getAccessOverview(session));
+    setSession(next);
+    return next;
+  }, [session]);
+
+  const value = useMemo(
+    () => ({ session, restoring, login, refreshAccess, logout }),
+    [login, logout, refreshAccess, restoring, session],
+  );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

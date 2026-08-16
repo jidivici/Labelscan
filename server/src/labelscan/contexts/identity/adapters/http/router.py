@@ -27,7 +27,6 @@ from labelscan.contexts.identity.application.sessions import (
 from labelscan.contexts.identity.domain.user import (
     ADMIN_ROLE,
     MANAGER_ROLE,
-    OPERATOR_ROLE,
     SUPER_ADMIN_ROLE,
     AuthenticatedUser,
 )
@@ -83,7 +82,9 @@ _SESSIONS_LOCK = threading.Lock()
 _REFRESH_COOKIE = "labelscan_refresh"
 _REFRESH_COOKIE_PATH = "/v1/auth"
 _log = get_logger("http.security")
-_BROWSER_ROLES = frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE})
+_BROWSER_ROLES = frozenset(
+    {SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE}
+)
 
 
 def get_login() -> Login:
@@ -201,7 +202,7 @@ def _current_user(user: AuthenticatedUser, client_type: str) -> CurrentUserRespo
     )
 
 
-def _is_authorized_mobile_operator(user: AuthenticatedUser) -> bool:
+def _is_authorized_mobile_user(user: AuthenticatedUser) -> bool:
     """Fail closed unless canonical claims describe one active portal and store.
 
     SQL-backed identities only receive portal/store claims after the repository has
@@ -212,7 +213,7 @@ def _is_authorized_mobile_operator(user: AuthenticatedUser) -> bool:
     portal_ids = tuple(dict.fromkeys(user.business_portal_ids))
     store_ids = tuple(dict.fromkeys(user.store_ids))
     return bool(
-        user.role == OPERATOR_ROLE
+        user.role == MANAGER_ROLE
         and len(portal_ids) == 1
         and user.business_portal_id == portal_ids[0]
         and user.trade_code
@@ -356,10 +357,10 @@ def mobile_login(
     sessions: SessionService = Depends(get_session_service),
 ) -> MobileLoginResponse:
     user = _authenticated_user(body, "labelscan", login_uc, request)
-    if not _is_authorized_mobile_operator(user):
+    if not _is_authorized_mobile_user(user):
         raise ApiError(
             "FORBIDDEN",
-            "the mobile application requires one active operator portal",
+            "the mobile application requires one active assigned portal",
         )
     return _mobile_response(sessions.create(user, "mobile"))
 
@@ -373,9 +374,9 @@ def mobile_refresh(
         session = sessions.rotate(body.refresh_token, "mobile")
     except InvalidRefreshToken:
         raise ApiError("UNAUTHENTICATED", "invalid or expired refresh token")
-    if not _is_authorized_mobile_operator(session.user):
+    if not _is_authorized_mobile_user(session.user):
         sessions.revoke(session.refresh_token)
-        raise ApiError("FORBIDDEN", "this account has no active mobile operator portal")
+        raise ApiError("FORBIDDEN", "this account has no active mobile portal")
     return _mobile_response(session)
 
 

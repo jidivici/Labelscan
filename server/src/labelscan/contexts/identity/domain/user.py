@@ -12,10 +12,10 @@ from dataclasses import dataclass
 SUPER_ADMIN_ROLE = "super_admin"
 ADMIN_ROLE = "admin"
 MANAGER_ROLE = "manager"
+# ``operator`` was retired. Keep the symbol temporarily for old migration/import
+# compatibility, but it is deliberately not an assignable role anymore.
 OPERATOR_ROLE = "operator"
-USER_ROLES: frozenset[str] = frozenset(
-    {SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE, OPERATOR_ROLE}
-)
+USER_ROLES: frozenset[str] = frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE})
 
 FULL_APPLICATION_SCOPES: frozenset[str] = frozenset(
     {
@@ -33,12 +33,11 @@ FULL_APPLICATION_SCOPES: frozenset[str] = frozenset(
     }
 )
 
-# Operators can scan, review, search, export and consult their store's catalogue.
-# Administration of stores and accounts remains an administrator-only capability,
-# enforced by the API as well as hidden by the web navigation.
-OPERATOR_SCOPES: frozenset[str] = frozenset(
+# Managers can scan, review, search, export and consult only their assigned portals.
+# Administration of stores and accounts remains an administrator-only capability.
+MANAGER_SCOPES: frozenset[str] = frozenset(
     scope for scope in FULL_APPLICATION_SCOPES if scope != "identity:admin"
-)
+) | frozenset({"identity:read"})
 SUPER_ADMIN_SCOPES: frozenset[str] = FULL_APPLICATION_SCOPES | frozenset(
     {
         "identity:admins:manage",
@@ -50,15 +49,11 @@ SUPER_ADMIN_SCOPES: frozenset[str] = FULL_APPLICATION_SCOPES | frozenset(
 ADMIN_SCOPES: frozenset[str] = FULL_APPLICATION_SCOPES | frozenset(
     {"identity:managers:manage", "identity:portals:manage", "identity:read"}
 )
-MANAGER_SCOPES: frozenset[str] = OPERATOR_SCOPES | frozenset(
-    {"identity:operators:manage", "identity:read"}
-)
 
 _ROLE_SCOPES: dict[str, frozenset[str]] = {
     SUPER_ADMIN_ROLE: SUPER_ADMIN_SCOPES,
     ADMIN_ROLE: ADMIN_SCOPES,
     MANAGER_ROLE: MANAGER_SCOPES,
-    OPERATOR_ROLE: OPERATOR_SCOPES,
 }
 
 

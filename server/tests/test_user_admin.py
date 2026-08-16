@@ -269,7 +269,11 @@ def test_admin_can_create_list_and_rename_stores(client):
     created = client.post(
         "/v1/stores",
         headers=_admin_headers(),
-        json={"code": "test-mag-02", "name": "Deuxième magasin"},
+        json={
+            "code": "test-mag-02",
+            "name": "Deuxième magasin",
+            "profession_codes": ["poissonnerie"],
+        },
     )
     assert created.status_code == 201
     assert created.json()["code"] == "TEST-MAG-02"
@@ -296,7 +300,10 @@ def test_portal_store_creation_and_operator_store_label_hide_internal_code(
     created = client.post(
         "/v1/stores",
         headers=_admin_headers(),
-        json={"name": "Magasin du port"},
+        json={
+            "name": "Magasin du port",
+            "profession_codes": ["poissonnerie", "boucherie"],
+        },
     )
     assert created.status_code == 201
     assert created.json()["name"] == "Magasin du port"
@@ -311,11 +318,18 @@ def test_portal_store_creation_and_operator_store_label_hide_internal_code(
                 {"store_id": created.json()["id"]},
             ).scalars()
         )
-    assert portals == {
-        "poissonnerie",
-        "boucherie",
-        "charcuterie_traiteur",
-    }
+    assert portals == {"poissonnerie", "boucherie", "charcuterie_traiteur"}
+    with engine.connect() as conn:
+        active_portals = set(
+            conn.execute(
+                text(
+                    "SELECT profession_code FROM identity.business_portal "
+                    "WHERE store_id = :store_id AND active = true"
+                ),
+                {"store_id": created.json()["id"]},
+            ).scalars()
+        )
+    assert active_portals == {"poissonnerie", "boucherie"}
 
     current = client.get(
         "/v1/stores/current",
@@ -334,7 +348,11 @@ def test_store_with_active_manager_portal_assignment_cannot_be_disabled(client, 
     created = client.post(
         "/v1/stores",
         headers=_admin_headers(),
-        json={"code": "MANAGER-SCOPE-01", "name": "Magasin manager"},
+        json={
+            "code": "MANAGER-SCOPE-01",
+            "name": "Magasin manager",
+            "profession_codes": ["poissonnerie"],
+        },
     )
     assert created.status_code == 201
     manager_id = str(uuid.uuid4())
@@ -343,7 +361,8 @@ def test_store_with_active_manager_portal_assignment_cannot_be_disabled(client, 
             text(
                 "SELECT id FROM identity.business_portal "
                 "WHERE organization_id = :organization_id "
-                "AND store_id = :store_id ORDER BY profession_code LIMIT 1"
+                "AND store_id = :store_id AND active = true "
+                "ORDER BY profession_code LIMIT 1"
             ),
             {
                 "organization_id": created.json()["organization_id"],

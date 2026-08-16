@@ -38,7 +38,7 @@ const FILTER_VALUES: Record<string, string> = {
 };
 
 describe('poissonneriePortal', () => {
-  it('exposes dashboard labels and métier-specific KPIs', () => {
+  it('exposes the arrivals page labels', () => {
     expect(poissonneriePortal.labels).toMatchObject({
       pageTitle: 'Tableau de bord poissonnerie',
       emptyTitle: 'Aucun arrivage de produits de la mer',
@@ -47,13 +47,6 @@ describe('poissonneriePortal', () => {
     });
     expect(poissonneriePortal.labels.pageDescription).toContain('traçabilité');
     expect(poissonneriePortal.labels.emptyDescription).toContain('filtres actifs');
-    expect(poissonneriePortal.kpis.map(({ metric }) => metric)).toEqual([
-      'total',
-      'flagged',
-      'openAlerts',
-      'incomplete',
-    ]);
-    expect(poissonneriePortal.kpis.every(({ description }) => description.length > 20)).toBe(true);
   });
 
   it('keeps the 17 canonical métier fields unique and complete', () => {
@@ -83,6 +76,8 @@ describe('poissonneriePortal', () => {
     expect(screen.getByText('Informations historiques')).toBeInTheDocument();
     expect(screen.getByText('Cabillaud historique')).toBeInTheDocument();
     expect(screen.getByText('Criée des anciens lots')).toBeInTheDocument();
+    expect(screen.queryByText('Non renseigné')).not.toBeInTheDocument();
+    expect(screen.queryByText('Producteur')).not.toBeInTheDocument();
     expect(
       poissonneriePortal.detailSections
         .flatMap(({ fields }) => fields.map(({ key }) => key))
@@ -115,8 +110,6 @@ describe('poissonneriePortal', () => {
       { key: 'scientific-name', label: 'Nom scientifique', source: 'scientific_name' },
       { key: 'fao-area', label: 'Zone FAO', source: 'fao_area_code' },
       { key: 'use-by', label: 'À consommer avant', source: 'use_by', format: 'date' },
-      { key: 'completeness', label: 'Complétude', source: 'completeness', format: 'percentage' },
-      { key: 'alert-state', label: 'État de l’alerte', source: 'alert_state', format: 'alert' },
     ]);
   });
 });

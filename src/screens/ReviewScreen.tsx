@@ -67,6 +67,7 @@ import {
 import { filledCountFromValues } from '../services/fieldCompleteness';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
+import { RotatedPhoto } from '../components/RotatedPhoto';
 import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
@@ -693,8 +694,8 @@ export function ReviewScreen() {
   return (
     <View style={styles.root}>
       {/* Fixed photo header — SAME system as ArticleDetail: the photo stays put while the
-          content sheet scrolls over it. The captured file is already rotated upright
-          (baked client-side at capture), so a plain cover Image reads landscape. Tap the
+          content sheet scrolls over it. The stored OCR source keeps its capture orientation;
+          RotatedPhoto applies the single left rotation used by every final display. Tap the
           photo to open it full-screen; the return control is the bottom action bar. */}
       <View style={styles.photoContainer}>
         {photoUri ? (
@@ -704,7 +705,11 @@ export function ReviewScreen() {
             accessibilityRole="button"
             accessibilityLabel="Voir la photo en plein écran"
           >
-            <Image source={{ uri: photoUri }} resizeMode="cover" style={StyleSheet.absoluteFillObject} />
+            <RotatedPhoto
+              source={{ uri: photoUri }}
+              resizeMode="cover"
+              style={StyleSheet.absoluteFillObject}
+            />
           </Pressable>
         ) : (
           <View style={[styles.photoCard, styles.photoPlaceholder]}>

@@ -6,7 +6,7 @@ export interface IamUser {
   id: string;
   username: string;
   display_name: string;
-  role: Role;
+  role: Role | 'operator';
   active: boolean;
   organization_id: string | null;
   store_id: string | null;
@@ -36,15 +36,9 @@ export interface IamOverview {
   business_portals: IamPortal[];
 }
 
-export interface ActivationGrant {
-  user: IamUser;
-  activation_token: string;
-  expires_at: string;
-}
-
 export interface IdentityDraft {
   username: string;
-  display_name: string;
+  password: string;
 }
 
 export interface ManagerDraft extends IdentityDraft {

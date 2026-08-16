@@ -1,3 +1,8 @@
+import { Link, useParams } from 'wouter';
+
+import { useAuth } from '../../auth/AuthContext';
+import { hasCapability } from '../../auth/capabilities';
+import { CAPABILITIES } from '../../types';
 import { AdminPage } from '../identity/AdminPage';
 import { OperatorsPage } from '../identity/OperatorsPage';
 import { SuperAdminPage } from '../identity/SuperAdminPage';
@@ -15,7 +20,12 @@ export function SuperAdminWorkspacePage() {
 }
 
 export function AccessDeniedPage() {
-  return <main className="centered-page"><div className="access-mark">!</div><h1>Accès non autorisé</h1><p>Votre compte ne dispose pas des droits nécessaires pour consulter cet espace.</p></main>;
+  const { session } = useAuth();
+  const { organizationSlug = 'labelscan' } = useParams();
+  const administrationPath = hasCapability(session, CAPABILITIES.ADMIN_WORKSPACE_VIEW)
+    ? `/o/${organizationSlug}/administration`
+    : `/o/${organizationSlug}`;
+  return <section className="centered-page"><div className="access-mark">!</div><h1>Accès non autorisé</h1><p>Cette page ne correspond pas aux droits de ce compte.</p><Link className="button primary" href={administrationPath}>Retour à mon espace</Link></section>;
 }
 
 export function NotFoundPage() {

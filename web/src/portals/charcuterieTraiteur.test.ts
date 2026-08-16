@@ -81,8 +81,6 @@ describe('charcuterieTraiteurPortal', () => {
       supplier: 'Fournisseur commun',
       lotCode: '',
       gtin: '',
-      alertState: '',
-      completenessMin: '',
       dateFrom: '',
       dateTo: '',
       expiryFrom: '2026-08-01',
@@ -105,17 +103,10 @@ describe('charcuterieTraiteurPortal', () => {
     );
   });
 
-  it('provides operational expiration, alert and completeness indicators', () => {
-    expect(charcuterieTraiteurPortal.kpis).toEqual(expect.arrayContaining([
-      expect.objectContaining({ key: 'expiry', metric: 'flagged', label: expect.stringMatching(/DLC/) }),
-      expect.objectContaining({ metric: 'openAlerts', tone: 'danger' }),
-      expect.objectContaining({ metric: 'incomplete', tone: 'warning' }),
-    ]));
+  it('provides operational expiration columns', () => {
     expect(charcuterieTraiteurPortal.secondaryColumns.map((column) => column.source)).toEqual([
       'packaging_date',
       'use_by',
-      'completeness',
-      'alert_state',
     ]);
   });
 

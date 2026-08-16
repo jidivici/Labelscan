@@ -1,4 +1,4 @@
-import type { PortalDetailSection, PortalKpiDefinition } from './types';
+import type { PortalDetailSection } from './types';
 
 export const COMMON_IDENTIFICATION_SECTION: PortalDetailSection = {
   id: 'identification',
@@ -33,10 +33,3 @@ export const COMMON_CONSERVATION_SECTION: PortalDetailSection = {
     { key: 'price', label: 'Prix' },
   ],
 };
-
-export const STANDARD_KPIS: readonly PortalKpiDefinition[] = [
-  { key: 'total', label: 'Arrivages', metric: 'total', description: 'Dans le périmètre filtré', tone: 'neutral' },
-  { key: 'flagged', label: 'Signalés', metric: 'flagged', description: 'À traiter en priorité', tone: 'warning' },
-  { key: 'alerts', label: 'Alertes ouvertes', metric: 'openAlerts', description: 'Non acquittées', tone: 'danger' },
-  { key: 'incomplete', label: 'Incomplets', metric: 'incomplete', description: 'Complétude inférieure à 100 %', tone: 'warning' },
-];

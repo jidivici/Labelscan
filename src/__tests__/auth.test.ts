@@ -12,7 +12,7 @@ jest.mock('../services/authStorage', () => ({
 }));
 
 import { apiRequest } from '../services/api';
-import { activateOperator, login, restoreAuthentication } from '../services/auth';
+import { login, restoreAuthentication } from '../services/auth';
 import {
   clearSessionTokens,
   clearUsername,
@@ -30,16 +30,16 @@ const clearUsernameMock = jest.mocked(clearUsername);
 const getRefreshTokenMock = jest.mocked(getRefreshToken);
 const setOperatorContextMock = jest.mocked(setOperatorContext);
 
-function operatorResponse(overrides: Record<string, unknown> = {}) {
+function managerResponse(overrides: Record<string, unknown> = {}) {
   return {
-    access_token: 'operator-token',
-    refresh_token: 'operator-refresh',
+    access_token: 'manager-token',
+    refresh_token: 'manager-refresh',
     token_type: 'bearer',
     expires_in: 3600,
     refresh_expires_in: 604800,
     user: {
-      role: 'operator',
-      username: 'operator',
+      role: 'manager',
+      username: 'manager',
       business_portal_id: 'portal-poissonnerie',
       trade_code: 'poissonnerie',
     },
@@ -47,28 +47,28 @@ function operatorResponse(overrides: Record<string, unknown> = {}) {
   };
 }
 
-describe('mobile operator authentication', () => {
+describe('mobile manager authentication', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     getRefreshTokenMock.mockResolvedValue('stored-refresh');
   });
 
-  it('uses the operator-only mobile endpoint and persists the session', async () => {
-    requestMock.mockResolvedValue(operatorResponse());
+  it('uses the manager-only mobile endpoint and persists the session', async () => {
+    requestMock.mockResolvedValue(managerResponse());
 
-    await expect(login('operator', 'secret')).resolves.toEqual({
-      username: 'operator',
+    await expect(login('manager', 'secret')).resolves.toEqual({
+      username: 'manager',
       businessPortalId: 'portal-poissonnerie',
       tradeCode: 'poissonnerie',
     });
 
     expect(requestMock).toHaveBeenCalledWith('/v1/mobile/auth/login', {
       method: 'POST',
-      body: { username: 'operator', password: 'secret' },
+      body: { username: 'manager', password: 'secret' },
       skipAuth: true,
     });
-    expect(setTokensMock).toHaveBeenCalledWith('operator-token', 'operator-refresh');
-    expect(setUsernameMock).toHaveBeenCalledWith('operator');
+    expect(setTokensMock).toHaveBeenCalledWith('manager-token', 'manager-refresh');
+    expect(setUsernameMock).toHaveBeenCalledWith('manager');
     expect(setOperatorContextMock).toHaveBeenCalledWith({
       businessPortalId: 'portal-poissonnerie',
       tradeCode: 'poissonnerie',
@@ -91,18 +91,18 @@ describe('mobile operator authentication', () => {
     });
 
     await expect(login('admin', 'secret')).rejects.toThrow(
-      'MOBILE_OPERATOR_ONLY',
+      'MOBILE_ACCESS_DENIED',
     );
     expect(setTokensMock).not.toHaveBeenCalled();
     expect(setUsernameMock).not.toHaveBeenCalled();
   });
 
-  it('rejects an operator session without a server-assigned supported portal context', async () => {
+  it('rejects a manager session without a server-assigned supported portal context', async () => {
     requestMock.mockResolvedValue(
-      operatorResponse({
+      managerResponse({
         user: {
-          role: 'operator',
-          username: 'operator',
+          role: 'manager',
+          username: 'manager',
           business_portal_id: null,
           trade_code: null,
         },
@@ -115,45 +115,12 @@ describe('mobile operator authentication', () => {
   });
 
   it('rolls back every credential when SecureStore persists only part of a session', async () => {
-    requestMock.mockResolvedValue(operatorResponse());
+    requestMock.mockResolvedValue(managerResponse());
     setOperatorContextMock.mockRejectedValueOnce(new Error('keystore failure'));
 
-    await expect(login('operator', 'secret')).rejects.toThrow('keystore failure');
+    await expect(login('manager', 'secret')).rejects.toThrow('keystore failure');
     expect(clearSessionTokensMock).toHaveBeenCalled();
     expect(clearUsernameMock).toHaveBeenCalled();
-  });
-
-  it('activates a one-use token then logs in to receive the authoritative context', async () => {
-    requestMock
-      .mockResolvedValueOnce({ username: 'new-operator', role: 'operator', active: true })
-      .mockResolvedValueOnce(
-        operatorResponse({
-          user: {
-            role: 'operator',
-            username: 'new-operator',
-            business_portal_id: 'portal-boucherie',
-            trade_code: 'boucherie',
-          },
-        }),
-      );
-
-    await expect(
-      activateOperator('  one-use-token  ', 'a-secure-password'),
-    ).resolves.toEqual({
-      username: 'new-operator',
-      businessPortalId: 'portal-boucherie',
-      tradeCode: 'boucherie',
-    });
-    expect(requestMock).toHaveBeenNthCalledWith(1, '/v1/mobile/auth/activate', {
-      method: 'POST',
-      body: { token: 'one-use-token', new_password: 'a-secure-password' },
-      skipAuth: true,
-    });
-    expect(requestMock).toHaveBeenNthCalledWith(2, '/v1/mobile/auth/login', {
-      method: 'POST',
-      body: { username: 'new-operator', password: 'a-secure-password' },
-      skipAuth: true,
-    });
   });
 
   it('restores a cold-start session by rotating the persisted refresh token', async () => {
@@ -164,15 +131,15 @@ describe('mobile operator authentication', () => {
       expires_in: 900,
       refresh_expires_in: 604800,
       user: {
-        role: 'operator',
-        username: 'operator',
+        role: 'manager',
+          username: 'manager',
         business_portal_id: 'portal-charcuterie',
         trade_code: 'charcuterie_traiteur',
       },
     });
 
     await expect(restoreAuthentication()).resolves.toEqual({
-      username: 'operator',
+      username: 'manager',
       businessPortalId: 'portal-charcuterie',
       tradeCode: 'charcuterie_traiteur',
     });

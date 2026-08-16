@@ -12,7 +12,7 @@ services:
     image: postgres:16
     container_name: labelscan-db
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-labelscan_test}
+      POSTGRES_DB: labelscan_demo
       POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     ports:
@@ -32,13 +32,31 @@ services:
       dockerfile: server/Dockerfile
     env_file: ./server/.env
     environment:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/labelscan_demo
     command: ["migrate"]
     healthcheck:
       disable: true
     depends_on:
       db:
         condition: service_healthy
+    restart: "no"
+
+  demo:
+    <<: *app-security
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    env_file: ./server/.env
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/labelscan_demo
+      LABELSCAN_OBJECT_STORE: "filesystem"
+      LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
+    volumes:
+      - labelscan-raw-store:/app/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["demo"]
     restart: "no"
 
   server:
@@ -53,13 +71,13 @@ services:
       # PostgreSQL reste volontairement limité à localhost ci-dessus.
       - "8000:8000"
     environment:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/labelscan_demo
       LABELSCAN_OBJECT_STORE: "filesystem"
       LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
     volumes:
       - labelscan-raw-store:/app/data/raw
     depends_on:
-      migrate:
+      demo:
         condition: service_completed_successfully
     command: ["api"]
     restart: unless-stopped
@@ -76,13 +94,13 @@ services:
       replicas: 2
     env_file: ./server/.env
     environment:
-      DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/labelscan_demo
       LABELSCAN_OBJECT_STORE: "filesystem"
       LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
     volumes:
       - labelscan-raw-store:/app/data/raw
     depends_on:
-      migrate:
+      demo:
         condition: service_completed_successfully
     command: ["worker"]
     restart: unless-stopped

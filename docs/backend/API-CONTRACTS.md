@@ -16,7 +16,7 @@ storage and synchronization invariants.
 - Default LLM: `claude-haiku-4-5` (not `claude-opus-4-8`); GS1 handles critical exact fields.
 - `extracted_field.source` ∈ `{llm, gs1, human}` (not `{llm, human}`); `field_name` includes `gtin`.
 - Implemented identity endpoints include `/o/{organization_slug}/auth/login`,
-  `/mobile/auth/login`, `/auth/activate`, `/me`, `/professions`, `/admins`,
+  `/mobile/auth/login`, `/me`, `/professions`, `/admins`,
   `/managers`, `/portals/{portal_id}/operators`, `/stores`, and
   `/stores/{store_id}/portals`. Generic `/users` reads and writes are disabled in favor of
   the role-specific administration routes.
@@ -78,14 +78,14 @@ authoritative even if a JWT contains a broader, stale, or forged scope.
 | Role | Client surface | Visibility | Identity administration |
 |---|---|---|---|
 | `super_admin` | Browser | Entire organization | Create/list/soft-delete admins; all admin powers |
-| `admin` | Browser | Every store and portal in its organization | Invite/list/disable managers; assign manager portals; soft-activate store portals; never handles another user's password |
+| `admin` | Browser | Every store and portal in its organization | Create/disable stores and choose their professions; create/list/disable managers; assign manager portals |
 | `manager` | Browser | Assigned active portals and their derived stores | Create/list/disable/reassign operators only inside assigned portals; issue operator credential-reset grants |
-| `operator` | Mobile only | Its single active portal and derived store | No web or identity-administration access |
+| `operator` | Browser and mobile | Its single active portal and derived store | Reads arrivals; no identity-administration access |
 
 `super_admin` is organization-scoped, not platform-global. Only it may add or
 soft-delete an `admin`. An `admin` cannot set, read, move, or reset credentials.
 
-### 0.3 Identity endpoints and activation
+### 0.3 Identity endpoints and credentials
 
 All user responses omit passwords and password hashes. Every generic
 `/v1/users` is not registered; callers use these bounded routes
@@ -94,32 +94,27 @@ instead:
 | Method | Path | Contract |
 |---|---|---|
 | `GET` | `/v1/me` | Current user, canonical capabilities/scopes, authorized stores, and detailed authorized portals (`id`, store id/code/name, profession code/name, portal name, `active`) |
-| `POST` | `/v1/me/password` | Authenticated user changes only their own password; all their sessions are revoked |
-| `GET`, `POST` | `/v1/admins` | Super-admin lists or creates inactive admins |
+| `POST` | `/v1/me/password` | Authenticated user supplies the current password and changes only their own password; all their sessions are revoked |
+| `GET`, `POST` | `/v1/admins` | Super-admin lists or creates active admins with a direct password |
 | `DELETE` | `/v1/admins/{user_id}` | Super-admin-only reversible soft-deactivation |
-| `GET`, `POST` | `/v1/managers` | Admin/super-admin lists or invites managers |
+| `GET`, `POST` | `/v1/managers` | Admin/super-admin lists or creates active managers with a direct password |
 | `PATCH` | `/v1/managers/{user_id}` | Admin/super-admin toggles manager activity |
+| `DELETE` | `/v1/managers/{user_id}` | Removes the manager from active administration and revokes access; the historical identity remains available to labels and the username becomes reusable |
 | `PATCH` | `/v1/managers/{user_id}/portals` | Replaces active manager assignments without deleting history |
-| `GET`, `POST` | `/v1/portals/{portal_id}/operators` | Manager lists or invites operators in an assigned portal |
+| `GET`, `POST` | `/v1/portals/{portal_id}/operators` | Manager lists or creates active operators in an assigned portal |
 | `PATCH` | `/v1/portals/{portal_id}/operators/{user_id}` | Manager reassigns or toggles an operator within its portal perimeter |
-| `POST` | `/v1/operators/{user_id}/credential-reset` | Manager invalidates the operator credential, revokes sessions, and receives a one-time reset grant |
+| `POST` | `/v1/operators/{user_id}/credential-reset` | Manager sets a new operator password and revokes the operator sessions |
+| `POST` | `/v1/stores` | Admin/super-admin creates a store and chooses at least one profession |
+| `PATCH` | `/v1/stores/{store_code}` | Admin/super-admin renames, disables, or reactivates a store |
 | `GET` | `/v1/stores/{store_id}/portals` | Admin/super-admin sees all organization portals; manager/operator sees only its active assignments; invisible stores return `404` |
 | `PUT` | `/v1/stores/{store_id}/portals` | Admin/super-admin idempotently sets `{portal_id, active}`; no physical delete; deactivation revokes affected sessions |
 
-Creating a store provisions one active portal for each of the three canonical
-professions in the same transaction. Administrators can then deactivate the
-portals that the store does not operate through the endpoint above.
-
-Creating an admin, manager, or operator creates an inactive account and returns
-an opaque activation token exactly once. Only its SHA-256 digest is stored; the
-grant expires after 24 hours. `POST /v1/auth/activate` consumes the token and
-sets the new password. Credential reset follows the same one-time flow and
-never discloses an existing credential. Role, assignment, password, account, or
-portal changes revoke affected refresh sessions.
-
-The mobile client uses `POST /v1/mobile/auth/activate`, which accepts only an
-operator grant. A manager or administrator token is rejected before it is
-consumed, so it remains usable on the browser activation flow.
+Creating a store provisions the three canonical portal ownership rows in the
+same transaction and activates only the professions selected by the admin.
+Creating an admin, manager, or operator requires a direct password and creates
+an immediately active account. Operator passwords require eight characters;
+the other roles require twelve. Role, assignment, password, account, or portal
+changes revoke affected refresh sessions.
 
 Account, assignment, store, and portal-state transitions are audited in the
 same database transaction. Assignment and account deletion are soft state
@@ -137,7 +132,7 @@ Browser refresh tokens are opaque rotating cookies; mobile refresh tokens are
 returned to the client for secure device storage. Each server session records
 `client_type = browser|mobile`. Login and refresh both reject crossing the
 surface boundary; a browser refresh cannot be replayed on `/mobile/auth/refresh`
-and an operator cannot acquire a browser session.
+while operator accounts can also acquire a browser session to consult arrivals.
 
 ---
 

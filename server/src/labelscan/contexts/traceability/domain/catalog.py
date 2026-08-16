@@ -53,6 +53,7 @@ class CatalogArrival:
     profession_code: str = "poissonnerie"
     trade_profile_version: str = "1"
     captured_by_user_id: str | None = None
+    captured_by_user_name: str | None = None
     completeness: int = 0
     alert_state: str | None = None
     alert_severity: str | None = None

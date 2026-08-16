@@ -116,8 +116,11 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
         "properties": {
             "fields": {
                 "type": "array",
-                "minItems": len(names),
-                "maxItems": len(names),
+                # Claude structured outputs only accepts array minItems values of
+                # 0 or 1.  The prompt requires one item per field and the adapter
+                # validates the exact, duplicate-free field set after decoding, so
+                # cardinality remains enforced without sending unsupported schema
+                # constraints to the provider.
                 "items": {
                     "type": "object",
                     "additionalProperties": False,

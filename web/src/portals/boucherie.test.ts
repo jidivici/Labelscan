@@ -92,17 +92,9 @@ describe('boucherie portal', () => {
     expect(pageParams.has('page')).toBe(false);
   });
 
-  it('uses professional dashboard, column, and empty-state language', () => {
-    expect(boucheriePortal.kpis.map((kpi) => kpi.label)).toEqual([
-      'Lots de viande',
-      'Lots à contrôler',
-      'Alertes sanitaires',
-      'Traçabilités incomplètes',
-    ]);
+  it('uses professional column and empty-state language', () => {
     expect(boucheriePortal.secondaryColumns.map((column) => [column.source, column.label])).toEqual([
       ['use_by', 'Date limite de consommation'],
-      ['completeness', 'Complétude traçabilité'],
-      ['alert_state', 'Alerte sanitaire'],
     ]);
     expect(boucheriePortal.labels).toMatchObject({
       pageTitle: 'Réceptions boucherie',

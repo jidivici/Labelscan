@@ -61,38 +61,6 @@ export const poissonneriePortal = {
     { key: 'scientific-name', label: 'Nom scientifique', source: 'scientific_name' },
     { key: 'fao-area', label: 'Zone FAO', source: 'fao_area_code' },
     { key: 'use-by', label: 'À consommer avant', source: 'use_by', format: 'date' },
-    { key: 'completeness', label: 'Complétude', source: 'completeness', format: 'percentage' },
-    { key: 'alert-state', label: 'État de l’alerte', source: 'alert_state', format: 'alert' },
-  ],
-  kpis: [
-    {
-      key: 'total',
-      label: 'Arrivages de marée',
-      metric: 'total',
-      description: 'Produits de la mer dans le périmètre filtré',
-      tone: 'neutral',
-    },
-    {
-      key: 'flagged',
-      label: 'À contrôler',
-      metric: 'flagged',
-      description: 'Arrivages signalés nécessitant une vérification',
-      tone: 'warning',
-    },
-    {
-      key: 'alerts',
-      label: 'Alertes ouvertes',
-      metric: 'openAlerts',
-      description: 'Alertes de traçabilité qui restent à traiter',
-      tone: 'danger',
-    },
-    {
-      key: 'incomplete',
-      label: 'Traçabilité incomplète',
-      metric: 'incomplete',
-      description: 'Arrivages dont au moins un des 17 champs métier manque',
-      tone: 'warning',
-    },
   ],
   labels: {
     pageTitle: 'Tableau de bord poissonnerie',

@@ -299,6 +299,7 @@ class SqlCatalogRepository(CatalogRepository):
                         "projection.trade_code_snapshot AS profession_code, "
                         "projection.trade_profile_version, "
                         "projection.captured_by_user_id::text AS captured_by_user_id, "
+                        "captured_by.display_name AS captured_by_user_name, "
                         "batch.status, projection.fields, "
                         "COALESCE(("
                         " SELECT jsonb_object_agg(field.field_name, jsonb_build_object("
@@ -321,6 +322,9 @@ class SqlCatalogRepository(CatalogRepository):
                         "FROM traceability.arrival_projection AS projection "
                         "JOIN traceability.batch AS batch "
                         "ON batch.id = projection.batch_id "
+                        "LEFT JOIN identity.app_user AS captured_by "
+                        "ON captured_by.id = projection.captured_by_user_id "
+                        "AND captured_by.organization_id = projection.organization_id "
                         f"WHERE {' AND '.join(conditions)}"
                     ),
                     params,
@@ -347,6 +351,7 @@ class SqlCatalogRepository(CatalogRepository):
             profession_code=row["profession_code"],
             trade_profile_version=row["trade_profile_version"],
             captured_by_user_id=row["captured_by_user_id"],
+            captured_by_user_name=row["captured_by_user_name"],
             completeness=int(row["completeness"]),
             alert_state=row["alert_state"],
             alert_severity=row["alert_severity"],

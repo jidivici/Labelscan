@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { arrivalImagePath, authorizedFetch } from '../../api';
 import { useAuth } from '../../auth/AuthContext';
+import { BrandMark } from '../../BrandMark';
 
 export function ArrivalImage({ batchId, available, alt = '' }: { batchId: string; available: boolean; alt?: string }) {
   const { session } = useAuth();
@@ -25,6 +26,6 @@ export function ArrivalImage({ batchId, available, alt = '' }: { batchId: string
   }, [available, batchId, session]);
 
   return url
-    ? <img className="arrival-image" src={url} alt={alt} />
-    : <div className="image-placeholder" aria-label="Photo indisponible"><span>LS</span></div>;
+    ? <span className="arrival-image"><img src={url} alt={alt} /></span>
+    : <div className="image-placeholder" aria-label="Photo indisponible"><BrandMark /></div>;
 }

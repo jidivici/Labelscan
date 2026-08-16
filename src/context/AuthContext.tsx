@@ -16,7 +16,6 @@ import React, {
 } from 'react';
 
 import {
-  activateOperator,
   login as apiLogin,
   logout as apiLogout,
   restoreAuthentication,
@@ -42,8 +41,6 @@ interface AuthValue {
   businessProfile: BusinessProfile;
   /** Throws on failure (e.g. bad credentials) — caller renders the error. */
   signIn: (username: string, password: string) => Promise<void>;
-  /** Consume a one-use token, set the first password and sign the operator in. */
-  activate: (token: string, newPassword: string) => Promise<void>;
   signOut: () => Promise<void>;
 }
 
@@ -110,13 +107,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setStatus('signedIn');
   }, [applyOperatorContext]);
 
-  const activate = useCallback(async (token: string, newPassword: string) => {
-    const session = await activateOperator(token, newPassword);
-    setUser(session.username);
-    applyOperatorContext(session);
-    setStatus('signedIn');
-  }, [applyOperatorContext]);
-
   const signOut = useCallback(async () => {
     try {
       await apiLogout();
@@ -139,7 +129,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         tradeCode,
         businessProfile,
         signIn,
-        activate,
         signOut,
       }}
     >

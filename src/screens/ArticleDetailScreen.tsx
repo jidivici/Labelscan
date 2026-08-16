@@ -13,7 +13,7 @@
  * edit happened lives only in the header meta, not as per-field badges.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -23,6 +23,10 @@ import {
   ActivityIndicator,
   TextInput,
   Image,
+  Alert,
+  Animated,
+  PanResponder,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -50,6 +54,7 @@ import {
 import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
 import { queryClient } from '../services/queryClient';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
+import { RotatedPhoto } from '../components/RotatedPhoto';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import { useAuth } from '../context/AuthContext';
@@ -57,6 +62,10 @@ import { useAuth } from '../context/AuthContext';
 type DetailRoute = RouteProp<ArticlesStackParamList, 'ArticleDetail'>;
 type DetailNav = StackNavigationProp<ArticlesStackParamList, 'ArticleDetail'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+const DISMISS_DISTANCE = 112;
+const DISMISS_VELOCITY = 0.8;
+const DRAG_LIMIT = 280;
 
 // A quiet leading icon per field — gives each row a modern, anchored look (and fills the
 // otherwise-bare list). Purely decorative; unknown fields fall back to a generic tag.
@@ -90,6 +99,8 @@ const FIELD_ICON: Record<string, IconName> = {
   product_family: 'food-outline',
   manufacturer_name: 'factory',
   ingredients: 'format-list-bulleted',
+  description: 'text-long',
+  product_description: 'text-long',
   additives: 'flask-outline',
   preparation_date: 'calendar-edit',
   conditioning_type: 'package-variant-closed',
@@ -97,6 +108,17 @@ const FIELD_ICON: Record<string, IconName> = {
   use_instructions: 'information-outline',
   reheating_instructions: 'microwave',
 };
+
+const LONG_FORM_FIELDS = new Set([
+  'description',
+  'product_description',
+  'ingredients',
+  'additives',
+  'allergens',
+  'use_instructions',
+  'reheating_instructions',
+  'raw_warnings',
+]);
 
 const FIELD_GROUP_ICON: Record<string, IconName> = {
   identity: 'food-variant',
@@ -250,10 +272,16 @@ function FieldCard({
               onChangeText={emit}
               placeholder="Saisir une valeur"
               placeholderTextColor={colors.onSurfaceVariant}
-              style={[typography.bodyLarge, styles.editInput, styles.editInputText]}
+              style={[
+                typography.bodyLarge,
+                styles.editInput,
+                styles.editInputText,
+                LONG_FORM_FIELDS.has(name) && styles.editInputMultiline,
+              ]}
               autoCapitalize="words"
               autoCorrect={false}
-              returnKeyType="done"
+              multiline={LONG_FORM_FIELDS.has(name)}
+              returnKeyType={LONG_FORM_FIELDS.has(name) ? 'default' : 'done'}
               accessibilityLabel={`Champ ${fieldLabelFr(name)}`}
             />
           )
@@ -275,8 +303,33 @@ function FieldCard({
   );
 }
 
+function SummaryFact({
+  icon,
+  label,
+  value,
+}: {
+  icon: IconName;
+  label: string;
+  value: string;
+}) {
+  return (
+    <View style={styles.factItem}>
+      <View style={styles.factIcon}>
+        <MaterialCommunityIcons name={icon} size={17} color={colors.primary} />
+      </View>
+      <View style={styles.factText}>
+        <Text style={[typography.labelSmall, styles.factLabel]}>{label}</Text>
+        <Text selectable style={[typography.labelLarge, styles.factValue]} numberOfLines={2}>
+          {value}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export function ArticleDetailScreen() {
   const insets = useSafeAreaInsets();
+  const { height: windowHeight } = useWindowDimensions();
   const navigation = useNavigation<DetailNav>();
   const route = useRoute<DetailRoute>();
   const { articleId } = route.params;
@@ -289,20 +342,41 @@ export function ArticleDetailScreen() {
   const [saving, setSaving] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [loadError, setLoadError] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const savedFeedbackTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollOffsetY = useRef(0);
+  const dismissTranslateY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let active = true;
     (async () => {
-      const found = await getArticleById(articleId);
-      if (active) {
-        setArticle(found);
-        setLoading(false);
+      setLoading(true);
+      setLoadError(false);
+      try {
+        const found = await getArticleById(articleId);
+        if (active) setArticle(found);
+      } catch {
+        if (active) {
+          setArticle(null);
+          setLoadError(true);
+        }
+      } finally {
+        if (active) setLoading(false);
       }
     })();
     return () => {
       active = false;
     };
-  }, [articleId]);
+  }, [articleId, reloadNonce]);
+
+  useEffect(
+    () => () => {
+      if (savedFeedbackTimeout.current) clearTimeout(savedFeedbackTimeout.current);
+    },
+    [],
+  );
 
   const articleTradeCode = useMemo(
     () =>
@@ -321,8 +395,104 @@ export function ArticleDetailScreen() {
     () => groupedFields.reduce((total, group) => total + group.fields.length, 0),
     [groupedFields],
   );
+  const hasUnsavedChanges = useMemo(() => {
+    if (!editing || !article) return false;
+    return article.fields.some((field) => {
+      if (!(field.field_name in drafts)) return false;
+      const raw = drafts[field.field_name].trim();
+      const draftValue = raw === '' ? null : raw;
+      return draftValue !== (field.value ?? null);
+    });
+  }, [article, drafts, editing]);
 
-  const handleBack = useCallback(() => navigation.goBack(), [navigation]);
+  const leaveScreen = useCallback(() => navigation.goBack(), [navigation]);
+
+  const confirmLeaveIfEditing = useCallback(
+    (onConfirm: () => void) => {
+      if (saving) return;
+      if (!hasUnsavedChanges) {
+        onConfirm();
+        return;
+      }
+
+      Alert.alert(
+        'Quitter la modification ?',
+        'Les changements non enregistrés seront perdus.',
+        [
+          { text: 'Continuer la saisie', style: 'cancel' },
+          { text: 'Quitter', style: 'destructive', onPress: onConfirm },
+        ],
+      );
+    },
+    [hasUnsavedChanges, saving],
+  );
+
+  const handleBack = useCallback(
+    () => confirmLeaveIfEditing(leaveScreen),
+    [confirmLeaveIfEditing, leaveScreen],
+  );
+
+  const restoreSheetPosition = useCallback(() => {
+    Animated.spring(dismissTranslateY, {
+      toValue: 0,
+      damping: 22,
+      stiffness: 240,
+      mass: 0.8,
+      useNativeDriver: true,
+    }).start();
+  }, [dismissTranslateY]);
+
+  const animateSheetExit = useCallback(() => {
+    Animated.timing(dismissTranslateY, {
+      toValue: windowHeight + spacing['2xl'],
+      duration: 190,
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) leaveScreen();
+    });
+  }, [dismissTranslateY, leaveScreen, windowHeight]);
+
+  const handleSwipeDismiss = useCallback(() => {
+    if (hasUnsavedChanges) {
+      restoreSheetPosition();
+      confirmLeaveIfEditing(animateSheetExit);
+      return;
+    }
+    animateSheetExit();
+  }, [animateSheetExit, confirmLeaveIfEditing, hasUnsavedChanges, restoreSheetPosition]);
+
+  const dismissPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_, gesture) => {
+          const isDownward = gesture.dy > 12;
+          const isMostlyVertical = Math.abs(gesture.dy) > Math.abs(gesture.dx) * 1.25;
+          return !saving && scrollOffsetY.current <= 0 && isDownward && isMostlyVertical;
+        },
+        onPanResponderMove: (_, gesture) => {
+          if (gesture.dy <= 0) {
+            dismissTranslateY.setValue(0);
+            return;
+          }
+          // A small resistance after the visible drag limit keeps the sheet attached
+          // to the finger without letting it disappear before release.
+          const resisted =
+            gesture.dy <= DRAG_LIMIT
+              ? gesture.dy
+              : DRAG_LIMIT + (gesture.dy - DRAG_LIMIT) * 0.18;
+          dismissTranslateY.setValue(resisted);
+        },
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dy >= DISMISS_DISTANCE || gesture.vy >= DISMISS_VELOCITY) {
+            handleSwipeDismiss();
+          } else {
+            restoreSheetPosition();
+          }
+        },
+        onPanResponderTerminate: restoreSheetPosition,
+      }),
+    [dismissTranslateY, handleSwipeDismiss, restoreSheetPosition, saving],
+  );
 
   const enterEdit = useCallback(() => {
     const seed: Record<string, string> = {};
@@ -331,12 +501,14 @@ export function ArticleDetailScreen() {
     }
     setDrafts(seed);
     setJustSaved(false);
+    setSaveError(null);
     setEditing(true);
   }, [article]);
 
   const cancelEdit = useCallback(() => {
     setEditing(false);
     setDrafts({});
+    setSaveError(null);
   }, []);
 
   const handleFieldChange = useCallback((name: string, text: string) => {
@@ -346,6 +518,7 @@ export function ArticleDetailScreen() {
   const handleSave = useCallback(async () => {
     if (!article || saving) return;
     setSaving(true);
+    setSaveError(null);
 
     const changed: { field_name: string; value: string | null }[] = [];
     for (const f of article.fields) {
@@ -362,19 +535,26 @@ export function ArticleDetailScreen() {
       return;
     }
 
-    // The API remains authoritative: no confirmed field is written only to the phone.
-    const result = await submitFieldOverrides({ ingestionId: article.ingestion_id, fields: changed });
-    await queryClient.invalidateQueries({ queryKey: ['catalog', 'arrivals'] });
-    if (result.pending === 0) {
-      // The projection is asynchronous; reload from the API only when it has caught up.
-      const refreshed = await getArticleById(article.id);
-      if (refreshed) setArticle(refreshed);
-    }
+    try {
+      // The API remains authoritative: no confirmed field is written only to the phone.
+      const result = await submitFieldOverrides({ ingestionId: article.ingestion_id, fields: changed });
+      await queryClient.invalidateQueries({ queryKey: ['catalog', 'arrivals'] });
+      if (result.pending === 0) {
+        // The projection is asynchronous; reload from the API only when it has caught up.
+        const refreshed = await getArticleById(article.id);
+        if (refreshed) setArticle(refreshed);
+      }
 
-    setEditing(false);
-    setSaving(false);
-    setJustSaved(true);
-    setTimeout(() => setJustSaved(false), 2600);
+      setEditing(false);
+      setDrafts({});
+      setJustSaved(true);
+      if (savedFeedbackTimeout.current) clearTimeout(savedFeedbackTimeout.current);
+      savedFeedbackTimeout.current = setTimeout(() => setJustSaved(false), 2600);
+    } catch {
+      setSaveError('Impossible d’enregistrer pour le moment. Vérifiez votre connexion puis réessayez.');
+    } finally {
+      setSaving(false);
+    }
   }, [article, drafts, saving]);
 
   if (loading) {
@@ -388,13 +568,28 @@ export function ArticleDetailScreen() {
   if (!article) {
     return (
       <View style={[styles.centered, { padding: spacing.lg }]}>
-        <MaterialCommunityIcons name="file-remove-outline" size={40} color={colors.onSurfaceVariant} />
+        <MaterialCommunityIcons
+          name={loadError ? 'cloud-alert-outline' : 'file-remove-outline'}
+          size={40}
+          color={colors.onSurfaceVariant}
+        />
         <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant, marginTop: spacing.sm }]}>
-          Ce lot est introuvable.
+          {loadError ? 'Impossible de charger cette fiche.' : 'Ce lot est introuvable.'}
         </Text>
-        <Pressable onPress={handleBack} style={styles.backTextButton} accessibilityRole="button">
-          <Text style={[typography.labelLarge, { color: colors.primary }]}>Retour</Text>
-        </Pressable>
+        <View style={styles.errorActions}>
+          {loadError ? (
+            <Pressable
+              onPress={() => setReloadNonce((value) => value + 1)}
+              style={styles.retryButton}
+              accessibilityRole="button"
+            >
+              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>Réessayer</Text>
+            </Pressable>
+          ) : null}
+          <Pressable onPress={handleBack} style={styles.backTextButton} accessibilityRole="button">
+            <Text style={[typography.labelLarge, { color: colors.primary }]}>Retour</Text>
+          </Pressable>
+        </View>
       </View>
     );
   }
@@ -415,44 +610,39 @@ export function ArticleDetailScreen() {
         : scientificName;
   const fao = fieldValue('FAO_area');
   const productionMethod = displayFieldValue('production_method', fieldValue('production_method'));
+  const origin = fieldValue('origin_country');
+  const expiryDate = displayFieldValue('expiry_date', fieldValue('expiry_date'));
+  const explicitDescription = fieldValue('description') || fieldValue('product_description');
+  const descriptionParts = [
+    tradeDescription,
+    producer,
+    productionMethod,
+    origin ? `Origine ${origin}` : '',
+  ].filter((value, index, values) => Boolean(value) && values.indexOf(value) === index);
+  const productDescription =
+    explicitDescription || descriptionParts.join(' · ') || 'Description non renseignée.';
+  const summaryFacts = [
+    {
+      icon: 'identifier' as IconName,
+      label: 'N° DE LOT',
+      value: lot?.value?.trim() || 'Non renseigné',
+    },
+    expiryDate
+      ? { icon: 'calendar-alert' as IconName, label: 'DATE LIMITE', value: expiryDate }
+      : null,
+    origin ? { icon: 'map-marker-outline' as IconName, label: 'ORIGINE', value: origin } : null,
+    fao ? { icon: 'map-outline' as IconName, label: 'ZONE FAO', value: fao } : null,
+  ].filter((fact): fact is { icon: IconName; label: string; value: string } => fact !== null);
 
   return (
-    <View style={[styles.root, { paddingBottom: editing ? 0 : insets.bottom }]}>
-      <View style={styles.photoContainer}>
-        {article.photo_uri ? (
-          <Pressable
-            onPress={() => setViewerOpen(true)}
-            style={styles.photoCard}
-            accessibilityRole="button"
-            accessibilityLabel="Voir la photo en plein écran"
-          >
-            <Image
-              source={{ uri: article.photo_uri, headers: article.photo_headers }}
-              resizeMode="cover"
-              style={StyleSheet.absoluteFillObject}
-            />
-          </Pressable>
-        ) : (
-          <View style={[styles.photoCard, styles.photoPlaceholder]}>
-            <MaterialCommunityIcons name="file-document-outline" size={48} color={colors.onSurfaceVariant} />
-          </View>
-        )}
-        <Pressable
-          onPress={handleBack}
-          hitSlop={12}
-          style={[styles.floatingBackButton, { top: insets.top + spacing.sm }]}
-          android_ripple={{ color: 'rgba(255,255,255,0.18)', borderless: true }}
-          accessibilityRole="button"
-          accessibilityLabel="Retour"
-        >
-          <MaterialCommunityIcons
-            name="arrow-left"
-            size={23}
-            color={colors.onPrimary}
-            style={styles.headerIcon}
-          />
-        </Pressable>
-      </View>
+    <Animated.View
+      style={[
+        styles.root,
+        { paddingBottom: editing ? 0 : insets.bottom },
+        { transform: [{ translateY: dismissTranslateY }] },
+      ]}
+      {...dismissPanResponder.panHandlers}
+    >
       <PhotoViewerModal
         visible={viewerOpen}
         photoUri={article.photo_uri}
@@ -460,161 +650,247 @@ export function ArticleDetailScreen() {
         onClose={() => setViewerOpen(false)}
       />
 
+      <View style={[styles.topBar, { paddingTop: insets.top }]}>
+        <View style={styles.dismissHandleSlot} pointerEvents="none">
+          <View style={styles.dismissHandle} />
+        </View>
+        <View style={styles.topBarInner}>
+          <Pressable
+            onPress={handleBack}
+            disabled={saving}
+            hitSlop={8}
+            style={styles.topBarButton}
+            accessibilityRole="button"
+            accessibilityLabel="Retour"
+            accessibilityState={{ disabled: saving }}
+          >
+            <MaterialCommunityIcons name="arrow-left" size={22} color={colors.onSurface} />
+          </Pressable>
+
+          <View style={styles.topBarTitle}>
+            <Text style={[typography.labelSmall, styles.topBarEyebrow]}>CATALOGUE</Text>
+            <Text style={[typography.titleMedium, styles.topBarHeading]}>Fiche produit</Text>
+          </View>
+
+          <Pressable
+            onPress={editing ? undefined : enterEdit}
+            disabled={editing}
+            hitSlop={4}
+            style={[styles.topBarEditButton, editing && styles.topBarEditButtonActive]}
+            android_ripple={{ color: colors.primaryContainer }}
+            accessibilityRole="button"
+            accessibilityLabel="Modifier la fiche"
+            accessibilityState={{ selected: editing, disabled: editing }}
+          >
+            <MaterialCommunityIcons
+              name={editing ? 'pencil-off-outline' : 'pencil-outline'}
+              size={17}
+              color={colors.primary}
+            />
+            <Text style={[typography.labelLarge, styles.topBarEditText]}>
+              {editing ? 'En cours' : 'Modifier'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
       <ScrollView
         style={styles.contentCard}
-        contentContainerStyle={styles.contentInner}
+        contentContainerStyle={[
+          styles.contentInner,
+          editing && { paddingBottom: spacing['3xl'] + insets.bottom },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        scrollEventThrottle={16}
+        onScroll={(event) => {
+          scrollOffsetY.current = event.nativeEvent.contentOffset.y;
+        }}
       >
-        {/* Product identity first: a stable professional summary before the
-            complete traceability record. */}
-        <View style={styles.identityCard}>
-          <View style={styles.identityHeader}>
-            <Text style={[typography.labelSmall, styles.identityEyebrow]}>
-              {articleProfile.displayName} · produit enregistré
-            </Text>
-          </View>
-
-          <Text selectable style={[typography.headlineSmall, styles.productName]}>
-            {productName}
-          </Text>
-          {tradeDescription ? (
-            <Text
-              selectable
-              style={[
-                typography.bodyMedium,
-                articleProfile.code === 'poissonnerie'
-                  ? styles.scientificName
-                  : styles.productDescription,
-              ]}
-            >
-              {tradeDescription}
-            </Text>
-          ) : producer ? (
-            <Text selectable style={[typography.bodyMedium, styles.productDescription]}>
-              {producer}
-            </Text>
-          ) : null}
-
-          <View style={styles.summaryChips}>
-            <View style={styles.summaryChip}>
-              <MaterialCommunityIcons name="identifier" size={14} color={colors.primary} />
-              <Text style={[typography.labelMedium, styles.summaryChipText]} numberOfLines={1}>
-                Lot {lot?.value && lot.value.length > 0 ? lot.value : 'non renseigné'}
-              </Text>
-            </View>
-            {fao ? (
-              <View style={styles.summaryChip}>
-                <MaterialCommunityIcons name="map-marker-outline" size={14} color={colors.primary} />
-                <Text style={[typography.labelMedium, styles.summaryChipText]} numberOfLines={1}>
-                  FAO {fao}
-                </Text>
-              </View>
-            ) : null}
-            {productionMethod ? (
-              <View style={styles.summaryChip}>
-                <MaterialCommunityIcons name="waves" size={14} color={colors.primary} />
-                <Text style={[typography.labelMedium, styles.summaryChipText]} numberOfLines={1}>
-                  {productionMethod}
-                </Text>
-              </View>
-            ) : null}
-          </View>
-
-          <View style={styles.identityFooter}>
-            <View style={styles.identityMeta}>
-              <MaterialCommunityIcons name="calendar-check-outline" size={15} color={colors.onSurfaceVariant} />
-              <Text style={[typography.bodySmall, styles.metaCaption]} numberOfLines={1}>
-                {formatDateShort(article.saved_at)}
-                {article.saved_by ? `  ·  ${article.saved_by}` : ''}
-              </Text>
-            </View>
-            <Pressable
-              onPress={editing ? undefined : enterEdit}
-              disabled={editing}
-              style={[styles.editButton, editing && styles.editButtonActive]}
-              android_ripple={{ color: colors.primaryContainer }}
-              accessibilityRole="button"
-              accessibilityLabel="Modifier la fiche"
-              accessibilityState={{ selected: editing, disabled: editing }}
-            >
-              <MaterialCommunityIcons name="pencil-outline" size={15} color={colors.primary} />
-              <Text style={[typography.labelMedium, styles.editButtonText]}>Modifier</Text>
-            </Pressable>
-          </View>
-        </View>
-
-        {justSaved ? (
-          <View style={styles.savedBanner}>
-            <MaterialCommunityIcons name="check-circle-outline" size={16} color={colors.success} />
-            <Text style={[typography.labelSmall, styles.savedText]}>Modifications enregistrées</Text>
-          </View>
-        ) : null}
-
-        {fieldCount === 0 ? (
-          <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
-            Aucun champ extrait.
-          </Text>
-        ) : (
-          groupedFields.map((group) => (
-            <View key={group.id} style={styles.fieldGroup}>
-              <View style={styles.fieldGroupHeader}>
-                <MaterialCommunityIcons
-                  name={FIELD_GROUP_ICON[group.id] ?? FIELD_GROUP_ICON.other}
-                  size={17}
-                  color={colors.primary}
+        <View style={styles.contentColumn}>
+          {/* A restrained product hero: the image, description and key facts form
+              one readable unit before the exhaustive traceability record. */}
+          <View style={styles.identityCard}>
+            {article.photo_uri ? (
+              <Pressable
+                onPress={() => setViewerOpen(true)}
+                style={styles.photoCard}
+                accessibilityRole="button"
+                accessibilityLabel="Voir la photo en plein écran"
+              >
+                <RotatedPhoto
+                  source={{ uri: article.photo_uri, headers: article.photo_headers }}
+                  resizeMode="cover"
+                  style={StyleSheet.absoluteFillObject}
                 />
-                <Text style={[typography.labelLarge, styles.fieldGroupTitle]}>
-                  {group.title}
+                <View style={styles.photoHint}>
+                  <MaterialCommunityIcons name="arrow-expand" size={14} color={colors.onPrimary} />
+                  <Text style={[typography.labelSmall, styles.photoHintText]}>Agrandir</Text>
+                </View>
+              </Pressable>
+            ) : (
+              <View style={[styles.photoCard, styles.photoPlaceholder]}>
+                <View style={styles.placeholderIcon}>
+                  <MaterialCommunityIcons name="image-outline" size={30} color={colors.primary} />
+                </View>
+                <Text style={[typography.labelMedium, styles.photoPlaceholderText]}>
+                  Photo non disponible
                 </Text>
               </View>
-              <View style={styles.fieldsCard}>
-                {group.fields.map((field, index) => (
-                  <FieldCard
-                    key={field.field_name}
-                    field={field}
-                    editing={editing}
-                    draft={drafts[field.field_name] ?? ''}
-                    onChange={handleFieldChange}
-                    last={index === group.fields.length - 1}
-                  />
+            )}
+
+            <View style={styles.identityBody}>
+              <Text style={[typography.labelSmall, styles.identityEyebrow]}>
+                {articleProfile.displayName} · produit enregistré
+              </Text>
+
+              <Text selectable style={[typography.headlineSmall, styles.productName]}>
+                {productName}
+              </Text>
+
+              <View style={styles.descriptionBlock}>
+                <Text style={[typography.labelSmall, styles.descriptionLabel]}>DESCRIPTION</Text>
+                <Text
+                  selectable
+                  style={[typography.bodyMedium, styles.productDescription]}
+                >
+                  {productDescription}
+                </Text>
+              </View>
+
+              {productionMethod ? (
+                <View style={styles.summaryChip}>
+                  <MaterialCommunityIcons name="sprout-outline" size={14} color={colors.primary} />
+                  <Text style={[typography.labelMedium, styles.summaryChipText]}>
+                    {productionMethod}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.factsGrid}>
+                {summaryFacts.map((fact) => (
+                  <SummaryFact key={fact.label} {...fact} />
                 ))}
               </View>
+
+              <View style={styles.identityMeta}>
+                <MaterialCommunityIcons
+                  name="calendar-check-outline"
+                  size={15}
+                  color={colors.onSurfaceVariant}
+                />
+                <Text style={[typography.bodySmall, styles.metaCaption]}>
+                  Enregistré le {formatDateShort(article.saved_at)}
+                  {article.saved_by ? ` · ${article.saved_by}` : ''}
+                </Text>
+              </View>
             </View>
-          ))
-        )}
+          </View>
+
+          {justSaved ? (
+            <View style={styles.savedBanner} accessibilityLiveRegion="polite">
+              <MaterialCommunityIcons name="check-circle-outline" size={17} color={colors.success} />
+              <Text style={[typography.labelLarge, styles.savedText]}>Modifications enregistrées</Text>
+            </View>
+          ) : null}
+
+          {saveError ? (
+            <View style={styles.errorBanner} accessibilityLiveRegion="assertive">
+              <MaterialCommunityIcons name="alert-circle-outline" size={18} color={colors.error} />
+              <Text style={[typography.bodySmall, styles.errorText]}>{saveError}</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.recordHeader}>
+            <View style={styles.recordHeaderText}>
+              <Text style={[typography.titleLarge, styles.recordTitle]}>Informations produit</Text>
+              <Text style={[typography.bodySmall, styles.recordSubtitle]}>
+                {fieldCount} information{fieldCount > 1 ? 's' : ''} affichée{fieldCount > 1 ? 's' : ''} · fiche modifiable
+              </Text>
+            </View>
+            {editing ? (
+              <View style={styles.editingBadge}>
+                <View style={styles.editingDot} />
+                <Text style={[typography.labelSmall, styles.editingBadgeText]}>MODE ÉDITION</Text>
+              </View>
+            ) : null}
+          </View>
+
+          {fieldCount === 0 ? (
+            <View style={styles.emptyRecord}>
+              <MaterialCommunityIcons name="text-box-remove-outline" size={26} color={colors.outline} />
+              <Text style={[typography.bodyMedium, styles.emptyRecordText]}>
+                Aucun champ extrait.
+              </Text>
+            </View>
+          ) : (
+            groupedFields.map((group) => (
+              <View key={group.id} style={styles.fieldGroup}>
+                <View style={styles.fieldGroupHeader}>
+                  <View style={styles.fieldGroupIcon}>
+                    <MaterialCommunityIcons
+                      name={FIELD_GROUP_ICON[group.id] ?? FIELD_GROUP_ICON.other}
+                      size={17}
+                      color={colors.primary}
+                    />
+                  </View>
+                  <Text style={[typography.titleMedium, styles.fieldGroupTitle]}>
+                    {group.title}
+                  </Text>
+                  <Text style={[typography.labelSmall, styles.fieldGroupCount]}>
+                    {group.fields.length}
+                  </Text>
+                </View>
+                <View style={styles.fieldsCard}>
+                  {group.fields.map((field, index) => (
+                    <FieldCard
+                      key={field.field_name}
+                      field={field}
+                      editing={editing}
+                      draft={drafts[field.field_name] ?? ''}
+                      onChange={handleFieldChange}
+                      last={index === group.fields.length - 1}
+                    />
+                  ))}
+                </View>
+              </View>
+            ))
+          )}
+        </View>
       </ScrollView>
 
       {editing ? (
         <View style={[styles.editBar, { paddingBottom: insets.bottom + spacing.sm }]}>
-          <Pressable
-            onPress={cancelEdit}
-            disabled={saving}
-            style={styles.cancelBtn}
-            accessibilityRole="button"
-            accessibilityLabel="Annuler"
-          >
-            <Text style={[typography.labelLarge, styles.cancelText]}>Annuler</Text>
-          </Pressable>
-          <Pressable
-            onPress={handleSave}
-            disabled={saving}
-            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
-            accessibilityRole="button"
-            accessibilityLabel="Enregistrer les modifications"
-          >
-            {saving ? (
-              <ActivityIndicator size="small" color={colors.onPrimary} />
-            ) : (
-              <>
-                <MaterialCommunityIcons name="check" size={18} color={colors.onPrimary} />
-                <Text style={[typography.labelLarge, styles.saveText]}>Enregistrer</Text>
-              </>
-            )}
-          </Pressable>
+          <View style={styles.editBarInner}>
+            <Pressable
+              onPress={cancelEdit}
+              disabled={saving}
+              style={styles.cancelBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Annuler"
+            >
+              <Text style={[typography.labelLarge, styles.cancelText]}>Annuler</Text>
+            </Pressable>
+            <Pressable
+              onPress={handleSave}
+              disabled={saving}
+              style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Enregistrer les modifications"
+            >
+              {saving ? (
+                <ActivityIndicator size="small" color={colors.onPrimary} />
+              ) : (
+                <>
+                  <MaterialCommunityIcons name="check" size={18} color={colors.onPrimary} />
+                  <Text style={[typography.labelLarge, styles.saveText]}>Enregistrer</Text>
+                </>
+              )}
+            </Pressable>
+          </View>
         </View>
       ) : null}
-    </View>
+    </Animated.View>
   );
 }
 
@@ -630,56 +906,107 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   backTextButton: {
-    marginTop: spacing.md,
+    minHeight: 44,
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.sm,
-  },
-  // A generous, unobstructed product photo. The only overlay is the compact back
-  // control; tapping anywhere else still opens the full-screen viewer.
-  photoContainer: {
-    height: 248,
-    position: 'relative',
-    backgroundColor: colors.onSurface,
-  },
-  // Full-bleed cover photo (no inner frame) — fills the header edge-to-edge, same
-  // clean treatment as ReviewScreen's hero. A tap opens PhotoViewerModal at full
-  // resolution, so the cover crop never loses content.
-  photoCard: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  photoPlaceholder: {
     alignItems: 'center',
     justifyContent: 'center',
   },
-  floatingBackButton: {
-    position: 'absolute',
-    left: spacing.md,
-    width: 40,
-    height: 40,
+  errorActions: {
+    marginTop: spacing.md,
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  retryButton: {
+    minHeight: 44,
+    minWidth: 132,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+  },
+  topBar: {
+    backgroundColor: colors.surface,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.outlineVariant,
+    zIndex: 2,
+  },
+  dismissHandleSlot: {
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dismissHandle: {
+    width: 38,
+    height: 4,
     borderRadius: radius.full,
-    backgroundColor: 'rgba(0,0,0,0.48)',
+    backgroundColor: colors.outlineVariant,
+  },
+  topBarInner: {
+    width: '100%',
+    maxWidth: 720,
+    minHeight: 64,
+    paddingHorizontal: spacing.md,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  topBarButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: colors.surfaceContainer,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+  },
+  topBarTitle: {
+    flex: 1,
+    minWidth: 0,
+  },
+  topBarEyebrow: {
+    color: colors.primary,
+    letterSpacing: 0.9,
+  },
+  topBarHeading: {
+    color: colors.onSurface,
+  },
+  topBarEditButton: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surface,
     overflow: 'hidden',
   },
-  headerIcon: {
-    width: 24,
-    height: 24,
-    lineHeight: 24,
-    textAlign: 'center',
-    textAlignVertical: 'center',
+  topBarEditButtonActive: {
+    backgroundColor: colors.primaryContainer,
+    borderColor: colors.primaryContainer,
+  },
+  topBarEditText: {
+    color: colors.primary,
   },
   contentCard: {
     flex: 1,
     backgroundColor: colors.background,
-    borderTopLeftRadius: radius.lg,
-    borderTopRightRadius: radius.lg,
-    marginTop: -radius.lg,
   },
   contentInner: {
-    padding: spacing.lg,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.md,
     paddingBottom: spacing['2xl'],
+  },
+  contentColumn: {
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
   },
   // ── Product identity summary ───────────────────────────────────────────────
   identityCard: {
@@ -687,120 +1014,261 @@ const styles = StyleSheet.create({
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
-    padding: spacing.lg,
-    gap: spacing.sm,
+    overflow: 'hidden',
     marginBottom: spacing.lg,
     ...elevation[1],
   },
-  identityHeader: {
+  photoCard: {
+    width: '100%',
+    height: 212,
+    position: 'relative',
+    backgroundColor: colors.surfaceContainer,
+    overflow: 'hidden',
+  },
+  photoPlaceholder: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+  },
+  placeholderIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryContainer,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  photoPlaceholderText: {
+    color: colors.onSurfaceVariant,
+  },
+  photoHint: {
+    position: 'absolute',
+    right: spacing.sm,
+    bottom: spacing.sm,
+    minHeight: 32,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(21,38,34,0.78)',
+  },
+  photoHintText: {
+    color: colors.onPrimary,
+  },
+  identityBody: {
+    alignItems: 'center',
+    padding: spacing.lg,
   },
   identityEyebrow: {
     color: colors.primary,
     textTransform: 'uppercase',
-    letterSpacing: 0.7,
+    textAlign: 'center',
+    letterSpacing: 0.8,
+    marginBottom: spacing.xs,
   },
   productName: {
     color: colors.onSurface,
+    textAlign: 'center',
+    marginBottom: spacing.md,
   },
-  scientificName: {
-    color: colors.onSurfaceVariant,
-    fontStyle: 'italic',
-    marginTop: 2,
+  descriptionBlock: {
+    width: '100%',
+    maxWidth: 560,
+    alignItems: 'center',
+    marginBottom: spacing.md,
+  },
+  descriptionLabel: {
+    color: colors.outline,
+    letterSpacing: 0.8,
+    marginBottom: spacing.xs,
   },
   productDescription: {
     color: colors.onSurfaceVariant,
-    marginTop: 2,
-  },
-  summaryChips: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   summaryChip: {
     maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 5,
-    borderRadius: radius.sm,
-    backgroundColor: colors.surfaceContainer,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryContainer,
     borderWidth: 1,
-    borderColor: colors.outlineVariant,
+    borderColor: colors.primaryContainer,
+    marginBottom: spacing.lg,
   },
   summaryChipText: {
-    color: colors.onSurfaceVariant,
+    color: colors.onPrimaryContainer,
     flexShrink: 1,
   },
-  identityFooter: {
+  factsGrid: {
+    width: '100%',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    justifyContent: 'center',
+  },
+  factItem: {
+    minWidth: 144,
+    flexGrow: 1,
+    flexBasis: 0,
+    maxWidth: 220,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: spacing.md,
-    paddingTop: spacing.sm,
+    gap: spacing.sm,
+    padding: spacing.sm,
+    borderRadius: radius.md,
+    backgroundColor: colors.surfaceContainer,
+  },
+  factIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.surface,
+  },
+  factText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  factLabel: {
+    color: colors.onSurfaceVariant,
+    letterSpacing: 0.7,
+  },
+  factValue: {
+    color: colors.onSurface,
+  },
+  identityMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.xs,
+    width: '100%',
+    marginTop: spacing.md,
+    paddingTop: spacing.md,
     borderTopWidth: 1,
     borderTopColor: colors.outlineVariant,
   },
-  identityMeta: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
   metaCaption: {
     color: colors.onSurfaceVariant,
-  },
-  // Secondary action lives in the summary footer so it never competes with the
-  // product title or compresses long names.
-  editButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    backgroundColor: colors.surface,
-  },
-  editButtonText: {
-    color: colors.primary,
-  },
-  editButtonActive: {
-    backgroundColor: colors.primaryContainer,
-    borderColor: colors.primary,
+    flexShrink: 1,
+    textAlign: 'center',
   },
   savedBanner: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: spacing.xs,
     backgroundColor: colors.successContainer,
-    borderRadius: radius.sm,
-    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#CDEAD7',
   },
   savedText: {
     color: colors.success,
   },
-  // ── Modern field list (one card, dividers between rows) ─────────────────────
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: spacing.sm,
+    backgroundColor: colors.errorContainer,
+    borderRadius: radius.md,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  errorText: {
+    color: colors.onErrorContainer,
+    flex: 1,
+  },
+  recordHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacing.md,
+    marginBottom: spacing.lg,
+    paddingHorizontal: spacing.xs,
+  },
+  recordHeaderText: {
+    flex: 1,
+    minWidth: 0,
+  },
+  recordTitle: {
+    color: colors.onSurface,
+  },
+  recordSubtitle: {
+    color: colors.onSurfaceVariant,
+    marginTop: 2,
+  },
+  editingBadge: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.sm,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryContainer,
+  },
+  editingDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+  },
+  editingBadgeText: {
+    color: colors.onPrimaryContainer,
+  },
+  emptyRecord: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 132,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
+    backgroundColor: colors.surface,
+    gap: spacing.sm,
+  },
+  emptyRecordText: {
+    color: colors.onSurfaceVariant,
+  },
+  // ── Complete field list ─────────────────────────────────────────────────────
   fieldGroup: {
     marginBottom: spacing.lg,
   },
   fieldGroupHeader: {
-    minHeight: 32,
+    minHeight: 36,
     flexDirection: 'row',
     alignItems: 'center',
     gap: spacing.sm,
     paddingHorizontal: spacing.xs,
     marginBottom: spacing.sm,
   },
+  fieldGroupIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: radius.sm,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.primaryContainer,
+  },
   fieldGroupTitle: {
     flex: 1,
     color: colors.onSurface,
+  },
+  fieldGroupCount: {
+    color: colors.onSurfaceVariant,
+    minWidth: 24,
+    textAlign: 'center',
   },
   fieldsCard: {
     backgroundColor: colors.surface,
@@ -813,7 +1281,7 @@ const styles = StyleSheet.create({
   card: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: spacing.md,
+    gap: spacing.sm,
     paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
   },
@@ -824,8 +1292,8 @@ const styles = StyleSheet.create({
   cardIcon: {
     width: 36,
     height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.primaryContainer,
+    borderRadius: radius.sm,
+    backgroundColor: colors.surfaceContainer,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
@@ -835,7 +1303,7 @@ const styles = StyleSheet.create({
     minWidth: 0,
   },
   cardLabel: {
-    color: colors.primary,
+    color: colors.onSurfaceVariant,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
     marginBottom: 3,
@@ -864,6 +1332,10 @@ const styles = StyleSheet.create({
   editInputText: {
     minHeight: 40,
   },
+  editInputMultiline: {
+    minHeight: 96,
+    textAlignVertical: 'top',
+  },
   affixRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -885,18 +1357,30 @@ const styles = StyleSheet.create({
   },
   // ── Edit action bar ──────────────────────────────────────────────────────────
   editBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-    paddingHorizontal: spacing.lg,
     paddingTop: spacing.md,
+    paddingHorizontal: spacing.md,
     backgroundColor: colors.surface,
     borderTopWidth: 1,
     borderTopColor: colors.outlineVariant,
+    ...elevation[3],
+  },
+  editBarInner: {
+    width: '100%',
+    maxWidth: 720,
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
   },
   cancelBtn: {
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
+    minHeight: 48,
+    minWidth: 104,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.outlineVariant,
   },
   cancelText: {
     color: colors.onSurfaceVariant,
@@ -909,7 +1393,8 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     backgroundColor: colors.primary,
     borderRadius: radius.md,
-    paddingVertical: spacing.md,
+    minHeight: 48,
+    paddingHorizontal: spacing.lg,
   },
   saveBtnDisabled: {
     opacity: 0.6,

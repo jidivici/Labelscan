@@ -15,13 +15,14 @@
  */
 
 import React, { useEffect } from 'react';
-import { Modal, Pressable, StyleSheet, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, spacing } from '../theme';
+import { PHOTO_DISPLAY_ROTATION } from './photoOrientation';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
@@ -41,6 +42,7 @@ export function PhotoViewerModal({
   onClose,
 }: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const scale = useSharedValue(1);
   const savedScale = useSharedValue(1);
   const translateX = useSharedValue(0);
@@ -101,10 +103,10 @@ export function PhotoViewerModal({
   const composed = Gesture.Simultaneous(pinch, pan);
   const gesture = Gesture.Race(doubleTap, composed);
 
-  // The stored file is already rotated upright (baked client-side at capture, workflow
-  // v2), so no base rotation here — just pan/zoom on the landscape image (`contain`).
+  // Keep the same left-facing orientation in the full-screen viewer and thumbnails.
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
+      { rotate: PHOTO_DISPLAY_ROTATION },
       { translateX: translateX.value },
       { translateY: translateY.value },
       { scale: scale.value },
@@ -119,7 +121,16 @@ export function PhotoViewerModal({
         <GestureDetector gesture={gesture}>
           <Animated.Image
             source={{ uri: photoUri, headers }}
-            style={[styles.image, imageStyle]}
+            style={[
+              styles.image,
+              {
+                left: (windowWidth - windowHeight) / 2,
+                top: (windowHeight - windowWidth) / 2,
+                width: windowHeight,
+                height: windowWidth,
+              },
+              imageStyle,
+            ]}
             resizeMode="contain"
           />
         </GestureDetector>
@@ -145,8 +156,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   image: {
-    width: '100%',
-    height: '100%',
+    position: 'absolute',
   },
   closeButton: {
     position: 'absolute',

@@ -130,6 +130,38 @@ def _portal_context(
     )
 
 
+def _identity_context(
+    conn, organization_id: str, user_id: str, role: str
+) -> tuple[tuple[str, ...], str | None, str | None, tuple[str, ...]]:
+    """Return claims matching the persisted role's authoritative perimeter."""
+
+    if role != "admin":
+        return _portal_context(conn, organization_id, user_id)
+    rows = (
+        conn.execute(
+            text(
+                "SELECT portal.id::text AS portal_id, portal.store_id::text AS store_id "
+                "FROM identity.business_portal AS portal "
+                "JOIN identity.store AS store ON store.id = portal.store_id "
+                "AND store.organization_id = portal.organization_id "
+                "WHERE portal.organization_id = :organization_id "
+                "AND store.created_by = :user_id "
+                "AND portal.active = true AND store.active = true "
+                "ORDER BY store.created_at, portal.created_at, portal.id"
+            ),
+            {"organization_id": organization_id, "user_id": user_id},
+        )
+        .mappings()
+        .all()
+    )
+    return (
+        tuple(row["portal_id"] for row in rows),
+        None,
+        None,
+        tuple(dict.fromkeys(row["store_id"] for row in rows)),
+    )
+
+
 class SqlUserRepository(UserRepository):
     def __init__(self, engine: Engine) -> None:
         self._engine = engine
@@ -161,7 +193,7 @@ class SqlUserRepository(UserRepository):
                         "store_id::text AS store_id "
                         "FROM identity.app_user "
                         "WHERE organization_id = :organization_id "
-                        "AND username = :u AND active = true"
+                        "AND username = :u AND active = true AND deleted_at IS NULL"
                     ),
                     {"organization_id": organization["id"], "u": username},
                 )
@@ -173,8 +205,8 @@ class SqlUserRepository(UserRepository):
             trade_code = None
             store_ids: tuple[str, ...] = ()
             if row is not None:
-                portal_ids, primary_portal_id, trade_code, store_ids = _portal_context(
-                    conn, organization["id"], row["id"]
+                portal_ids, primary_portal_id, trade_code, store_ids = _identity_context(
+                    conn, organization["id"], row["id"], row["role"]
                 )
         if row is None:
             return None
@@ -281,6 +313,7 @@ class SqlUserRepository(UserRepository):
             if organization_id is None:
                 organization_id = _default_organization_id(conn)
             set_tenant_context(conn, organization_id)
+            conditions.insert(0, "deleted_at IS NULL")
             conditions.insert(0, "organization_id = :organization_id")
             params["organization_id"] = organization_id
             where = f"WHERE {' AND '.join(conditions)}"

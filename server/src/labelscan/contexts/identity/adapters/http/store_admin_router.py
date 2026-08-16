@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import threading
 import uuid
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
 from pydantic import BaseModel, Field
@@ -62,6 +63,9 @@ class CreateStoreRequest(BaseModel):
     # preserves the API for integrations that already own a store-code scheme.
     code: str | None = Field(None, min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=120)
+    profession_codes: list[
+        Literal["poissonnerie", "boucherie", "charcuterie_traiteur"]
+    ] = Field(min_length=1)
 
 
 class UpdateStoreRequest(BaseModel):
@@ -82,13 +86,13 @@ def _new_internal_store_code() -> str:
 
 def _map_write_error(exc: Exception) -> None:
     if isinstance(exc, StoreAlreadyExists):
-        raise ApiError("STORE_ALREADY_EXISTS", "store code is already in use")
+        raise ApiError("STORE_ALREADY_EXISTS", "ce code magasin est déjà utilisé")
     if isinstance(exc, StoreNotFound):
-        raise ApiError("NOT_FOUND", "store not found")
+        raise ApiError("NOT_FOUND", "magasin introuvable")
     if isinstance(exc, StoreInUse):
         raise ApiError(
             "STORE_IN_USE",
-            "store cannot be disabled while active users or portal assignments remain",
+            "ce magasin contient encore des utilisateurs ou des accès actifs",
         )
     if isinstance(exc, ValueError):
         raise ApiError("VALIDATION_ERROR", str(exc))
@@ -111,6 +115,7 @@ def create_store(
             CreateStoreCommand(
                 code=body.code or _new_internal_store_code(),
                 name=body.name,
+                profession_codes=tuple(body.profession_codes),
                 actor_id=principal.actor_id,
                 correlation_id=request.state.correlation_id,
                 trace_id=request.state.trace_id,
@@ -131,7 +136,11 @@ def list_stores(
     service: StoreAdminService = Depends(get_store_admin_service),
 ) -> list[StoreResponse]:
     stores = service.list(
-        organization_id=principal.organization_id, active=active, query=q
+        organization_id=principal.organization_id,
+        active=active,
+        query=q,
+        actor_id=principal.actor_id,
+        include_all=principal.role == "super_admin",
     )
     return [StoreResponse.from_domain(store) for store in stores]
 
@@ -149,6 +158,7 @@ def get_current_store(
         organization_id=principal.organization_id,
         active=None,
         query=principal.store_code,
+        include_all=True,
     )
     store = next((item for item in stores if item.code == principal.store_code), None)
     if store is None:
@@ -174,6 +184,7 @@ def update_store(
                 correlation_id=request.state.correlation_id,
                 trace_id=request.state.trace_id,
                 organization_id=principal.organization_id,
+                manage_all_stores=principal.role == "super_admin",
             )
         )
     except Exception as exc:

@@ -7,23 +7,24 @@
  */
 
 import type { Article } from '../types/Article';
+import { parseDateValue } from './dates';
 
 /**
  * Local-day key (YYYY-MM-DD) for an ISO timestamp — the operator's wall-clock day,
- * never the UTC day. Missing/invalid input falls back to today (same doctrine as
- * services/dates.ts: never surface a technical failure to the poissonnier).
+ * never the UTC day. Invalid input returns an empty key so a malformed historical
+ * timestamp can never be silently grouped under today.
  */
 export function dayKey(iso?: string | null): string {
-  const d = iso ? new Date(iso) : new Date();
-  const safe = Number.isNaN(d.getTime()) ? new Date() : d;
-  const m = String(safe.getMonth() + 1).padStart(2, '0');
-  const day = String(safe.getDate()).padStart(2, '0');
-  return `${safe.getFullYear()}-${m}-${day}`;
+  const date = parseDateValue(iso);
+  if (!date) return '';
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
 }
 
 /** Today's day key — the home list's default scope. */
 export function todayKey(): string {
-  return dayKey();
+  return dayKey(new Date().toISOString());
 }
 
 /** Articles saved per local day, keyed YYYY-MM-DD. Drives the heat map. */
@@ -31,6 +32,7 @@ export function countByDay(articles: Article[]): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const article of articles) {
     const key = dayKey(article.saved_at);
+    if (!key) continue;
     counts[key] = (counts[key] ?? 0) + 1;
   }
   return counts;

@@ -2,55 +2,35 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react
 
 import { useAuth } from '../../auth/AuthContext';
 import { hasCapability } from '../../auth/capabilities';
-import { CAPABILITIES } from '../../types';
+import { PORTALS } from '../../portals/registry';
+import { CAPABILITIES, type ProfessionCode } from '../../types';
 import {
+  createStore,
   createManager,
+  deleteManager,
   getIamOverview,
   listManagers,
   listStorePortals,
   replaceManagerPortals,
-  setManagerActive,
+  setStoreActive,
   setStorePortalActive,
 } from './client';
 import {
   ActiveBadge,
+  CompactPager,
   ErrorNotice,
+  IDENTITY_PAGE_SIZE,
   IdentityEmpty,
   IdentityPanel,
   LoadingState,
-  OneTimeGrant,
+  PasswordField,
+  SuccessNotice,
 } from './components';
-import type { ActivationGrant, IamOverview, IamPortal, IamUser } from './types';
+import { ManagerPortalSelect } from './ManagerPortalSelect';
+import type { IamOverview, IamPortal, IamUser } from './types';
 
 function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'L’opération a échoué.';
-}
-
-function PortalChoices({
-  portals,
-  selected,
-  onChange,
-  name,
-}: {
-  portals: IamPortal[];
-  selected: string[];
-  onChange: (ids: string[]) => void;
-  name: string;
-}) {
-  return <div style={{ display: 'grid', gap: 8 }}>
-    {portals.filter((portal) => portal.active).map((portal) => <label key={portal.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-      <input
-        type="checkbox"
-        name={name}
-        value={portal.id}
-        checked={selected.includes(portal.id)}
-        onChange={(event) => onChange(event.target.checked
-          ? [...selected, portal.id]
-          : selected.filter((id) => id !== portal.id))}
-      />
-      <span>{portal.profession_name} · {portal.store_name}</span>
-    </label>)}
-  </div>;
 }
 
 function ManagerRow({
@@ -58,32 +38,35 @@ function ManagerRow({
   portals,
   saving,
   onAssignments,
-  onToggle,
+  onDelete,
 }: {
   manager: IamUser;
   portals: IamPortal[];
   saving: boolean;
-  onAssignments: (manager: IamUser, portalIds: string[]) => Promise<void>;
-  onToggle: (manager: IamUser) => Promise<void>;
+  onAssignments: (manager: IamUser, portalIds: string[]) => Promise<boolean>;
+  onDelete: (manager: IamUser) => Promise<void>;
 }) {
   const activePortalIds = portals.filter((portal) => portal.active).map((portal) => portal.id);
-  const assignedActivePortalIds = manager.business_portal_ids.filter((id) => activePortalIds.includes(id));
-  const [selected, setSelected] = useState(assignedActivePortalIds);
-  useEffect(() => setSelected(assignedActivePortalIds), [manager.business_portal_ids, portals]);
-  const changed = selected.slice().sort().join('|') !== manager.business_portal_ids.slice().sort().join('|');
+  const assignedActivePortalId = manager.business_portal_ids.find((id) => activePortalIds.includes(id)) ?? '';
+  const [selected, setSelected] = useState(assignedActivePortalId);
+  useEffect(() => setSelected(assignedActivePortalId), [assignedActivePortalId]);
+  async function changeAssignment(portalId: string) {
+    if (!portalId || portalId === assignedActivePortalId) return;
+    setSelected(portalId);
+    if (!await onAssignments(manager, [portalId])) setSelected(assignedActivePortalId);
+  }
   return <tr>
-    <td><strong>{manager.display_name}</strong><br /><small className="subtle">{manager.username}</small></td>
-    <td><PortalChoices portals={portals} selected={selected} onChange={setSelected} name={`manager-${manager.id}`} /></td>
+    <td><strong>{manager.username}</strong></td>
+    <td><ManagerPortalSelect portals={portals} selected={selected} onChange={(portalId) => void changeAssignment(portalId)} name={`manager-${manager.id}`} ariaLabel={`Magasin et métier de ${manager.username}`} inTable disabled={saving} /></td>
     <td><ActiveBadge active={manager.active} /></td>
-    <td><div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-      <button className="button secondary" disabled={saving || selected.length === 0 || !changed} onClick={() => void onAssignments(manager, selected)}>Enregistrer les portails</button>
-      <button className="button text" disabled={saving} onClick={() => void onToggle(manager)}>{manager.active ? 'Désactiver' : 'Réactiver'}</button>
+    <td><div className="table-actions">
+      <button className="button text small danger-text" type="button" disabled={saving} onClick={() => void onDelete(manager)}>Supprimer</button>
     </div></td>
   </tr>;
 }
 
 export function AdminPage() {
-  const { session } = useAuth();
+  const { session, refreshAccess } = useAuth();
   const canManageManagers = hasCapability(session, CAPABILITIES.MANAGER_ASSIGNMENTS_MANAGE);
   const canManagePortals = hasCapability(session, CAPABILITIES.STORES_MANAGE);
   const [overview, setOverview] = useState<IamOverview | null>(null);
@@ -91,18 +74,26 @@ export function AdminPage() {
   const [storePortals, setStorePortals] = useState<IamPortal[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [username, setUsername] = useState('');
-  const [displayName, setDisplayName] = useState('');
-  const [selectedPortalIds, setSelectedPortalIds] = useState<string[]>([]);
-  const [grant, setGrant] = useState<ActivationGrant | null>(null);
+  const [password, setPassword] = useState('');
+  const [selectedPortalId, setSelectedPortalId] = useState('');
+  const [storeName, setStoreName] = useState('');
+  const [storeProfessions, setStoreProfessions] = useState<ProfessionCode[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [managerPage, setManagerPage] = useState(1);
+  const [storePage, setStorePage] = useState(1);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const stores = useMemo(
     () => overview?.stores.filter((store): store is typeof store & { id: string } => Boolean(store.id)) ?? [],
     [overview],
   );
   const portals = overview?.business_portals ?? [];
+  const managerPageCount = Math.max(1, Math.ceil(managers.length / IDENTITY_PAGE_SIZE));
+  const storePageCount = Math.max(1, Math.ceil(stores.length / IDENTITY_PAGE_SIZE));
+  const visibleManagers = managers.slice((managerPage - 1) * IDENTITY_PAGE_SIZE, managerPage * IDENTITY_PAGE_SIZE);
+  const visibleStores = stores.slice((storePage - 1) * IDENTITY_PAGE_SIZE, storePage * IDENTITY_PAGE_SIZE);
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -125,6 +116,14 @@ export function AdminPage() {
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    if (managerPage > managerPageCount) setManagerPage(managerPageCount);
+  }, [managerPage, managerPageCount]);
+
+  useEffect(() => {
+    if (storePage > storePageCount) setStorePage(storePageCount);
+  }, [storePage, storePageCount]);
+
+  useEffect(() => {
     if (!selectedStoreId && stores[0]) setSelectedStoreId(stores[0].id);
   }, [selectedStoreId, stores]);
 
@@ -140,19 +139,20 @@ export function AdminPage() {
 
   async function submitManager(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session || selectedPortalIds.length === 0) return;
+    if (!session || !selectedPortalId) return;
     setSaving(true);
-    setGrant(null);
+    setSuccess('');
     try {
-      const created = await createManager(session, {
+      await createManager(session, {
         username,
-        display_name: displayName,
-        business_portal_ids: selectedPortalIds,
+        password,
+        business_portal_ids: [selectedPortalId],
       });
-      setGrant(created);
       setUsername('');
-      setDisplayName('');
-      setSelectedPortalIds([]);
+      setPassword('');
+      setSelectedPortalId('');
+      setSuccess('Le compte manager est créé et peut se connecter immédiatement.');
+      setError('');
       await load();
     } catch (cause) {
       setError(message(cause));
@@ -161,24 +161,33 @@ export function AdminPage() {
     }
   }
 
-  async function saveAssignments(manager: IamUser, portalIds: string[]) {
-    if (!session) return;
+  async function saveAssignments(manager: IamUser, portalIds: string[]): Promise<boolean> {
+    if (!session) return false;
     setSaving(true);
     try {
       await replaceManagerPortals(session, manager.id, portalIds);
       await load();
+      setSuccess(`L’affectation de ${manager.username} a été mise à jour.`);
+      setError('');
+      return true;
     } catch (cause) {
       setError(message(cause));
+      return false;
     } finally {
       setSaving(false);
     }
   }
 
-  async function toggleManager(manager: IamUser) {
+  async function removeManager(manager: IamUser) {
     if (!session) return;
+    if (!window.confirm(`Supprimer définitivement le manager « ${manager.username} » de l’interface ? Son historique restera associé aux étiquettes.`)) return;
     setSaving(true);
+    setSuccess('');
     try {
-      await setManagerActive(session, manager.id, !manager.active);
+      await deleteManager(session, manager.id);
+      setManagers((items) => items.filter((item) => item.id !== manager.id));
+      setSuccess(`Le manager ${manager.username} a été supprimé. Cet identifiant peut être réutilisé.`);
+      setError('');
       await load();
     } catch (cause) {
       setError(message(cause));
@@ -205,45 +214,120 @@ export function AdminPage() {
     }
   }
 
+  async function submitStore(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!session || storeProfessions.length === 0) return;
+    setSaving(true);
+    setSuccess('');
+    try {
+      const created = await createStore(session, {
+        name: storeName.trim(),
+        profession_codes: storeProfessions,
+      });
+      setStoreName('');
+      setStoreProfessions([]);
+      if (created.id) setSelectedStoreId(created.id);
+      setSuccess('Le magasin a été ajouté avec ses métiers.');
+      setError('');
+      await refreshAccess();
+      await load();
+    } catch (cause) {
+      setError(message(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function toggleStore(store: (typeof stores)[number]) {
+    if (!session) return;
+    if (store.active && !window.confirm(`Supprimer le magasin « ${store.name} » ?`)) return;
+    setSaving(true);
+    setSuccess('');
+    try {
+      await setStoreActive(session, store.code, !store.active);
+      setSuccess(store.active ? 'Le magasin a été supprimé.' : 'Le magasin a été réactivé.');
+      setError('');
+      await refreshAccess();
+      await load();
+    } catch (cause) {
+      setError(message(cause));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   if (loading && !overview) return <LoadingState label="Chargement de l’administration…" />;
   return <section className="page-stack">
     <header className="page-header">
-      <div><span className="eyebrow">Administration</span><h1>Magasins et managers</h1><p>Affectations métier séparées de toute gestion de mot de passe.</p></div>
+      <div><h1>Équipe et magasins</h1><p>Attribuez un magasin et un métier à chaque manager.</p></div>
       <div className="heading-stat"><strong>{managers.length}</strong><span>manager{managers.length > 1 ? 's' : ''}</span></div>
     </header>
     <ErrorNotice message={error} />
+    <SuccessNotice message={success} />
+
+    {canManagePortals && <IdentityPanel title="Nouveau magasin" description="Ajoutez un magasin et choisissez les métiers réellement utilisés.">
+      <form className="identity-form manager-form" onSubmit={(event) => void submitStore(event)}>
+        <label className="field"><span>Nom du magasin</span><input required maxLength={120} value={storeName} onChange={(event) => setStoreName(event.target.value)} /></label>
+        <fieldset className="choice-fieldset"><legend>Métiers</legend><div className="portal-choices">
+          {(Object.keys(PORTALS) as ProfessionCode[]).map((code) => <label key={code} className="portal-choice">
+            <input type="checkbox" checked={storeProfessions.includes(code)} onChange={(event) => setStoreProfessions(event.target.checked ? [...storeProfessions, code] : storeProfessions.filter((item) => item !== code))} />
+            <span>{PORTALS[code].label}</span>
+          </label>)}
+        </div></fieldset>
+        <button className="button primary" disabled={saving || !storeName.trim() || storeProfessions.length === 0}>{saving ? 'Ajout…' : 'Ajouter le magasin'}</button>
+      </form>
+    </IdentityPanel>}
 
     {canManageManagers && <>
-      <OneTimeGrant grant={grant} title="Code d’activation manager" onDismiss={() => setGrant(null)} />
-      <IdentityPanel title="Inviter un manager" description="Le compte reste inactif jusqu’à l’utilisation du code d’activation.">
-        <form className="filter-panel" onSubmit={(event) => void submitManager(event)}>
+      <IdentityPanel title="Nouveau manager" description="Le compte sera actif dès sa création.">
+        <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
           <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-          <label className="field"><span>Nom affiché</span><input required maxLength={120} value={displayName} onChange={(event) => setDisplayName(event.target.value)} /></label>
-          <fieldset style={{ border: 0, padding: 0, margin: 0 }}><legend className="field" style={{ marginBottom: 8 }}>Portails autorisés</legend><PortalChoices portals={portals} selected={selectedPortalIds} onChange={setSelectedPortalIds} name="new-manager-portals" /></fieldset>
-          <button className="button primary" disabled={saving || selectedPortalIds.length === 0}>Créer l’invitation</button>
+          <PasswordField value={password} onChange={setPassword} />
+          <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={portals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
+          <button className="button primary" disabled={saving || !selectedPortalId || password.length === 0}>{saving ? 'Création…' : 'Créer le compte'}</button>
         </form>
       </IdentityPanel>
 
       {managers.length === 0
-        ? <IdentityEmpty title="Aucun manager" description="Invitez un manager et choisissez au moins un portail." />
-        : <IdentityPanel title="Affectations managers" description="Une réaffectation révoque les sessions afin de recharger le périmètre.">
-          <div className="table-scroll"><table>
-            <thead><tr><th>Manager</th><th>Portails autorisés</th><th>Statut</th><th>Actions</th></tr></thead>
-            <tbody>{managers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={portals} saving={saving} onAssignments={saveAssignments} onToggle={toggleManager} />)}</tbody>
+        ? <IdentityEmpty title="Aucun manager" description="Créez un manager et attribuez-lui un magasin et un métier." />
+        : <IdentityPanel title="Managers" description="Un manager est rattaché à un seul magasin et un seul métier.">
+          <div className="table-scroll paged-content" key={`managers-${managerPage}`}><table className="identity-admin-table">
+            <thead><tr><th>Identifiant</th><th>Magasin et métier</th><th>Statut</th><th>Actions</th></tr></thead>
+            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={portals} saving={saving} onAssignments={saveAssignments} onDelete={removeManager} />)}</tbody>
           </table></div>
+          <CompactPager page={managerPage} total={managers.length} onChange={setManagerPage} label="des managers" />
         </IdentityPanel>}
     </>}
 
-    {canManagePortals && <IdentityPanel title="Activation des portails magasin" description="Les trois métiers restent référencés; leur désactivation est réversible et révoque les sessions concernées.">
-      <label className="field" style={{ maxWidth: 440, marginBottom: 18 }}><span>Magasin</span><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name} · {store.code}</option>)}</select></label>
+    {canManagePortals && <>
+      <IdentityPanel title="Magasins" description="La suppression conserve l’historique de traçabilité. Un magasin utilisé doit d’abord être libéré de ses accès actifs.">
+        <div className="table-scroll paged-content" key={`stores-${storePage}`}><table className="identity-admin-table">
+          <thead><tr><th>Magasin</th><th>Code</th><th>Statut</th><th>Actions</th></tr></thead>
+          <tbody>{visibleStores.map((store) => <tr key={store.id}>
+            <td><strong>{store.name}</strong></td>
+            <td><span className="subtle">{store.code}</span></td>
+            <td><ActiveBadge active={store.active} /></td>
+            <td><div className="table-actions">
+              <button className={`button ${store.active ? 'text danger-text' : 'secondary'} small`} type="button" disabled={saving} onClick={() => void toggleStore(store)}>{store.active ? 'Supprimer' : 'Réactiver'}</button>
+            </div></td>
+          </tr>)}</tbody>
+        </table></div>
+        <CompactPager page={storePage} total={stores.length} onChange={setStorePage} label="des magasins" />
+      </IdentityPanel>
+
+      <IdentityPanel title="Métiers par magasin" description="Activez uniquement les métiers utilisés dans chaque magasin.">
+      <label className="field compact-field panel-control"><span>Magasin</span><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name} · {store.code}</option>)}</select></label>
       {storePortals.length === 0
         ? <IdentityEmpty title="Aucun portail" description="Aucun portail métier n’est disponible pour ce magasin." />
-        : <div className="extension-grid">{storePortals.map((portal) => <article className="extension-card" key={portal.id}>
-          <span className="extension-dot" />
-          <h2>{portal.profession_name}</h2>
-          <p>{portal.name}<br />{portal.store_name}</p>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}><ActiveBadge active={portal.active} /><button className="button secondary" disabled={saving} onClick={() => void togglePortal(portal)}>{portal.active ? 'Désactiver' : 'Activer'}</button></div>
-        </article>)}</div>}
-    </IdentityPanel>}
+        : <div className="table-scroll"><table className="identity-admin-table identity-portal-table">
+          <thead><tr><th>Métier</th><th>Statut</th><th>Actions</th></tr></thead>
+          <tbody>{storePortals.map((portal) => <tr key={portal.id}>
+            <td><strong>{portal.profession_name}</strong></td>
+            <td><ActiveBadge active={portal.active} /></td>
+            <td><div className="table-actions"><button className="button secondary small" type="button" disabled={saving} onClick={() => void togglePortal(portal)}>{portal.active ? 'Désactiver' : 'Activer'}</button></div></td>
+          </tr>)}</tbody>
+        </table></div>}
+      </IdentityPanel>
+    </>}
   </section>;
 }

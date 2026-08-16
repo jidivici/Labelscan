@@ -183,56 +183,6 @@ paths:
               schema:
                 $ref: '#/components/schemas/Problem'
       security: []
-  /v1/auth/activate:
-    post:
-      summary: Activate Account
-      operationId: activate_account_v1_auth_activate_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ActivateRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
-  /v1/mobile/auth/activate:
-    post:
-      summary: Activate an operator account from the mobile application
-      operationId: activate_operator_account_v1_mobile_auth_activate_post
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ActivateRequest'
-        required: true
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
   /v1/me:
     get:
       summary: Get the current user and complete access context
@@ -372,7 +322,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivationResponse'
+                $ref: '#/components/schemas/UserResponse'
         '400':
           description: Request validation failed
           content:
@@ -435,7 +385,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivationResponse'
+                $ref: '#/components/schemas/UserResponse'
         '400':
           description: Request validation failed
           content:
@@ -510,6 +460,30 @@ paths:
                 $ref: '#/components/schemas/Problem'
       security:
       - bearerAuth: []
+    delete:
+      summary: Delete a manager from active administration
+      description: Soft-deletes the account and revokes its access while preserving
+        the identity row used by historical labels. The username becomes reusable.
+      operationId: delete_manager_v1_managers__user_id__delete
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      responses:
+        '204':
+          description: Successful Response
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
   /v1/portals/{portal_id}/operators:
     get:
       summary: List Operators
@@ -563,7 +537,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivationResponse'
+                $ref: '#/components/schemas/UserResponse'
         '400':
           description: Request validation failed
           content:
@@ -624,13 +598,19 @@ paths:
           type: string
           format: uuid
           title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResetCredentialRequest'
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ActivationResponse'
+                $ref: '#/components/schemas/UserResponse'
         '400':
           description: Request validation failed
           content:
@@ -1506,39 +1486,6 @@ paths:
       security: []
 components:
   schemas:
-    ActivateRequest:
-      properties:
-        token:
-          type: string
-          maxLength: 256
-          minLength: 32
-          title: Token
-        new_password:
-          type: string
-          maxLength: 128
-          minLength: 12
-          title: New Password
-      type: object
-      required:
-      - token
-      - new_password
-      title: ActivateRequest
-    ActivationResponse:
-      properties:
-        user:
-          $ref: '#/components/schemas/UserResponse'
-        activation_token:
-          type: string
-          title: Activation Token
-        expires_at:
-          type: string
-          title: Expires At
-      type: object
-      required:
-      - user
-      - activation_token
-      - expires_at
-      title: ActivationResponse
     ActiveRequest:
       properties:
         active:
@@ -1883,6 +1830,11 @@ components:
           - type: string
           - type: 'null'
           title: Captured By User Id
+        captured_by_user_name:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Captured By User Name
         completeness:
           type: integer
           title: Completeness
@@ -1913,6 +1865,7 @@ components:
       - profession_code
       - trade_profile_version
       - captured_by_user_id
+      - captured_by_user_name
       - completeness
       - alert_state
       - alert_severity
@@ -2063,13 +2016,19 @@ components:
       title: CatalogProductResponse
     ChangePasswordRequest:
       properties:
+        current_password:
+          type: string
+          maxLength: 128
+          minLength: 1
+          title: Current Password
         new_password:
           type: string
           maxLength: 128
-          minLength: 12
+          minLength: 8
           title: New Password
       type: object
       required:
+      - current_password
       - new_password
       title: ChangePasswordRequest
     ConfirmIngestionResponse:
@@ -2101,10 +2060,16 @@ components:
           maxLength: 120
           minLength: 1
           title: Display Name
+        password:
+          type: string
+          maxLength: 128
+          minLength: 8
+          title: Password
       type: object
       required:
       - username
       - display_name
+      - password
       title: CreateIdentityRequest
     CreateManagerRequest:
       properties:
@@ -2118,6 +2083,11 @@ components:
           maxLength: 120
           minLength: 1
           title: Display Name
+        password:
+          type: string
+          maxLength: 128
+          minLength: 8
+          title: Password
         business_portal_ids:
           items:
             type: string
@@ -2129,6 +2099,7 @@ components:
       required:
       - username
       - display_name
+      - password
       - business_portal_ids
       title: CreateManagerRequest
     CreateStoreRequest:
@@ -2145,9 +2116,20 @@ components:
           maxLength: 120
           minLength: 1
           title: Name
+        profession_codes:
+          items:
+            type: string
+            enum:
+            - poissonnerie
+            - boucherie
+            - charcuterie_traiteur
+          type: array
+          minItems: 1
+          title: Profession Codes
       type: object
       required:
       - name
+      - profession_codes
       title: CreateStoreRequest
     CurrentStoreResponse:
       properties:
@@ -2820,6 +2802,17 @@ components:
       required:
       - refresh_token
       title: RefreshRequest
+    ResetCredentialRequest:
+      properties:
+        new_password:
+          type: string
+          maxLength: 128
+          minLength: 8
+          title: New Password
+      type: object
+      required:
+      - new_password
+      title: ResetCredentialRequest
     RunSummary:
       properties:
         run_id:

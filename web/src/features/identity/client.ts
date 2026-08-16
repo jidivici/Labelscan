@@ -1,6 +1,5 @@
 import { request } from '../../api';
 import type {
-  ActivationGrant,
   IamOverview,
   IamPortal,
   IamSession,
@@ -9,6 +8,7 @@ import type {
   ManagerDraft,
   OperatorMutation,
 } from './types';
+import type { ProfessionCode, Store } from '../../types';
 
 function json(body: object): RequestInit {
   return { body: JSON.stringify(body) };
@@ -18,6 +18,38 @@ export function getIamOverview(session: IamSession): Promise<IamOverview> {
   return request<IamOverview>('/v1/me', session);
 }
 
+export function changeMyPassword(
+  session: IamSession,
+  currentPassword: string,
+  newPassword: string,
+): Promise<void> {
+  return request<void>('/v1/me/password', session, {
+    method: 'POST',
+    ...json({ current_password: currentPassword, new_password: newPassword }),
+  });
+}
+
+export function createStore(
+  session: IamSession,
+  draft: { name: string; profession_codes: ProfessionCode[] },
+): Promise<Store> {
+  return request<Store>('/v1/stores', session, {
+    method: 'POST',
+    ...json(draft),
+  });
+}
+
+export function setStoreActive(
+  session: IamSession,
+  storeCode: string,
+  active: boolean,
+): Promise<Store> {
+  return request<Store>(`/v1/stores/${encodeURIComponent(storeCode)}`, session, {
+    method: 'PATCH',
+    ...json({ active }),
+  });
+}
+
 export function listManagers(session: IamSession): Promise<IamUser[]> {
   return request<IamUser[]>('/v1/managers', session);
 }
@@ -25,8 +57,8 @@ export function listManagers(session: IamSession): Promise<IamUser[]> {
 export function createManager(
   session: IamSession,
   draft: ManagerDraft,
-): Promise<ActivationGrant> {
-  return request<ActivationGrant>('/v1/managers', session, {
+): Promise<IamUser> {
+  return request<IamUser>('/v1/managers', session, {
     method: 'POST',
     ...json(draft),
   });
@@ -40,6 +72,12 @@ export function setManagerActive(
   return request<IamUser>(`/v1/managers/${encodeURIComponent(userId)}`, session, {
     method: 'PATCH',
     ...json({ active }),
+  });
+}
+
+export function deleteManager(session: IamSession, userId: string): Promise<void> {
+  return request<void>(`/v1/managers/${encodeURIComponent(userId)}`, session, {
+    method: 'DELETE',
   });
 }
 
@@ -69,8 +107,8 @@ export function createOperator(
   session: IamSession,
   portalId: string,
   draft: IdentityDraft,
-): Promise<ActivationGrant> {
-  return request<ActivationGrant>(
+): Promise<IamUser> {
+  return request<IamUser>(
     `/v1/portals/${encodeURIComponent(portalId)}/operators`,
     session,
     { method: 'POST', ...json(draft) },
@@ -93,11 +131,12 @@ export function updateOperator(
 export function resetOperatorCredential(
   session: IamSession,
   userId: string,
-): Promise<ActivationGrant> {
-  return request<ActivationGrant>(
+  newPassword: string,
+): Promise<IamUser> {
+  return request<IamUser>(
     `/v1/operators/${encodeURIComponent(userId)}/credential-reset`,
     session,
-    { method: 'POST' },
+    { method: 'POST', ...json({ new_password: newPassword }) },
   );
 }
 
@@ -108,8 +147,8 @@ export function listAdmins(session: IamSession): Promise<IamUser[]> {
 export function createAdmin(
   session: IamSession,
   draft: IdentityDraft,
-): Promise<ActivationGrant> {
-  return request<ActivationGrant>('/v1/admins', session, {
+): Promise<IamUser> {
+  return request<IamUser>('/v1/admins', session, {
     method: 'POST',
     ...json(draft),
   });

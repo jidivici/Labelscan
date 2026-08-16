@@ -38,6 +38,7 @@ COPY --from=builder /install /usr/local
 COPY server/alembic.ini ./
 COPY server/migrations/ migrations/
 COPY server/scripts/ scripts/
+COPY server/demo/ demo/
 COPY --from=web-builder /web/dist/ static/
 COPY server/static/assets/labelscan-logo.png static/assets/labelscan-logo.png
 COPY server/entrypoint.sh ./

@@ -35,7 +35,7 @@ from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
 
 router = APIRouter()
-Role = Literal["super_admin", "admin", "manager", "operator"]
+Role = Literal["super_admin", "admin", "manager"]
 
 _SERVICE: UserAdminService | None = None
 _SERVICE_LOCK = threading.Lock()
@@ -95,14 +95,14 @@ class UserPage(BaseModel):
 class CreateUserRequest(BaseModel):
     username: str = Field(min_length=1, max_length=254)
     display_name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=12, max_length=128)
-    role: Role = "operator"
+    password: str = Field(min_length=1, max_length=128)
+    role: Role = "manager"
     store_code: str | None = Field(None, max_length=64)
 
 
 class UpdateUserRequest(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=120)
-    password: str | None = Field(None, min_length=12, max_length=128)
+    password: str | None = Field(None, min_length=1, max_length=128)
     role: Role | None = None
     active: bool | None = None
     store_code: str | None = Field(None, max_length=64)

@@ -1,6 +1,6 @@
 import type { Page, Route } from '@playwright/test';
 
-export type TestRole = 'operator' | 'manager' | 'admin' | 'super_admin';
+export type TestRole = 'manager' | 'admin' | 'super_admin';
 
 interface MockOptions {
   role: TestRole;
@@ -101,12 +101,23 @@ function roleAccess(role: TestRole) {
   }
   if (role === 'super_admin') {
     return {
-      scopes: ['catalog:read', 'identity:read', 'identity:admins:manage'],
+      scopes: [
+        'catalog:read',
+        'identity:read',
+        'identity:admins:manage',
+        'identity:managers:manage',
+        'identity:operators:manage',
+        'identity:portals:manage',
+      ],
       stores,
       portals,
     };
   }
-  return { scopes: [], stores: [], portals: [] };
+  return {
+    scopes: ['catalog:read'],
+    stores: [stores[0]],
+    portals: [portals[0]],
+  };
 }
 
 function displayName(role: TestRole): string {
@@ -155,13 +166,11 @@ function arrivalPage(url: URL) {
   const limit = Number(url.searchParams.get('limit') ?? 50);
   const offset = Number(url.searchParams.get('offset') ?? 0);
   let total = 101;
-  if (url.searchParams.get('status') === 'flagged') total = 9;
-  if (url.searchParams.get('alert_state') === 'open') total = 4;
   if (url.searchParams.get('completeness_min') === '100') total = 80;
   const items = limit === 50 ? [{
     batch_id: `batch-${offset}`,
     store_code: 'PARIS-01',
-    profession_code: url.searchParams.get('profession'),
+    profession_code: url.searchParams.get('profession') ?? 'poissonnerie',
     product_name: offset ? 'Saumon page 2' : 'Saumon atlantique',
     scientific_name: 'Salmo salar',
     gtin: '03012345678903',
@@ -175,14 +184,13 @@ function arrivalPage(url: URL) {
     recorded_at: '2026-08-04T08:00:00Z',
     photo_available: false,
     completeness: 94,
-    alert_state: 'open',
-    alert_severity: 'warning',
   }] : [];
   return { items, total, limit, offset };
 }
 
 export async function installMockBackend(page: Page, options: MockOptions): Promise<MockBackend> {
   const requests: string[] = [];
+  let managerRecords = managers.map((manager) => ({ ...manager, business_portal_ids: [...manager.business_portal_ids] }));
 
   await page.route('**/v1/**', async (route) => {
     const request = route.request();
@@ -196,6 +204,10 @@ export async function installMockBackend(page: Page, options: MockOptions): Prom
       return;
     }
     if (url.pathname === '/v1/auth/logout') {
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    if (url.pathname === '/v1/me/password') {
       await route.fulfill({ status: 204 });
       return;
     }
@@ -216,8 +228,65 @@ export async function installMockBackend(page: Page, options: MockOptions): Prom
       await json(route, arrivalPage(url));
       return;
     }
-    if (url.pathname === '/v1/managers') {
-      await json(route, managers);
+    if (/^\/v1\/arrivals\/[^/]+$/.test(url.pathname)) {
+      const batchId = decodeURIComponent(url.pathname.split('/')[3]);
+      await json(route, {
+        batch_id: batchId,
+        ingestion_id: 'ingestion-e2e-1',
+        store_code: 'PARIS-01',
+        profession_code: 'poissonnerie',
+        status: 'registered',
+        fields: {
+          commercial_designation: 'Saumon atlantique',
+          scientific_name: 'Salmo salar',
+          lot_number: 'LOT-1',
+          supplier_name: 'Criée Atlantique',
+          FAO_area: '27',
+          extra_traceability_note: 'Contrôle visuel conforme',
+        },
+        validation: {
+          scientific_name: { source: 'étiquette', validation_status: 'accepted' },
+        },
+        revision_no: 2,
+        recorded_at: '2026-08-04T08:00:00Z',
+        updated_at: '2026-08-04T09:15:00Z',
+        photo_available: false,
+        captured_by_user_name: 'Marion Poisson',
+        completeness: 94,
+      });
+      return;
+    }
+    if (url.pathname === '/v1/managers' && request.method() === 'GET') {
+      await json(route, managerRecords);
+      return;
+    }
+    if (url.pathname === '/v1/managers' && request.method() === 'POST') {
+      const body = request.postDataJSON() as { username: string; business_portal_ids: string[] };
+      const created = iamUser(`manager-${Date.now()}`, body.username, body.username, 'manager', body.business_portal_ids);
+      managerRecords.push(created);
+      await json(route, created, 201);
+      return;
+    }
+    if (/^\/v1\/managers\/[^/]+\/portals$/.test(url.pathname) && request.method() === 'PATCH') {
+      const userId = decodeURIComponent(url.pathname.split('/')[3]);
+      const body = request.postDataJSON() as { business_portal_ids: string[] };
+      managerRecords = managerRecords.map((manager) => manager.id === userId ? { ...manager, business_portal_ids: body.business_portal_ids } : manager);
+      await json(route, managerRecords.find((manager) => manager.id === userId));
+      return;
+    }
+    if (/^\/v1\/managers\/[^/]+$/.test(url.pathname) && request.method() === 'DELETE') {
+      const userId = decodeURIComponent(url.pathname.split('/')[3]);
+      managerRecords = managerRecords.filter((manager) => manager.id !== userId);
+      await route.fulfill({ status: 204 });
+      return;
+    }
+    if (url.pathname === '/v1/stores' && request.method() === 'POST') {
+      await json(route, { ...stores[0], id: 'store-created', code: 'STORE-CREATED', name: 'Nouveau magasin' }, 201);
+      return;
+    }
+    if (/^\/v1\/stores\/[^/]+$/.test(url.pathname) && request.method() === 'PATCH') {
+      const code = decodeURIComponent(url.pathname.split('/')[3]);
+      await json(route, { ...stores.find((store) => store.code === code) ?? stores[0], active: false });
       return;
     }
     if (/^\/v1\/stores\/[^/]+\/portals$/.test(url.pathname)) {

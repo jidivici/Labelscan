@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-_ORGANIZATION_WIDE_ROLES = frozenset({"admin", "super_admin"})
+_ORGANIZATION_WIDE_ROLES = frozenset({"super_admin"})
 
 
 def _identifiers(value: Any) -> frozenset[str]:
