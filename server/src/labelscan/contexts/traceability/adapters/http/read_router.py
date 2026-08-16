@@ -9,16 +9,20 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.http.access import (
+    access_context_for_principal,
+    postgres_scope,
+)
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.read_models import AuditEntry, audit_entries
 from labelscan.platform.http.security import Principal, require_scope
-from labelscan.platform.db.tenant_context import set_tenant_context
 
 router = APIRouter()
 
@@ -66,14 +70,18 @@ class BatchView(BaseModel):
 
 @router.get("/v1/batches/{batch_id}", response_model=BatchView)
 def get_batch(
-    batch_id: str,
     request: Request,
+    batch_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("traceability:read")),
     engine: Engine = Depends(get_engine),
 ) -> BatchView:
     with engine.connect() as c:
         organization_id = _organization_id(c, principal)
         set_tenant_context(c, organization_id)
+        access = access_context_for_principal(
+            principal, default_organization_id=organization_id
+        )
+        scope, scope_params = postgres_scope(access, alias="b")
         row = (
             c.execute(
                 text(
@@ -86,14 +94,11 @@ def get_batch(
                     "FROM traceability.batch b "
                     "LEFT JOIN traceability.supplier s ON s.id = b.supplier_id "
                     "LEFT JOIN traceability.product p ON p.id = b.product_id "
-                    "WHERE b.id = :id AND b.organization_id = :organization_id "
-                    "AND (:all_stores OR b.store_id::text = :store_id)"
+                    "WHERE b.id = :id AND " + scope
                 ),
                 {
                     "id": batch_id,
-                    "organization_id": organization_id,
-                    "all_stores": principal.role == "admin",
-                    "store_id": principal.store_id or "",
+                    **scope_params,
                 },
             )
             .mappings()

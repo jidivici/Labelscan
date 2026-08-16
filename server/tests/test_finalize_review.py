@@ -35,7 +35,7 @@ from labelscan.contexts.traceability.adapters.review_projection_consumer import 
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import OCR_TEXT, FakeLlm, FakeOcr, traceable_fields
-from tests.conftest import bearer
+from tests.conftest import bearer, jpeg_bytes
 
 RULES = RuleSet(version="test", required_fields=frozenset({"scientific_name"}))
 
@@ -87,7 +87,7 @@ def _seed_review_ready(atomic_client, engine, raw_store) -> str:
         files={
             "image": (
                 "label.jpg",
-                b"atomic-review-" + uuid.uuid4().hex.encode(),
+                jpeg_bytes(b"atomic-review-" + uuid.uuid4().hex.encode()),
                 "image/jpeg",
             )
         },

@@ -56,6 +56,9 @@ _EXTRA_FIELDS = (
     # (a count only — never the values).
     "interim_field_count",
     "next_retry_at",
+    "actor_id",
+    "rate_limit_scope",
+    "retry_after",
 )
 
 

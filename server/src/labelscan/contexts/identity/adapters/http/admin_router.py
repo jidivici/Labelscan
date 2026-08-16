@@ -11,7 +11,7 @@ import threading
 from typing import Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, Response, status
+from fastapi import APIRouter, Depends, Request, Response, status
 from pydantic import BaseModel, Field
 
 from labelscan.contexts.identity.application.manage_users import (
@@ -35,7 +35,7 @@ from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
 
 router = APIRouter()
-Role = Literal["admin", "operator"]
+Role = Literal["super_admin", "admin", "manager"]
 
 _SERVICE: UserAdminService | None = None
 _SERVICE_LOCK = threading.Lock()
@@ -93,19 +93,19 @@ class UserPage(BaseModel):
 
 
 class CreateUserRequest(BaseModel):
-    username: str = Field(min_length=1)
+    username: str = Field(min_length=1, max_length=254)
     display_name: str = Field(min_length=1, max_length=120)
-    password: str = Field(min_length=1)
-    role: Role = "operator"
-    store_code: str | None = None
+    password: str = Field(min_length=1, max_length=128)
+    role: Role = "manager"
+    store_code: str | None = Field(None, max_length=64)
 
 
 class UpdateUserRequest(BaseModel):
     display_name: str | None = Field(None, min_length=1, max_length=120)
-    password: str | None = Field(None, min_length=1)
+    password: str | None = Field(None, min_length=1, max_length=128)
     role: Role | None = None
     active: bool | None = None
-    store_code: str | None = None
+    store_code: str | None = Field(None, max_length=64)
 
 
 def _map_write_error(exc: Exception) -> None:
@@ -138,6 +138,7 @@ def _map_write_error(exc: Exception) -> None:
     "/v1/users",
     response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
+    include_in_schema=False,
 )
 def create_user(
     body: CreateUserRequest,
@@ -145,6 +146,9 @@ def create_user(
     principal: Principal = Depends(require_scope("identity:admin")),
     service: UserAdminService = Depends(get_user_admin_service),
 ) -> UserResponse:
+    raise ApiError(
+        "FORBIDDEN", "generic user mutations are disabled; use the role-specific API"
+    )
     try:
         user = service.create(
             CreateUserCommand(
@@ -165,38 +169,19 @@ def create_user(
     return UserResponse.from_domain(user)
 
 
-@router.get("/v1/users", response_model=UserPage)
+@router.get("/v1/users", response_model=UserPage, include_in_schema=False)
 def list_users(
-    role: Role | None = Query(None),
-    active: bool | None = Query(None),
-    store_code: str | None = Query(None),
-    q: str | None = Query(None),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
     principal: Principal = Depends(require_scope("identity:admin")),
-    service: UserAdminService = Depends(get_user_admin_service),
 ) -> UserPage:
-    try:
-        users, total = service.list(
-            organization_id=principal.organization_id,
-            role=role,
-            active=active,
-            store_code=store_code,
-            query=q,
-            limit=limit,
-            offset=offset,
-        )
-    except ValueError as exc:
-        raise ApiError("VALIDATION_ERROR", str(exc))
-    return UserPage(
-        items=[UserResponse.from_domain(user) for user in users],
-        total=total,
-        limit=limit,
-        offset=offset,
+    raise ApiError(
+        "FORBIDDEN",
+        "generic user listing is disabled; use the role-specific API",
     )
 
 
-@router.patch("/v1/users/{user_id}", response_model=UserResponse)
+@router.patch(
+    "/v1/users/{user_id}", response_model=UserResponse, include_in_schema=False
+)
 def update_user(
     user_id: UUID,
     body: UpdateUserRequest,
@@ -204,6 +189,9 @@ def update_user(
     principal: Principal = Depends(require_scope("identity:admin")),
     service: UserAdminService = Depends(get_user_admin_service),
 ) -> UserResponse:
+    raise ApiError(
+        "FORBIDDEN", "generic user mutations are disabled; use the role-specific API"
+    )
     try:
         user = service.update(
             UpdateUserCommand(
@@ -229,6 +217,7 @@ def update_user(
     "/v1/users/{user_id}",
     status_code=status.HTTP_204_NO_CONTENT,
     response_class=Response,
+    include_in_schema=False,
 )
 def delete_user(
     user_id: UUID,
@@ -237,6 +226,9 @@ def delete_user(
     service: UserAdminService = Depends(get_user_admin_service),
 ) -> Response:
     """Soft-delete an account while preserving its audit history."""
+    raise ApiError(
+        "FORBIDDEN", "generic user mutations are disabled; use the role-specific API"
+    )
     try:
         service.update(
             UpdateUserCommand(

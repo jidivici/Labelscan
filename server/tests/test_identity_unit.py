@@ -20,13 +20,17 @@ from labelscan.contexts.identity.domain.password import hash_password, verify_pa
 from labelscan.contexts.identity.domain.store import normalize_store_code
 from labelscan.contexts.identity.domain.user import (
     ADMIN_SCOPES,
+    MANAGER_SCOPES,
     OPERATOR_SCOPES,
+    SUPER_ADMIN_SCOPES,
     USER_ROLES,
     ManagedUser,
     StoredUser,
     scopes_for_role,
 )
 from labelscan.platform.http import jwt as jwt_codec
+from labelscan.platform.http.errors import ApiError
+from labelscan.platform.http.security import _principal_from_bearer
 
 ADMIN_ID = "11111111-1111-1111-1111-111111111111"
 
@@ -35,14 +39,14 @@ ADMIN_ID = "11111111-1111-1111-1111-111111111111"
 
 
 def test_password_roundtrip():
-    enc = hash_password("s3cr3t-pw")
+    enc = hash_password("s3cr3t-passphrase")
     assert enc.startswith("pbkdf2_sha256$")
-    assert verify_password("s3cr3t-pw", enc)
+    assert verify_password("s3cr3t-passphrase", enc)
     assert not verify_password("wrong-pw", enc)
 
 
 def test_password_salt_is_random():
-    assert hash_password("same") != hash_password("same")
+    assert hash_password("same passphrase") != hash_password("same passphrase")
 
 
 def test_password_rejects_empty():
@@ -88,6 +92,23 @@ def test_jwt_tampered_is_rejected():
         jwt_codec.decode(token + "tamper")
 
 
+def test_jwt_rejects_a_token_for_another_audience(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_JWT_AUDIENCE", "labelscan-clients")
+    token = jwt_codec.encode({"actor_id": "actor-1", "scopes": []})
+    monkeypatch.setenv("LABELSCAN_JWT_AUDIENCE", "another-service")
+    with pytest.raises(jwt_codec.TokenError):
+        jwt_codec.decode(token)
+
+
+def test_production_principal_requires_tenant_claims(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_ENV", "production")
+    token = jwt_codec.encode(
+        {"actor_id": ADMIN_ID, "scopes": [], "sid": "session-family"}
+    )
+    with pytest.raises(ApiError, match="UNAUTHENTICATED"):
+        _principal_from_bearer(token)
+
+
 # ── Login use case ──────────────────────────────────────────────────────────
 
 
@@ -114,7 +135,7 @@ def _admin(password: str) -> StoredUser:
 
 
 def test_login_success_maps_admin_scopes():
-    user = Login(_FakeRepo(_admin("pw")))("admin", "pw")
+    user = Login(_FakeRepo(_admin("valid passphrase")))("admin", "valid passphrase")
     assert user.actor_id == ADMIN_ID
     assert user.username == "admin"
     assert user.display_name == "Administrator"
@@ -124,7 +145,7 @@ def test_login_success_maps_admin_scopes():
 
 def test_login_wrong_password_rejected():
     with pytest.raises(InvalidCredentials):
-        Login(_FakeRepo(_admin("pw")))("admin", "nope")
+        Login(_FakeRepo(_admin("valid passphrase")))("admin", "nope")
 
 
 def test_login_unknown_user_rejected():
@@ -136,10 +157,15 @@ def test_login_unknown_user_rejected():
 
 
 def test_role_scope_matrix_is_additive_and_fail_closed():
-    assert USER_ROLES == {"admin", "operator"}
+    assert USER_ROLES == {"super_admin", "admin", "manager", "operator"}
     assert OPERATOR_SCOPES < ADMIN_SCOPES
+    assert OPERATOR_SCOPES < MANAGER_SCOPES
+    assert ADMIN_SCOPES < SUPER_ADMIN_SCOPES
     assert "identity:admin" in ADMIN_SCOPES
     assert "identity:admin" not in OPERATOR_SCOPES
+    assert "identity:admins:manage" in SUPER_ADMIN_SCOPES
+    assert "identity:admins:manage" not in ADMIN_SCOPES
+    assert "identity:operators:manage" in MANAGER_SCOPES
     assert "catalog:read" in OPERATOR_SCOPES
     assert scopes_for_role("unknown") == frozenset()
 
@@ -199,7 +225,7 @@ def test_create_user_normalizes_fields_and_hashes_password():
     assert audit.actor_id == ADMIN_ID
 
 
-def test_create_user_accepts_any_non_empty_password_and_rejects_unknown_role():
+def test_create_user_enforces_credential_bounds_and_rejects_unknown_role():
     service = UserAdminService(_FakeAdminRepo())
     long_username = "a" * 600
     base = dict(
@@ -209,15 +235,28 @@ def test_create_user_accepts_any_non_empty_password_and_rejects_unknown_role():
         correlation_id="corr",
         trace_id="trace",
     )
-    created = service.create(
-        CreateUserCommand(
-            password="x",
-            role="operator",
-            store_code="PARIS-01",
-            **base,
+    with pytest.raises(ValueError, match="at most 254"):
+        service.create(
+            CreateUserCommand(
+                password="valid passphrase",
+                role="operator",
+                store_code="PARIS-01",
+                **base,
+            )
         )
-    )
-    assert created.username == long_username
+    with pytest.raises(ValueError, match="at least 12"):
+        service.create(
+            CreateUserCommand(
+                username="alice",
+                password="short",
+                role="operator",
+                store_code="PARIS-01",
+                display_name="Alice",
+                actor_id=ADMIN_ID,
+                correlation_id="corr",
+                trace_id="trace",
+            )
+        )
     with pytest.raises(ValueError, match="unknown role"):
         service.create(
             CreateUserCommand(
@@ -235,7 +274,7 @@ def test_operator_requires_a_store_assignment():
             CreateUserCommand(
                 username="alice",
                 display_name="Alice",
-                password="x",
+                password="valid passphrase",
                 role="operator",
                 store_code=None,
                 actor_id=ADMIN_ID,

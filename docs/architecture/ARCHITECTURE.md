@@ -1,7 +1,9 @@
 # LabelScan — Target Architecture
 
-**Status:** Partially implemented (Phases 0–4 shipped; Phase 5 in progress; see §9).
-**Date:** 2026-06-18 (updated from 2026-06-14 design)
+**Status:** Historical target/design record. The current runtime and production trust
+boundaries are documented in
+[`../security/SECURITY-ARCHITECTURE.md`](../security/SECURITY-ARCHITECTURE.md).
+**Date:** 2026-08-03 (runtime reference added; original design dated 2026-06-18)
 **Author:** Software Architect
 **Scope:** `LabelScan/` only. Sibling projects (FishTrac, TRACEO, TRACEO1) are out of scope.
 **System:** HACCP-oriented seafood traceability for large-scale retail fishmongery.
@@ -59,7 +61,7 @@ IDs `D*`/`A*` reference `AUDIT.md`; re-confirmed against the live source files.
 | R13 | **P3** | **Crop geometry wrong on most devices** (D7) | Screen-px→photo-px mapping ignores cover-crop aspect mismatch | `CameraScreen.tsx:127-135` | **RESOLVED** — backend gets full image; no client-side crop |
 | R14 | **P3** | **Non-portable export** (A6) | JSON/CSV embed device-local `photoUri` | `export.ts:36,47` | **PARTIALLY RESOLVED** — export still uses local URIs |
 | R15 | **P3** | **No tests / CI** (A5) | Single initial commit, no test infra | repo | **PARTIALLY RESOLVED** — jest + ruff + pytest exist; coverage partial |
-| R16 | **P3** | **Doc/version drift** (A7) | `AGENTS.md` says Expo v56; `package.json` pins SDK 54 | `package.json:12` | **OPEN** |
+| R16 | **P3** | **Doc/version drift** (A7) | Expo version instructions and app manifest previously drifted | `AGENTS.md`, `package.json`, `app.json` | **RESOLVED** — all pin Expo SDK 54; versioned SDK 54 documentation is authoritative |
 
 **Added beyond the audit (now all resolved):**
 
@@ -187,7 +189,11 @@ extracted along an existing seam.
   through `AuditLogPort` by every context. Append-only table now; event-sourcing deferred
   (ADR-0004).
 
-### 3.2 Backend module layout (proposed `server/` package — to be created in Phase 0)
+### 3.2 Historical proposed backend module layout
+
+> The package is now implemented under `server/src/labelscan/`, with current app,
+> contexts and platform boundaries shown in the security architecture document. The tree
+> below is retained as the original design rationale, not as an operational source of truth.
 
 ```
 server/

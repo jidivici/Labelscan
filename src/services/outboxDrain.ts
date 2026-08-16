@@ -31,12 +31,14 @@ import {
   markFailed,
   markInFlight,
   markSucceeded,
+  operationMatchesOperatorContext,
   purgeTerminalOps,
   type OperationError,
   type OutboxOperation,
   type OutboxResult,
 } from './outbox';
 import { reconcileScanQueue } from './scanQueue';
+import { getOperatorContext } from './authStorage';
 
 export interface DrainResult {
   succeeded: number;
@@ -121,6 +123,7 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
       // Fresh clock each pass: an op enqueued MID-drain has next_attempt_at after
       // the drain's start time — a frozen `now` would never see it due.
       const due = await listPendingDue(Math.max(now, Date.now()));
+      const operatorContext = await getOperatorContext();
       for (const op of due) {
         if (
           op.type !== 'override_field' &&
@@ -128,6 +131,10 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
           op.type !== 'finalize_review' &&
           op.type !== 'create_ingestion'
         ) {
+          result.skipped += 1;
+          continue;
+        }
+        if (!operationMatchesOperatorContext(op, operatorContext)) {
           result.skipped += 1;
           continue;
         }

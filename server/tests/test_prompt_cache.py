@@ -16,6 +16,7 @@ import re
 
 import pytest
 
+from labelscan.business_profiles import trade_profile
 from labelscan.contexts.ingestion.adapters import claude_llm_provider as clp
 from labelscan.contexts.ingestion.adapters.claude_llm_provider import (
     _SYSTEM_TEXT,
@@ -80,13 +81,16 @@ _REPLY = json.dumps(
     {
         "fields": [
             {
-                "name": "scientific_name",
-                "value": "Gadus morhua",
-                "confidence": 0.9,
-                "evidence": ["Gadus morhua"],
-                "validation_status": "present",
+                "name": name,
+                "value": "Gadus morhua" if name == "scientific_name" else None,
+                "confidence": 0.9 if name == "scientific_name" else 0.0,
+                "evidence": ["Gadus morhua"] if name == "scientific_name" else [],
+                "validation_status": (
+                    "present" if name == "scientific_name" else "missing"
+                ),
                 "warnings": [],
             }
+            for name in trade_profile("poissonnerie").fields
         ]
     }
 )

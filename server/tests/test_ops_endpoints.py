@@ -23,8 +23,9 @@ def test_version_reports_build_and_rule_set_version():
     assert r.status_code == 200
     body = r.json()
     assert isinstance(body["version"], str) and body["version"]
-    # active rule set is the B2 placeholder until Compliance authors it
-    assert body["rule_set_version"] == "placeholder-pending-B2"
+    # The compatibility version endpoint reports the default Poissonnerie profile;
+    # each ingestion persists its own métier/profile version authoritatively.
+    assert body["rule_set_version"] == "trade-profile:poissonnerie:v1"
 
 
 class _FakeProbe:

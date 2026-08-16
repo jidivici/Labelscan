@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from labelscan.platform.http.access import AccessContext
+
 
 class RawStore(Protocol):
     """Durable object store for raw payload bytes (content-addressed)."""
@@ -25,13 +27,9 @@ class RawStore(Protocol):
         putting identical content twice is a no-op that returns the same ref."""
         ...
 
-    def exists(
-        self, *, checksum: str, organization_id: str | None = None
-    ) -> bool: ...
+    def exists(self, *, checksum: str, organization_id: str | None = None) -> bool: ...
 
-    def read(
-        self, *, checksum: str, organization_id: str | None = None
-    ) -> bytes: ...
+    def read(self, *, checksum: str, organization_id: str | None = None) -> bytes: ...
 
 
 @dataclass(frozen=True)
@@ -63,6 +61,10 @@ class IngestionWriteRepository(Protocol):
         store_code: str | None = None,
         organization_id: str | None = None,
         store_id: str | None = None,
+        business_portal_id: str | None = None,
+        trade_code_snapshot: str = "poissonnerie",
+        trade_profile_version: str = "1",
+        captured_by_user_id: str | None = None,
         principal: str,
         route: str,
         audit: AuditContext,
@@ -108,6 +110,7 @@ class FieldOverrideRepository(Protocol):
         audit: AuditContext,
         action: str,
         idempotency_key: str | None = None,
+        access: AccessContext | None = None,
     ) -> OverriddenField | None: ...
 
 
@@ -137,7 +140,12 @@ class ConfirmIngestionRepository(Protocol):
     other state (→ 409)."""
 
     def confirm(
-        self, *, ingestion_id: str, audit: AuditContext, action: str
+        self,
+        *,
+        ingestion_id: str,
+        audit: AuditContext,
+        action: str,
+        access: AccessContext | None = None,
     ) -> ConfirmedIngestion | None: ...
 
 
@@ -164,4 +172,5 @@ class ReviewRepository(Protocol):
         idempotency_key: str,
         audit: AuditContext,
         action: str,
+        access: AccessContext | None = None,
     ) -> FinalizedReview | None: ...

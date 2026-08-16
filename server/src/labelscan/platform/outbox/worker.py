@@ -42,7 +42,7 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
-from labelscan.platform.db.tenant_context import set_system_tenant_context
+from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.observability import get_logger
 from labelscan.platform.outbox.backoff import (
     DEFAULT_BASE_SECONDS,
@@ -145,7 +145,6 @@ class OutboxWorker:
         ctx: dict[str, str] = {}
         try:
             with self._engine.begin() as conn:
-                set_system_tenant_context(conn)
                 row = conn.execute(_CLAIM, {"types": types}).mappings().first()
                 if row is None:
                     return False
@@ -157,13 +156,17 @@ class OutboxWorker:
                     correlation_id=row["correlation_id"],
                     trace_id=row["trace_id"],
                 )
+                # Business handlers execute under the tenant carried by the
+                # immutable event payload. An empty context fails closed for
+                # platform-only events and tests. No application-writable GUC
+                # can switch RLS into a cross-tenant mode.
+                message_organization_id = str(msg.payload.get("organization_id") or "")
+                set_tenant_context(conn, message_organization_id)
                 ctx = {
                     "event_type": msg.event_type,
                     "correlation_id": msg.correlation_id,
                     "trace_id": msg.trace_id,
-                    "organization_id": str(
-                        msg.payload.get("organization_id") or ""
-                    ),
+                    "organization_id": message_organization_id,
                 }
                 for consumer, handler in self._handlers.get(msg.event_type, []):
                     if conn.execute(_SEEN, {"c": consumer, "e": msg.id}).first():

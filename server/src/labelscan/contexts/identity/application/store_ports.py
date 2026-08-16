@@ -34,12 +34,14 @@ class StoreAuditContext:
     correlation_id: str
     trace_id: str
     organization_id: str | None = None
+    manage_all_stores: bool = False
 
 
 @dataclass(frozen=True)
 class NewStore:
     code: str
     name: str
+    profession_codes: tuple[str, ...]
     created_by: str
 
 
@@ -61,6 +63,8 @@ class StoreRepository(Protocol):
         organization_id: str | None = None,
         active: bool | None,
         query: str | None,
+        actor_id: str | None = None,
+        include_all: bool = False,
     ) -> list[Store]:
         ...
 

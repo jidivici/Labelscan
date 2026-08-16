@@ -15,7 +15,7 @@ from labelscan.contexts.identity.domain.user import AuthenticatedUser, scopes_fo
 
 # A well-formed hash to verify against when no user is found, so the missing-user
 # path costs the same as the wrong-password path (no timing oracle).
-_DUMMY_HASH = hash_password("invalid-credentials-placeholder")
+_DUMMY_HASH = hash_password("invalid-credentials-placeholder-value")
 
 
 class InvalidCredentials(Exception):
@@ -48,4 +48,8 @@ class Login:
             organization_id=user.organization_id,
             organization_slug=user.organization_slug,
             store_id=user.store_id,
+            business_portal_ids=user.business_portal_ids,
+            business_portal_id=user.business_portal_id,
+            trade_code=user.trade_code,
+            store_ids=user.store_ids,
         )

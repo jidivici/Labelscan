@@ -23,6 +23,14 @@ class CatalogProduct:
     packaging_date: str | None
     recorded_at: str
     photo_available: bool = True
+    store_id: str | None = None
+    business_portal_id: str | None = None
+    profession_code: str = "poissonnerie"
+    trade_profile_version: str = "1"
+    captured_by_user_id: str | None = None
+    completeness: int = 0
+    alert_state: str | None = None
+    alert_severity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -40,3 +48,12 @@ class CatalogArrival:
     recorded_at: str
     updated_at: str
     photo_available: bool
+    store_id: str | None = None
+    business_portal_id: str | None = None
+    profession_code: str = "poissonnerie"
+    trade_profile_version: str = "1"
+    captured_by_user_id: str | None = None
+    captured_by_user_name: str | None = None
+    completeness: int = 0
+    alert_state: str | None = None
+    alert_severity: str | None = None

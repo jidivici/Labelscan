@@ -1,5 +1,9 @@
 # Architecture entreprise LabelScan
 
+> La topologie runtime et les frontières de confiance pré-pentest faisant autorité sont
+> dans [`security/SECURITY-ARCHITECTURE.md`](security/SECURITY-ARCHITECTURE.md). Ce document
+> conserve les décisions fonctionnelles d'architecture entreprise.
+
 ## Principes
 
 Le backend FastAPI reste un monolithe modulaire stateless. PostgreSQL est la

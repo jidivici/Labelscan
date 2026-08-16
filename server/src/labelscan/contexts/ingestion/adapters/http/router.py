@@ -23,13 +23,15 @@ from fastapi import (
     File,
     Form,
     Header,
+    Path,
     Request,
     Response,
     UploadFile,
     status,
 )
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
+from labelscan.business_profiles import trade_profile
 from labelscan.contexts.ingestion.adapters.http.schemas import IngestionAcceptedResponse
 from labelscan.contexts.ingestion.application.confirm_ingestion import (
     ConfirmIngestion,
@@ -58,13 +60,16 @@ from labelscan.contexts.ingestion.application.submit_ingestion import (
     SubmitIngestion,
     SubmitIngestionCommand,
 )
+from labelscan.platform.http.access import access_context_for_principal
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
+from labelscan.platform.image_validation import InvalidImage, validate_image
 
 router = APIRouter()
 
-_ACCEPTED_MEDIA = {"image/jpeg", "image/png", "image/webp", "image/heic"}
+_ACCEPTED_MEDIA = {"image/jpeg", "image/png", "image/webp"}
 _MAX_BYTES = 10 * 1024 * 1024
+_READ_CHUNK_BYTES = 64 * 1024
 
 
 _DEFAULT_USE_CASE: SubmitIngestion | None = None
@@ -72,6 +77,16 @@ _DEFAULT_USE_CASE: SubmitIngestion | None = None
 # concurrent first requests could otherwise each build a use case (and a DB
 # engine), leaving one orphaned. Double-checked locking keeps the build once.
 _USE_CASE_LOCK = threading.Lock()
+
+
+def _bounded_idempotency_key(value: str | None, *, required: bool) -> str | None:
+    if required and not value:
+        raise ApiError("VALIDATION_ERROR", "Idempotency-Key header is required")
+    if value is not None and len(value) > 128:
+        raise ApiError(
+            "VALIDATION_ERROR", "Idempotency-Key must be at most 128 characters"
+        )
+    return value
 
 
 def get_submit_ingestion() -> SubmitIngestion:
@@ -103,14 +118,15 @@ def submit_ingestion(
     request: Request,
     response: Response,
     image: UploadFile = File(...),
-    barcode_raw: str | None = Form(None),
-    client_captured_at: str | None = Form(None),
+    barcode_raw: str | None = Form(None, max_length=128),
+    client_captured_at: str | None = Form(None, max_length=64),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     principal: Principal = Depends(require_scope("ingestion:write")),
     use_case: SubmitIngestion = Depends(get_submit_ingestion),
 ) -> IngestionAcceptedResponse:
-    if not idempotency_key:
-        raise ApiError("VALIDATION_ERROR", "Idempotency-Key header is required")
+    idempotency_key = _bounded_idempotency_key(idempotency_key, required=True)
+    if barcode_raw is not None and len(barcode_raw) > 128:
+        raise ApiError("VALIDATION_ERROR", "barcode_raw must be at most 128 characters")
 
     media_type = (image.content_type or "").split(";")[0].strip()
     if media_type not in _ACCEPTED_MEDIA:
@@ -118,12 +134,31 @@ def submit_ingestion(
             "UNSUPPORTED_MEDIA_TYPE", f"media type '{media_type}' is not accepted"
         )
 
-    data = image.file.read()
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = image.file.read(_READ_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_BYTES:
+            raise ApiError(
+                "PAYLOAD_TOO_LARGE", "image exceeds the configured size limit"
+            )
+        chunks.append(chunk)
+    data = b"".join(chunks)
     if not data:
         raise ApiError("VALIDATION_ERROR", "empty image payload")
-    if len(data) > _MAX_BYTES:
-        raise ApiError("PAYLOAD_TOO_LARGE", "image exceeds the configured size limit")
+    try:
+        validate_image(data, media_type)
+    except InvalidImage as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc))
 
+    access = access_context_for_principal(principal)
+    portal_id = getattr(principal, "business_portal_id", None)
+    if portal_id is None and len(access.business_portal_ids) == 1:
+        portal_id = next(iter(access.business_portal_ids))
+    profile = trade_profile(getattr(principal, "trade_code", None))
     command = SubmitIngestionCommand(
         image_bytes=data,
         content_type=media_type,
@@ -136,6 +171,9 @@ def submit_ingestion(
         store_code=principal.store_code,
         organization_id=principal.organization_id,
         store_id=principal.store_id,
+        business_portal_id=portal_id,
+        trade_code_snapshot=profile.code,
+        trade_profile_version=profile.version,
     )
 
     try:
@@ -185,8 +223,8 @@ def get_override_field() -> OverrideField:
 
 
 class OverrideFieldRequest(BaseModel):
-    value: str | None = None  # null/blank => the reviewer cleared the field
-    note: str | None = None
+    value: str | None = Field(None, max_length=512)
+    note: str | None = Field(None, max_length=2000)
     # Explicit acknowledgement required to override a GS1-owned (barcode-derived)
     # field; without it those fields stay 409 FIELD_NOT_EDITABLE (back-compat).
     force_gs1: bool = False
@@ -209,14 +247,15 @@ class OverriddenFieldResponse(BaseModel):
     response_model=OverriddenFieldResponse,
 )
 def override_field(
-    ingestion_id: str,
-    field_name: str,
     request: Request,
     body: OverrideFieldRequest,
+    ingestion_id: str = Path(min_length=1, max_length=128),
+    field_name: str = Path(min_length=1, max_length=128),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     principal: Principal = Depends(require_scope("extraction:review")),
     use_case: OverrideField = Depends(get_override_field),
 ) -> OverriddenFieldResponse:
+    idempotency_key = _bounded_idempotency_key(idempotency_key, required=False)
     command = OverrideFieldCommand(
         ingestion_id=ingestion_id,
         field_name=field_name,
@@ -230,6 +269,7 @@ def override_field(
         # original outcome instead of appending another run.
         idempotency_key=idempotency_key,
         force_gs1=body.force_gs1,
+        access=access_context_for_principal(principal),
     )
     try:
         result = use_case(command)
@@ -295,8 +335,8 @@ class ConfirmIngestionResponse(BaseModel):
     response_model=ConfirmIngestionResponse,
 )
 def confirm_ingestion(
-    ingestion_id: str,
     request: Request,
+    ingestion_id: str = Path(min_length=1, max_length=128),
     principal: Principal = Depends(require_scope("extraction:review")),
     use_case: ConfirmIngestion = Depends(get_confirm_ingestion),
 ) -> ConfirmIngestionResponse:
@@ -306,6 +346,7 @@ def confirm_ingestion(
         correlation_id=request.state.correlation_id,
         trace_id=request.state.trace_id,
         organization_id=principal.organization_id,
+        access=access_context_for_principal(principal),
     )
     try:
         result = use_case(command)
@@ -328,7 +369,7 @@ def confirm_ingestion(
     )
 
 
-# ── Enterprise sync: all 17 final fields + confirmation in one commit ────────────
+# ── Enterprise sync: complete trade-profile review + confirmation in one commit ─
 
 _DEFAULT_FINALIZE_REVIEW: FinalizeReview | None = None
 _FINALIZE_REVIEW_LOCK = threading.Lock()
@@ -352,7 +393,15 @@ def get_finalize_review() -> FinalizeReview:
 
 class FinalizeReviewRequest(BaseModel):
     fields: dict[str, str | None]
-    note: str | None = None
+    note: str | None = Field(None, max_length=2000)
+
+    @model_validator(mode="after")
+    def values_are_bounded(self):
+        if any(
+            value is not None and len(value) > 512 for value in self.fields.values()
+        ):
+            raise ValueError("review field values must be at most 512 characters")
+        return self
 
 
 class FinalizeReviewResponse(BaseModel):
@@ -367,15 +416,14 @@ class FinalizeReviewResponse(BaseModel):
     response_model=FinalizeReviewResponse,
 )
 def finalize_review(
-    ingestion_id: str,
     request: Request,
     body: FinalizeReviewRequest,
+    ingestion_id: str = Path(min_length=1, max_length=128),
     idempotency_key: str | None = Header(None, alias="Idempotency-Key"),
     principal: Principal = Depends(require_scope("extraction:review")),
     use_case: FinalizeReview = Depends(get_finalize_review),
 ) -> FinalizeReviewResponse:
-    if not idempotency_key:
-        raise ApiError("VALIDATION_ERROR", "Idempotency-Key header is required")
+    idempotency_key = _bounded_idempotency_key(idempotency_key, required=True)
     if not principal.organization_id:
         raise ApiError("UNAUTHENTICATED", "organization context is missing")
     try:
@@ -389,6 +437,7 @@ def finalize_review(
                 actor_id=principal.actor_id,
                 correlation_id=request.state.correlation_id,
                 trace_id=request.state.trace_id,
+                access=access_context_for_principal(principal),
             )
         )
     except InvalidReviewFields as exc:

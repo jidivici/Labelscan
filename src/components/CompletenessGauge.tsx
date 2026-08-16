@@ -19,6 +19,8 @@ import { colors, typography } from '../theme';
 export interface CompletenessGaugeProps {
   /** Number of canonical fields already filled (0..CANONICAL_FIELD_COUNT). */
   filled: number;
+  /** Profile-specific denominator (17 poissonnerie, 22 other V1 profiles). */
+  total?: number;
   /** While the extraction is still running the water level gently waves. */
   loading?: boolean;
   /** Pixel diameter of the gauge (default 46 — fits PendingScanCard). */
@@ -28,11 +30,13 @@ export interface CompletenessGaugeProps {
 
 export function CompletenessGauge({
   filled,
+  total = CANONICAL_FIELD_COUNT,
   loading = false,
   size = 46,
   accessibilityLabel,
 }: CompletenessGaugeProps) {
-  const ratio = Math.max(0, Math.min(1, filled / CANONICAL_FIELD_COUNT));
+  const safeTotal = total > 0 ? total : CANONICAL_FIELD_COUNT;
+  const ratio = Math.max(0, Math.min(1, filled / safeTotal));
 
   const level = useRef(new Animated.Value(ratio)).current;
   const wavePhase = useRef(new Animated.Value(0)).current;
@@ -74,14 +78,14 @@ export function CompletenessGauge({
   );
 
   const a11y =
-    accessibilityLabel ?? `Extraction ${filled} sur ${CANONICAL_FIELD_COUNT} champs${loading ? ', en cours' : ''}`;
+    accessibilityLabel ?? `Extraction ${filled} sur ${safeTotal} champs${loading ? ', en cours' : ''}`;
 
   return (
     <View
       style={[styles.root, ringStyle]}
       accessibilityRole="progressbar"
       accessibilityLabel={a11y}
-      accessibilityValue={{ min: 0, max: CANONICAL_FIELD_COUNT, now: filled }}
+      accessibilityValue={{ min: 0, max: safeTotal, now: filled }}
     >
       {/* Water fill — clipped to the circle by overflow:hidden + borderRadius. */}
       <Animated.View style={[styles.water, { height: Animated.multiply(waterHeight, size) }]} />
@@ -89,7 +93,7 @@ export function CompletenessGauge({
       <View style={styles.scoreWrap}>
         <Text style={[typography.labelSmall, styles.score]}>
           {filled}
-          <Text style={styles.scoreDenom}>/{CANONICAL_FIELD_COUNT}</Text>
+          <Text style={styles.scoreDenom}>/{safeTotal}</Text>
         </Text>
       </View>
     </View>

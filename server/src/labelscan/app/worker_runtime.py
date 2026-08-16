@@ -18,6 +18,7 @@ import time
 from labelscan.app.domain_wiring import register_domain_consumers
 from labelscan.app.extraction_wiring import register_extraction_consumer
 from labelscan.app.ocr_wiring import build_ocr_provider
+from labelscan.platform.config import validate_runtime_configuration
 from labelscan.platform.db.engine import make_engine
 from labelscan.platform.observability import configure_logging
 from labelscan.platform.outbox.worker import OutboxWorker
@@ -26,6 +27,7 @@ from labelscan.platform.storage_factory import build_raw_store
 
 def build_outbox_worker() -> OutboxWorker:
     configure_logging()
+    validate_runtime_configuration("worker")
     worker = OutboxWorker(make_engine())
 
     raw_store = build_raw_store()

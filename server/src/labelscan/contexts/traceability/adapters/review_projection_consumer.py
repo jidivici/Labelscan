@@ -26,11 +26,13 @@ class ReviewProjectionConsumer:
                     updated_at = clock_timestamp()
                 WHERE projection.ingestion_id = :ingestion_id
                   AND projection.organization_id = :organization_id
+                  AND projection.business_portal_id IS NOT DISTINCT FROM :business_portal_id
                 """
             ),
             {
                 "run_id": payload["run_id"],
                 "ingestion_id": payload["ingestion_id"],
                 "organization_id": payload["organization_id"],
+                "business_portal_id": payload.get("business_portal_id"),
             },
         )

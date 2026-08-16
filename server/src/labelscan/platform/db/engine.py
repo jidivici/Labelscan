@@ -6,9 +6,9 @@ layers never import this module (enforced by G-ARCH / .importlinter).
 
 from __future__ import annotations
 
-import os
-
 from sqlalchemy import Engine, create_engine
+
+from labelscan.platform.config import secret_value
 
 
 def database_url() -> str:
@@ -17,7 +17,7 @@ def database_url() -> str:
     Uses psycopg (v3) driver. No default host/credentials are baked in —
     a missing URL is a hard error, never a silent fallback.
     """
-    url = os.environ.get("DATABASE_URL")
+    url = secret_value("DATABASE_URL")
     if not url:
         raise RuntimeError(
             "DATABASE_URL is not set. Expected a postgresql+psycopg://... URL."

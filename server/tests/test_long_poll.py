@@ -30,6 +30,7 @@ from labelscan.contexts.ingestion.application.submit_ingestion import (
 )
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.http.deps import get_engine
+from labelscan.platform.http.rate_limit import rate_limits
 from tests.conftest import ACTOR_ID, bearer
 
 AUTH = bearer("ingestion:read", principal="device-01")
@@ -148,6 +149,23 @@ def test_missing_ingestion_404s_promptly_even_with_wait(client):
     elapsed = time.monotonic() - t0
     assert r.status_code == 404
     assert elapsed < 1.0  # a missing row never holds the request
+
+
+def test_concurrency_limit_returns_rate_limited_with_retry_after(client, monkeypatch):
+    monkeypatch.setenv("LABELSCAN_LONG_POLL_PER_ACTOR", "1")
+    rate_limits.acquire_hold(ACTOR_ID)
+    try:
+        response = client.get(
+            "/v1/ingestions/00000000-0000-0000-0000-00000000dead",
+            params={"wait": 10, "last_status": "raw_stored"},
+            headers=AUTH,
+        )
+    finally:
+        rate_limits.release_hold(ACTOR_ID)
+
+    assert response.status_code == 429
+    assert response.json()["error_code"] == "RATE_LIMITED"
+    assert response.headers["Retry-After"] == "1"
 
 
 def test_plain_get_without_params_is_untouched(submit, client):
