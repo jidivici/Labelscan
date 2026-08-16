@@ -31,6 +31,7 @@ import {
   Text,
   Pressable,
   Alert,
+  Platform,
   useWindowDimensions,
 } from 'react-native';
 import { StatusBar } from 'react-native';
@@ -330,6 +331,12 @@ export function CameraScreen() {
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="back"
+          // Keep the application UI portrait while letting the native iOS camera
+          // use the phone's *physical* orientation for the captured pixels. This
+          // is essential when the operator holds the phone landscape: the source
+          // buffer then matches the live frame before our exact crop + left
+          // rotation are applied. This prop does not rotate the React Native UI.
+          responsiveOrientationWhenOrientationLocked={Platform.OS === 'ios'}
           flash={torchOn ? 'on' : 'off'}
           enableTorch={torchOn}
           onBarcodeScanned={taking ? undefined : handleBarcodeScanned}
