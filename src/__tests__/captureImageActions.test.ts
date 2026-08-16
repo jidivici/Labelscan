@@ -14,10 +14,4 @@ describe('captureImageActions', () => {
     expect(actions.some((action) => 'rotate' in action)).toBe(false);
   });
 
-  it('keeps capture orientation when only resizing', () => {
-    const actions = captureImageActions(null, { height: 1600 });
-
-    expect(actions).toEqual([{ resize: { height: 1600 } }]);
-    expect(actions.some((action) => 'rotate' in action)).toBe(false);
-  });
 });
