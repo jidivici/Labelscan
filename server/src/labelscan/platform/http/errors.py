@@ -21,6 +21,7 @@ _SAFE_RESPONSE_HEADERS = {"retry-after"}
 ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
     "VALIDATION_ERROR": (400, "Malformed request", False),
     "UNAUTHENTICATED": (401, "Missing or invalid credentials", False),
+    "INVALID_CURRENT_PASSWORD": (401, "Current password is incorrect", False),
     "FORBIDDEN": (403, "Insufficient scope for this operation", False),
     "NOT_FOUND": (404, "Resource not found", False),
     "USER_ALREADY_EXISTS": (409, "Username is already in use", False),

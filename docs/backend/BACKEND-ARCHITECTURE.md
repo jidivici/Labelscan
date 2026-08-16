@@ -248,11 +248,11 @@ vice versa. Role, portal, password, credential-reset, account, and portal-active
 changes revoke affected sessions.
 
 The role-specific IAM API replaces all generic user reads and mutations: a super-admin
-manages admins; an admin manages managers and store portals; a manager manages
-operators inside assigned portals. Accounts start inactive and receive a
-one-time, 24-hour activation grant whose hash alone is stored. Admins never
-read, set, or reset another user's credential. Runtime deletion is always a
-reversible soft state transition.
+manages admins and retains every admin power; an admin manages stores, professions,
+managers and store portals; a manager manages operators inside assigned portals.
+Accounts are created active with a direct password. Users change their own password
+only after supplying the current password. Runtime deletion is always a reversible
+soft state transition.
 
 `GET /v1/arrivals` belongs to the traceability context. It projects immutable
 registered batches into a searchable arrivals feed. Admin and super-admin are
@@ -285,7 +285,7 @@ isolated from business routes.
   for GS1-reconciled fields (confidence 1.0, bypass evidence gate).
 - **`extracted_field.field_name`** includes `gtin` (migration 0008) — set by GS1
   parser from AI 01, not by the LLM.
-- **Migrations:** Alembic `0001 → 0025`, with guarded downgrade behavior (CI runs
+- **Migrations:** Alembic `0001 → 0026`, with guarded downgrade behavior (CI runs
   migration proofs).
   - `0007` adds `identity.app_user` (credential store for JWT auth);
   - `0008` extends `extracted_field` CHECKs (`source += 'gs1'`, `field_name += 'gtin'`);
@@ -297,8 +297,8 @@ isolated from business routes.
   - `0017` snapshots the submitting store on ingestions and immutable batches for arrivals.
   - `0024` adds rotating, revocable refresh-session families.
   - `0025` adds the four IAM roles, the three professions, business portals,
-    user-portal assignments, activation grants, client-type sessions, and
-    organization/store/portal ownership snapshots.
+    user-portal assignments, client-type sessions, and ownership snapshots.
+  - `0026` removes the obsolete account-activation table and lookup function.
 
 ---
 
@@ -322,21 +322,20 @@ Conventions for every endpoint below:
 
 | Method | Path | Purpose | Auth scope | Idempotent? |
 |--------|------|---------|-----------|-------------|
-| POST | `/v1/o/{organization_slug}/auth/login` | Browser login for manager/admin/super-admin; rotating cookie session. | none | No |
+| POST | `/v1/o/{organization_slug}/auth/login` | Browser login for operator/manager/admin/super-admin; rotating cookie session. | none | No |
 | POST | `/v1/mobile/auth/login` | Mobile login for operator only; explicit refresh token. | none | No |
-| POST | `/v1/auth/activate` | Consume one-time activation/reset grant and set a password. | none | Token single-use |
 | POST | `/v1/auth/refresh`, `/v1/mobile/auth/refresh` | Rotate a same-client-type refresh session. | refresh credential | Rotation-safe |
 | GET | `/v1/me` | Current user, scopes, authorized stores, and detailed portals. | authenticated | Yes (safe) |
 | POST | `/v1/me/password` | Change own password and revoke own sessions. | authenticated | No |
 | GET | `/v1/professions` | Three versioned profiles: `poissonnerie`, `boucherie`, `charcuterie_traiteur`. | `catalog:read` | Yes (safe) |
-| GET, POST | `/v1/admins` | Super-admin lists or creates inactive admins. | `identity:admins:manage` | GET only |
+| GET, POST | `/v1/admins` | Super-admin lists or creates active admins. | `identity:admins:manage` | GET only |
 | DELETE | `/v1/admins/{user_id}` | Super-admin soft-deactivates an admin. | `identity:admins:manage` | State-idempotent |
-| GET, POST | `/v1/managers` | Admin/super-admin lists or invites managers. | `identity:managers:manage` | GET only |
+| GET, POST | `/v1/managers` | Admin/super-admin lists or creates managers. | `identity:managers:manage` | GET only |
 | PATCH | `/v1/managers/{user_id}` | Toggle manager activity. | `identity:managers:manage` | State-idempotent |
 | PATCH | `/v1/managers/{user_id}/portals` | Replace active assignments without deleting history. | `identity:managers:manage` | State-idempotent |
 | GET, POST | `/v1/portals/{portal_id}/operators` | Manager lists or invites portal-scoped operators. | `identity:operators:manage` | GET only |
 | PATCH | `/v1/portals/{portal_id}/operators/{user_id}` | Manager reassigns or toggles an in-scope operator. | `identity:operators:manage` | State-idempotent |
-| POST | `/v1/operators/{user_id}/credential-reset` | Manager invalidates credential and issues one-time reset grant. | `identity:operators:manage` | No |
+| POST | `/v1/operators/{user_id}/credential-reset` | Manager directly sets a new operator password and revokes sessions. | `identity:operators:manage` | No |
 | POST | `/v1/stores` | Create a uniquely coded store. | `identity:admin` | No |
 | GET | `/v1/stores` | List/filter the store directory. | `identity:admin` | Yes (safe) |
 | PATCH | `/v1/stores/{code}` | Rename, activate, or safely disable a store. | `identity:admin` | State-idempotent |
@@ -654,7 +653,8 @@ Constraints:
 | 0008 | GS1 provenance: `source += 'gs1'`, `field_name += 'gtin'` |
 | 0009 | Outbox DLQ + backoff: attempts, next_retry_at, last_error, status columns |
 | 0024 | Opaque rotating refresh sessions, replay detection, and family revocation |
-| 0025 | Multi-trade professions/portals, IAM assignments/activation, client-type sessions, and ownership snapshots |
+| 0025 | Multi-trade professions/portals, IAM assignments, client-type sessions, and ownership snapshots |
+| 0026 | Removal of obsolete account-activation storage and lookup function |
 
 ### 15.4 Reversibility of each backend phase
 

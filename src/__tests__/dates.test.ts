@@ -1,4 +1,4 @@
-import { formatDate, formatDateShort } from '../services/dates';
+import { formatDate, formatDateShort, parseDateValue } from '../services/dates';
 
 describe('formatDate / formatDateShort', () => {
   it('formats a valid date without ever emitting "Invalid"', () => {
@@ -10,10 +10,18 @@ describe('formatDate / formatDateShort', () => {
     expect(formatDateShort('2026-06-20')).toBe('20/06/2026');
   });
 
-  it('falls back to today for missing/invalid input (no "Invalid date")', () => {
-    // Both invalid and undefined collapse to the same (today) rendering.
-    expect(formatDate('not-a-date')).toBe(formatDate(undefined));
-    expect(formatDate('')).not.toMatch(/invalid/i);
-    expect(formatDateShort('garbage')).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+  it('normalizes PostgreSQL timestamps for Hermes', () => {
+    expect(parseDateValue('2026-08-14 15:33:10.533187+00')?.toISOString()).toBe(
+      '2026-08-14T15:33:10.533Z',
+    );
+    expect(parseDateValue('2026-08-09 15:33:10.533187+00')?.toISOString()).toBe(
+      '2026-08-09T15:33:10.533Z',
+    );
+  });
+
+  it('renders missing/invalid input as unknown instead of today', () => {
+    expect(formatDate('not-a-date')).toBe('Date inconnue');
+    expect(formatDate('')).toBe('Date inconnue');
+    expect(formatDateShort('garbage')).toBe('Date inconnue');
   });
 });

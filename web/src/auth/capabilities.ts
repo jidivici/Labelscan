@@ -9,7 +9,7 @@ import {
   type Session,
 } from '../types';
 
-const ROLE_VALUES = new Set<string>(['super_admin', 'admin', 'manager', 'operator']);
+const ROLE_VALUES = new Set<string>(['super_admin', 'admin', 'manager']);
 const CAPABILITY_VALUES = new Set<string>(Object.values(CAPABILITIES));
 const PROFESSION_VALUES = new Set<string>(PROFESSION_CODES);
 
@@ -33,7 +33,7 @@ const SERVER_SCOPE_CAPABILITIES: Record<string, readonly Capability[]> = {
 };
 
 function validRole(role: string): Role {
-  return ROLE_VALUES.has(role) ? role as Role : 'operator';
+  return ROLE_VALUES.has(role) ? role as Role : 'manager';
 }
 
 /** Build only the authenticated bearer shell. `/v1/me` remains the authority for access. */

@@ -1,8 +1,16 @@
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  type FocusEvent as ReactFocusEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+} from 'react';
 import { Link, useLocation, useParams } from 'wouter';
 
 import { useAuth } from '../auth/AuthContext';
-import { canAccessProfession, hasCapability } from '../auth/capabilities';
+import { canAccessProfession, firstAccessibleProfession, hasCapability } from '../auth/capabilities';
 import { PORTALS, portalDefinition } from '../portals/registry';
 import { ScopeProvider, useScope } from '../scope/ScopeContext';
 import { CAPABILITIES, type ProfessionCode } from '../types';
@@ -12,7 +20,6 @@ const ROLE_LABELS: Record<string, string> = {
   manager: 'Manager',
   admin: 'Administrateur',
   super_admin: 'Super-administrateur',
-  operator: 'Opérateur',
 };
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -22,8 +29,9 @@ export function AppShell({ children }: { children: ReactNode }) {
 function ShellContent({ children }: { children: ReactNode }) {
   const { session, logout } = useAuth();
   const { stores, storesLoading, selectedStoreCode, setSelectedStoreCode } = useScope();
-  const { organizationSlug = 'labelscan', profession } = useParams();
+  const { organizationSlug = 'labelscan', profession: routeProfession } = useParams();
   const [location, navigate] = useLocation();
+  const profession = routeProfession ?? (location.includes('/portails/tous/') ? 'tous' : undefined);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileViewport, setMobileViewport] = useState(
     () => typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 820px)').matches,
@@ -32,6 +40,7 @@ function ShellContent({ children }: { children: ReactNode }) {
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const sidebarBrandRef = useRef<HTMLButtonElement>(null);
   const currentPortal = portalDefinition(profession);
+  const allProfessions = profession === 'tous' || location.includes('/administration');
 
   useEffect(() => {
     if (typeof window.matchMedia !== 'function') return;
@@ -91,10 +100,26 @@ function ShellContent({ children }: { children: ReactNode }) {
 
   const availablePortals = Object.values(PORTALS).filter((portal) => canAccessProfession(session, portal.code));
   const base = `/o/${organizationSlug}`;
-  const portalBase = currentPortal ? `${base}/portails/${currentPortal.code}` : '';
   const retainStore = selectedStoreCode ? `?store=${encodeURIComponent(selectedStoreCode)}` : '';
+  const defaultProfession = firstAccessibleProfession(session);
+  const canSelectScope = session.user.role === 'admin' || session.user.role === 'super_admin';
+  const arrivalsPath = allProfessions
+    ? `${base}/portails/tous/arrivages`
+    : currentPortal
+      ? `${base}/portails/${currentPortal.code}/arrivages`
+      : canSelectScope
+        ? `${base}/portails/tous/arrivages`
+        : defaultProfession
+          ? `${base}/portails/${defaultProfession}/arrivages`
+          : `${base}/portails`;
+  const assignedStore = stores[0]?.name ?? '';
+  const homePath = canSelectScope
+    ? `${base}/portails/tous/arrivages${retainStore}`
+    : defaultProfession
+      ? `${base}/portails/${defaultProfession}/arrivages${retainStore}`
+      : `${base}/portails${retainStore}`;
 
-  function changeProfession(next: ProfessionCode) {
+  function changeProfession(next: ProfessionCode | 'tous') {
     navigate(`${base}/portails/${next}/arrivages${retainStore}`);
     setMobileOpen(false);
   }
@@ -102,40 +127,54 @@ function ShellContent({ children }: { children: ReactNode }) {
   const closeNavigation = () => setMobileOpen(false);
   const sidebarInactive = mobileViewport && !mobileOpen;
   return <div className="app-shell">
-    {mobileOpen && <button className="sidebar-scrim" aria-label="Fermer le menu" tabIndex={-1} onClick={closeNavigation} />}
+    {mobileOpen && <button type="button" className="sidebar-scrim" aria-label="Fermer le menu" tabIndex={-1} onClick={closeNavigation} />}
     <aside ref={sidebarRef} id="app-sidebar" className={`sidebar ${mobileOpen ? 'open' : ''}`} aria-label="Navigation du portail" aria-hidden={sidebarInactive || undefined} inert={sidebarInactive || undefined}>
-      <button ref={sidebarBrandRef} className="sidebar-brand" onClick={() => navigate(`${base}/portails`)}>
+      <button ref={sidebarBrandRef} type="button" className="sidebar-brand" onClick={() => navigate(homePath)}>
         <BrandMark />
-        <span><strong>LabelScan</strong><small>Portail professionnel</small></span>
+        <span><strong>LabelScan</strong><small>Traçabilité</small></span>
       </button>
 
       <div className="scope-selectors">
-        <label><span>Métier</span><select value={currentPortal?.code ?? ''} onChange={(event) => changeProfession(event.target.value as ProfessionCode)}><option value="" disabled>Choisir un portail</option>{availablePortals.map((portal) => <option key={portal.code} value={portal.code}>{portal.shortLabel}</option>)}</select></label>
-        <label><span>Magasin</span><select value={selectedStoreCode} onChange={(event) => setSelectedStoreCode(event.target.value)} disabled={storesLoading || stores.length === 0}><option value="">{stores.length > 1 ? 'Tous mes magasins' : 'Périmètre attribué'}</option>{stores.map((store) => <option value={store.code} key={store.code}>{store.name}</option>)}</select></label>
+        {canSelectScope
+          ? <SidebarScopeSelect
+              label="Métier"
+              placeholder="Choisir un métier"
+              value={allProfessions ? 'tous' : currentPortal?.code ?? ''}
+              options={[{ value: 'tous', label: 'Tous les métiers' }, ...availablePortals.map((portal) => ({ value: portal.code, label: portal.shortLabel }))]}
+              onChange={(next) => changeProfession(next as ProfessionCode | 'tous')}
+            />
+          : currentPortal && <div className="scope-value"><span>Métier</span><strong>{currentPortal.shortLabel}</strong></div>}
+        {canSelectScope
+          ? <SidebarScopeSelect
+              label="Magasin"
+              placeholder="Tous les magasins"
+              value={selectedStoreCode}
+              options={[{ value: '', label: 'Tous les magasins' }, ...stores.map((store) => ({ value: store.code, label: store.name }))]}
+              disabled={storesLoading || stores.length === 0}
+              onChange={setSelectedStoreCode}
+            />
+          : assignedStore && <div className="scope-value"><span>Magasin</span><strong>{assignedStore}</strong></div>}
       </div>
 
       <nav className="sidebar-nav" aria-label="Navigation principale">
-        <span className="nav-heading">Suivi</span>
-        <ActiveLink href={`${base}/portails${retainStore}`} exact onClick={closeNavigation}><span className="nav-symbol">◇</span>Portails</ActiveLink>
-        {currentPortal && <ActiveLink href={`${portalBase}/arrivages${retainStore}`} onClick={closeNavigation}><span className="nav-symbol">▦</span>Arrivages</ActiveLink>}
-        {currentPortal && hasCapability(session, CAPABILITIES.OPERATORS_MANAGE) && <ActiveLink href={`${portalBase}/operateurs${retainStore}`} onClick={closeNavigation}><span className="nav-symbol">◎</span>Opérateurs</ActiveLink>}
+        <ActiveLink href={`${arrivalsPath}${retainStore}`} onClick={closeNavigation}>Arrivages</ActiveLink>
 
-        {(hasCapability(session, CAPABILITIES.ADMIN_WORKSPACE_VIEW) || hasCapability(session, CAPABILITIES.ADMINS_MANAGE)) && <span className="nav-heading separated">Administration</span>}
-        {hasCapability(session, CAPABILITIES.ADMIN_WORKSPACE_VIEW) && <ActiveLink href={`${base}/administration${retainStore}`} onClick={closeNavigation}><span className="nav-symbol">⌂</span>Magasins & managers</ActiveLink>}
-        {hasCapability(session, CAPABILITIES.ADMINS_MANAGE) && <ActiveLink href={`${base}/super-administration${retainStore}`} onClick={closeNavigation}><span className="nav-symbol">✦</span>Administrateurs</ActiveLink>}
+        {hasCapability(session, CAPABILITIES.ADMIN_WORKSPACE_VIEW) && <ActiveLink href={`${base}/administration${retainStore}`} onClick={closeNavigation}>Équipe & portails</ActiveLink>}
+        {hasCapability(session, CAPABILITIES.ADMINS_MANAGE) && <ActiveLink href={`${base}/super-administration${retainStore}`} onClick={closeNavigation}>Administrateurs</ActiveLink>}
       </nav>
 
       <footer className="sidebar-footer">
-        <div className="user-summary"><span className="user-avatar">{session.user.display_name.slice(0, 2).toUpperCase()}</span><span><strong>{session.user.display_name}</strong><small>{ROLE_LABELS[session.user.role] ?? 'Compte professionnel'}</small></span></div>
-        <button className="logout-button" onClick={() => void logout()}>Se déconnecter <span>↗</span></button>
+        <div className="user-summary"><span className="user-avatar">{session.user.username.slice(0, 2).toUpperCase()}</span><span><strong>{session.user.username}</strong><small>{ROLE_LABELS[session.user.role] ?? 'Compte professionnel'}</small></span></div>
+        <Link href={`${base}/compte`} className="account-link" onClick={closeNavigation}>Mon compte</Link>
+        <button type="button" className="logout-button" onClick={() => void logout()}>Se déconnecter</button>
       </footer>
     </aside>
 
     <div className="main-column" aria-hidden={mobileOpen || undefined}>
       <header className="topbar">
-        <button ref={menuButtonRef} className="menu-button" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu" aria-controls="app-sidebar" aria-expanded={mobileOpen}>☰</button>
-        <div className="breadcrumb"><span>{currentPortal?.label ?? 'Espaces métier'}</span><small>{location.includes('arrivages') ? 'Arrivages' : location.includes('operateurs') ? 'Opérateurs' : 'Vue d’ensemble'}</small></div>
-        <div className="topbar-context"><span className="context-dot" style={{ background: currentPortal?.accent ?? '#72817f' }} /><span>{selectedStoreCode ? stores.find((store) => store.code === selectedStoreCode)?.name ?? selectedStoreCode : stores.length > 1 ? 'Tous mes magasins' : stores[0]?.name ?? 'Périmètre sécurisé'}</span></div>
+        <button ref={menuButtonRef} type="button" className="menu-button" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu" aria-controls="app-sidebar" aria-expanded={mobileOpen}><span /><span /><span /></button>
+        <div className="breadcrumb"><strong>{location.includes('administration') ? 'Administration' : allProfessions ? 'Tous les métiers' : currentPortal?.label ?? 'Portails'}</strong></div>
+        {(canSelectScope || assignedStore) && <div className="topbar-context"><span className="context-dot" style={{ background: currentPortal?.accent ?? (allProfessions ? '#087f72' : '#72817f') }} /><span>{canSelectScope ? (selectedStoreCode ? stores.find((store) => store.code === selectedStoreCode)?.name ?? selectedStoreCode : 'Tous les magasins') : assignedStore}</span></div>}
       </header>
       <main className="main-content">{children}</main>
     </div>
@@ -147,4 +186,120 @@ function ActiveLink({ href, children, onClick, exact = false }: { href: string; 
   const [location] = useLocation();
   const active = exact ? location === path : location === path || location.startsWith(`${path}/`);
   return <Link href={href} className={active ? 'active' : ''} onClick={onClick}>{children}</Link>;
+}
+
+type ScopeOption = { value: string; label: string };
+
+function SidebarScopeSelect({ label, placeholder, value, options, disabled = false, onChange }: {
+  label: string;
+  placeholder: string;
+  value: string;
+  options: ScopeOption[];
+  disabled?: boolean;
+  onChange: (value: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const pendingFocusIndex = useRef<number | null>(null);
+  const labelId = useId();
+  const valueId = useId();
+  const selectedIndex = options.findIndex((option) => option.value === value);
+  const selectedLabel = options[selectedIndex]?.label ?? placeholder;
+
+  useEffect(() => {
+    if (!open || pendingFocusIndex.current === null) return;
+    optionRefs.current[pendingFocusIndex.current]?.focus();
+    pendingFocusIndex.current = null;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOnOutsidePress = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', closeOnOutsidePress);
+    return () => document.removeEventListener('pointerdown', closeOnOutsidePress);
+  }, [open]);
+
+  useEffect(() => {
+    if (disabled) setOpen(false);
+  }, [disabled]);
+
+  function openAt(index: number) {
+    pendingFocusIndex.current = Math.max(0, Math.min(options.length - 1, index));
+    setOpen(true);
+  }
+
+  function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      return;
+    }
+    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+    event.preventDefault();
+    openAt(selectedIndex >= 0 ? selectedIndex : event.key === 'ArrowDown' ? 0 : options.length - 1);
+  }
+
+  function handleOptionKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      triggerRef.current?.focus();
+      return;
+    }
+    const nextIndex = event.key === 'ArrowDown'
+      ? (index + 1) % options.length
+      : event.key === 'ArrowUp'
+        ? (index - 1 + options.length) % options.length
+        : event.key === 'Home'
+          ? 0
+          : event.key === 'End'
+            ? options.length - 1
+            : null;
+    if (nextIndex === null) return;
+    event.preventDefault();
+    optionRefs.current[nextIndex]?.focus();
+  }
+
+  function handleBlur(event: ReactFocusEvent<HTMLDivElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
+  }
+
+  return <div ref={rootRef} className={`scope-dropdown ${open ? 'open' : ''}`} onBlur={handleBlur}>
+    <span id={labelId} className="scope-dropdown-label">{label}</span>
+    <button
+      ref={triggerRef}
+      type="button"
+      className="scope-dropdown-trigger"
+      aria-labelledby={`${labelId} ${valueId}`}
+      aria-haspopup="listbox"
+      aria-expanded={open}
+      disabled={disabled}
+      onClick={() => setOpen((current) => !current)}
+      onKeyDown={handleTriggerKeyDown}
+    >
+      <span id={valueId}>{selectedLabel}</span>
+      <span className="scope-dropdown-chevron" aria-hidden="true" />
+    </button>
+    {open && <div className="scope-dropdown-menu" role="listbox" aria-label={label}>
+      {options.map((option, index) => <button
+        ref={(element) => { optionRefs.current[index] = element; }}
+        type="button"
+        role="option"
+        aria-selected={option.value === value}
+        className="scope-dropdown-option"
+        key={option.value}
+        onClick={() => { setOpen(false); onChange(option.value); }}
+        onKeyDown={(event) => handleOptionKeyDown(event, index)}
+      >
+        <span>{option.label}</span>
+        {option.value === value && <span aria-hidden="true">✓</span>}
+      </button>)}
+    </div>}
+  </div>;
 }

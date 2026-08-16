@@ -50,16 +50,12 @@ def _seed_tenant(engine, label: str) -> dict[str, str]:
             "artifact",
             "assignment",
             "alert",
-            "activation",
             "session",
         )
     }
     slug = f"tenant-{label.lower()}-{uuid.uuid4().hex[:8]}"
     code = f"{label.upper()}-{uuid.uuid4().hex[:8].upper()}"
     checksum = (label.lower() * 64)[:64]
-    activation_token_hash = hashlib.sha256(
-        f"activation-{label}-{ids['organization']}".encode()
-    ).hexdigest()
     session_token_hash = hashlib.sha256(
         f"session-{label}-{ids['organization']}".encode()
     ).hexdigest()
@@ -139,20 +135,6 @@ def _seed_tenant(engine, label: str) -> dict[str, str]:
                 "organization_id": ids["organization"],
                 "user_id": ids["user"],
                 "portal_id": ids["portal"],
-            },
-        )
-        conn.execute(
-            text(
-                "INSERT INTO identity.account_activation "
-                "(id, organization_id, user_id, token_hash, purpose, expires_at, created_by) "
-                "VALUES (:id, :organization_id, :user_id, :token_hash, 'credential_reset', "
-                "clock_timestamp() + interval '1 hour', :user_id)"
-            ),
-            {
-                "id": ids["activation"],
-                "organization_id": ids["organization"],
-                "user_id": ids["user"],
-                "token_hash": activation_token_hash,
             },
         )
         conn.execute(
@@ -327,7 +309,6 @@ def _seed_tenant(engine, label: str) -> dict[str, str]:
         "slug": slug,
         "store_code": code,
         "checksum": checksum,
-        "activation_token_hash": activation_token_hash,
         "session_token_hash": session_token_hash,
         "family_id": family_id,
     }
@@ -339,18 +320,6 @@ def test_postgresql_rls_hides_every_tenant_owned_row(engine):
     with engine.begin() as conn:
         conn.execute(text("SET LOCAL ROLE labelscan_app"))
         conn.execute(text("SET LOCAL search_path = pg_temp, public"))
-        assert (
-            str(
-                conn.execute(
-                    text(
-                        "SELECT identity.account_activation_organization_for_token("
-                        ":token_hash)"
-                    ),
-                    {"token_hash": tenant_a["activation_token_hash"]},
-                ).scalar_one()
-            )
-            == tenant_a["organization"]
-        )
         assert (
             str(
                 conn.execute(
@@ -380,7 +349,6 @@ def test_postgresql_rls_hides_every_tenant_owned_row(engine):
             "identity.store",
             "identity.business_portal",
             "identity.user_portal_assignment",
-            "identity.account_activation",
             "identity.auth_session",
             "ingestion.ingestion",
             "ingestion.raw_artifact",
@@ -426,17 +394,6 @@ def test_postgresql_rls_rejects_cross_tenant_writes_even_with_spoofed_flag(engin
                 },
             ),
             (
-                "INSERT INTO identity.account_activation "
-                "(organization_id, user_id, token_hash, purpose, expires_at, created_by) "
-                "VALUES (:organization_id, :user_id, :token_hash, 'credential_reset', "
-                "clock_timestamp() + interval '1 hour', :user_id)",
-                {
-                    "organization_id": tenant_b["organization"],
-                    "user_id": tenant_b["user"],
-                    "token_hash": "1" * 64,
-                },
-            ),
-            (
                 "INSERT INTO identity.auth_session "
                 "(family_id, organization_id, user_id, client_type, "
                 "refresh_token_hash, refresh_expires_at) "
@@ -474,11 +431,6 @@ def test_postgresql_rls_rejects_cross_tenant_writes_even_with_spoofed_flag(engin
                 "UPDATE identity.user_portal_assignment "
                 "SET updated_at = updated_at WHERE id = :id",
                 tenant_b["assignment"],
-            ),
-            (
-                "UPDATE identity.account_activation "
-                "SET used_at = used_at WHERE id = :id",
-                tenant_b["activation"],
             ),
             (
                 "UPDATE identity.auth_session "
@@ -519,5 +471,6 @@ def test_catalog_detail_and_photo_reject_guessed_cross_tenant_ids(engine):
             headers=headers,
         )
     assert own.status_code == 200
+    assert own.json()["captured_by_user_name"] == f"admin-{tenant_a['slug']}"
     assert other.status_code == 404
     assert other_photo.status_code == 404

@@ -92,7 +92,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CorrelationMiddleware)
     install_error_handlers(app)
     app.include_router(auth_router)  # auth: POST /v1/auth/login (unauthenticated)
-    app.include_router(identity_access_router)  # role-specific IAM + activation
+    app.include_router(identity_access_router)  # role-specific IAM
     app.include_router(store_admin_router)  # admin: POST/GET/PATCH /v1/stores
     app.include_router(ingestion_router)  # write: POST /v1/ingestions
     app.include_router(

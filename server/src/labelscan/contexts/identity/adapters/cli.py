@@ -36,7 +36,8 @@ def upsert_admin(username: str, password: str) -> str:
         existing_id = conn.execute(
             text(
                 "SELECT id::text FROM identity.app_user "
-                "WHERE organization_id = :organization_id AND username = :u"
+                "WHERE organization_id = :organization_id AND username = :u "
+                "AND deleted_at IS NULL"
             ),
             {"organization_id": organization_id, "u": username},
         ).scalar_one_or_none()
@@ -56,7 +57,7 @@ def upsert_admin(username: str, password: str) -> str:
                 "(id, organization_id, organization_code, username, display_name, "
                 "password_hash, role, active, created_by) "
                 "VALUES (:id, :organization_id, 'labelscan', :u, :u, :h, :r, true, :id) "
-                "ON CONFLICT (organization_id, username) DO UPDATE "
+                "ON CONFLICT (organization_id, username) WHERE deleted_at IS NULL DO UPDATE "
                 "SET password_hash = excluded.password_hash, "
                 "    role = excluded.role, "
                 "    active = true, "

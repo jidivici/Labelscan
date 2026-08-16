@@ -18,6 +18,10 @@ case "$role" in
     echo "==> Starting extraction worker"
     exec python -m labelscan.app.worker_runtime
     ;;
+  demo)
+    echo "==> Installing demonstration data"
+    exec python /app/scripts/seed_demo.py
+    ;;
   *)
     echo "unsupported process role: $role" >&2
     exit 64

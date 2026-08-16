@@ -3,7 +3,6 @@ import type {
   Arrival,
   ArrivalDetail,
   ArrivalFilters,
-  ArrivalMetrics,
   AuthPayload,
   Page,
   ProfessionCode,
@@ -15,6 +14,8 @@ export class ApiProblem extends Error {
     super(message);
   }
 }
+
+export const ARRIVAL_PAGE_SIZE = 30;
 
 let refreshPromise: Promise<AuthPayload | null> | null = null;
 
@@ -93,11 +94,11 @@ export async function authorizedFetch(
 
 export async function listArrivals(
   session: Session,
-  profession: ProfessionCode,
+  profession: ProfessionCode | undefined,
   filters: ArrivalFilters,
   signal?: AbortSignal,
 ): Promise<Page<Arrival>> {
-  const limit = 50;
+  const limit = ARRIVAL_PAGE_SIZE;
   const params = arrivalQueryParams(profession, filters, { limit, offset: (filters.page - 1) * limit });
   return request<Page<Arrival>>(`/v1/arrivals?${params}`, session, { signal });
 }
@@ -106,27 +107,22 @@ interface ArrivalQueryOptions {
   limit: number;
   offset: number;
   status?: string;
-  alertState?: string;
-  completenessMin?: string;
 }
 
 export function arrivalQueryParams(
-  profession: ProfessionCode,
+  profession: ProfessionCode | undefined,
   filters: ArrivalFilters,
   options: ArrivalQueryOptions,
 ): URLSearchParams {
-  const params = new URLSearchParams({ profession, limit: String(options.limit), offset: String(options.offset) });
-  if (filters.query) params.set('q', filters.query);
+  const params = new URLSearchParams({ limit: String(options.limit), offset: String(options.offset) });
+  if (profession) params.set('profession', profession);
+  if (filters.query.trim()) params.set('q', filters.query.trim());
   if (filters.storeCode) params.set('store_code', filters.storeCode);
   const status = options.status ?? filters.status;
-  const alertState = options.alertState ?? filters.alertState;
-  const completenessMin = options.completenessMin ?? filters.completenessMin;
   if (status) params.set('status', status);
   if (filters.supplier) params.set('supplier', filters.supplier);
   if (filters.lotCode) params.set('lot_code', filters.lotCode);
   if (filters.gtin) params.set('gtin', filters.gtin);
-  if (alertState) params.set('alert_state', alertState);
-  if (completenessMin) params.set('completeness_min', completenessMin);
   if (filters.dateFrom) params.set('date_from', filters.dateFrom);
   if (filters.dateTo) params.set('date_to', filters.dateTo);
   if (filters.expiryFrom) params.set('expiry_from', filters.expiryFrom);
@@ -135,33 +131,6 @@ export function arrivalQueryParams(
   if (filters.sortDirection) params.set('sort_direction', filters.sortDirection);
   for (const filter of filters.fieldFilters) params.append('field_filter', `${filter.field}:${filter.value}`);
   return params;
-}
-
-async function arrivalMetricTotal(
-  session: Session,
-  profession: ProfessionCode,
-  filters: ArrivalFilters,
-  overrides: Partial<Pick<ArrivalQueryOptions, 'status' | 'alertState' | 'completenessMin'>>,
-  signal?: AbortSignal,
-): Promise<number> {
-  const params = arrivalQueryParams(profession, filters, { limit: 1, offset: 0, ...overrides });
-  const page = await request<Page<Arrival>>(`/v1/arrivals?${params}`, session, { signal });
-  return page.total;
-}
-
-export async function getArrivalMetrics(
-  session: Session,
-  profession: ProfessionCode,
-  filters: ArrivalFilters,
-  signal?: AbortSignal,
-): Promise<ArrivalMetrics> {
-  const [total, flagged, openAlerts, complete] = await Promise.all([
-    arrivalMetricTotal(session, profession, filters, {}, signal),
-    arrivalMetricTotal(session, profession, filters, { status: 'flagged' }, signal),
-    arrivalMetricTotal(session, profession, filters, { alertState: 'open' }, signal),
-    arrivalMetricTotal(session, profession, filters, { completenessMin: '100' }, signal),
-  ]);
-  return { total, flagged, openAlerts, incomplete: Math.max(0, total - complete) };
 }
 
 export async function getArrival(

@@ -12,8 +12,6 @@ const QUERY_KEYS: Record<ScalarArrivalFilterKey, string> = {
   supplier: 'supplier',
   lotCode: 'lot',
   gtin: 'gtin',
-  alertState: 'alert',
-  completenessMin: 'completeness',
   dateFrom: 'from',
   dateTo: 'to',
   expiryFrom: 'expiry_from',
@@ -35,14 +33,14 @@ function parseFieldFilter(raw: string): ArrivalFieldFilter | null {
 export function parseArrivalFilters(params: URLSearchParams): ArrivalFilters {
   const page = params.get('page') ?? '';
   return {
-    query: params.get('q')?.trim() ?? '',
+    // Preserve the value while the controlled search field is being edited.
+    // Trimming here would remove a just-typed trailing space before the next word.
+    query: params.get('q') ?? '',
     storeCode: params.get('store')?.trim() ?? '',
     status: params.get('status')?.trim() ?? '',
     supplier: params.get('supplier')?.trim() ?? '',
     lotCode: params.get('lot')?.trim() ?? '',
     gtin: params.get('gtin')?.trim() ?? '',
-    alertState: params.get('alert')?.trim() ?? '',
-    completenessMin: params.get('completeness')?.trim() ?? '',
     dateFrom: params.get('from') ?? '',
     dateTo: params.get('to') ?? '',
     expiryFrom: params.get('expiry_from') ?? '',
@@ -50,7 +48,7 @@ export function parseArrivalFilters(params: URLSearchParams): ArrivalFilters {
     sortBy: params.get('sort')?.trim() || 'recorded_at',
     sortDirection: params.get('direction') === 'asc' ? 'asc' : 'desc',
     fieldFilters: params.getAll('field_filter').map(parseFieldFilter).filter((value): value is ArrivalFieldFilter => value !== null),
-    view: params.get('view') === 'cards' ? 'cards' : 'table',
+    view: params.get('view') === 'table' ? 'table' : 'cards',
     page: POSITIVE_INTEGER.test(page) ? Number(page) : 1,
   };
 }
@@ -58,7 +56,7 @@ export function parseArrivalFilters(params: URLSearchParams): ArrivalFilters {
 function isDefaultValue(key: ScalarArrivalFilterKey, value: string | number): boolean {
   return !value
     || (key === 'page' && value === 1)
-    || (key === 'view' && value === 'table')
+    || (key === 'view' && value === 'cards')
     || (key === 'sortBy' && value === 'recorded_at')
     || (key === 'sortDirection' && value === 'desc');
 }
@@ -95,21 +93,20 @@ export function updatePortalFieldFilter(
 
 export function clearArrivalFilters(current: URLSearchParams): URLSearchParams {
   const next = new URLSearchParams();
+  const query = current.get('q');
   const view = current.get('view');
-  if (view === 'cards') next.set('view', view);
+  if (query) next.set('q', query);
+  if (view === 'table') next.set('view', view);
   return next;
 }
 
 export function activeArrivalFilterCount(filters: ArrivalFilters): number {
   return [
-    filters.query,
     filters.storeCode,
     filters.status,
     filters.supplier,
     filters.lotCode,
     filters.gtin,
-    filters.alertState,
-    filters.completenessMin,
     filters.dateFrom,
     filters.dateTo,
     filters.expiryFrom,

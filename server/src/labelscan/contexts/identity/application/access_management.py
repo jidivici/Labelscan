@@ -1,15 +1,17 @@
-"""Role-specific identity administration and one-time account activation."""
+"""Role-specific identity administration."""
 
 from __future__ import annotations
 
-import hashlib
-import secrets
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
-from labelscan.contexts.identity.domain.password import hash_password
-from labelscan.contexts.identity.domain.user import ManagedUser
+from labelscan.contexts.identity.domain.password import hash_password, verify_password
+from labelscan.contexts.identity.domain.user import (
+    ADMIN_ROLE,
+    MANAGER_ROLE,
+    SUPER_ADMIN_ROLE,
+    ManagedUser,
+)
 
 
 class AccessDenied(Exception):
@@ -24,7 +26,7 @@ class IdentityAlreadyExists(Exception):
     pass
 
 
-class InvalidActivation(Exception):
+class InvalidCurrentPassword(Exception):
     pass
 
 
@@ -34,13 +36,6 @@ class IdentityAudit:
     organization_id: str
     correlation_id: str
     trace_id: str
-
-
-@dataclass(frozen=True)
-class ActivationGrant:
-    user: ManagedUser
-    activation_token: str
-    expires_at: str
 
 
 @dataclass(frozen=True)
@@ -91,7 +86,7 @@ class AccessRepository(Protocol):
         self, audit: IdentityAudit, role: str, portal_id: str | None = None
     ) -> list[ManagedUser]: ...
 
-    def create_pending(
+    def create_active(
         self,
         audit: IdentityAudit,
         *,
@@ -100,9 +95,7 @@ class AccessRepository(Protocol):
         display_name: str,
         role: str,
         portal_ids: tuple[str, ...],
-        placeholder_password_hash: str,
-        activation_token_hash: str,
-        expires_at: datetime,
+        password_hash: str,
     ) -> ManagedUser: ...
 
     def replace_assignments(
@@ -125,25 +118,26 @@ class AccessRepository(Protocol):
         actor_roles: frozenset[str],
     ) -> ManagedUser: ...
 
-    def issue_reset(
+    def delete_manager(
         self,
         audit: IdentityAudit,
         *,
         target_user_id: str,
-        placeholder_password_hash: str,
-        activation_token_hash: str,
-        expires_at: datetime,
+        actor_roles: frozenset[str],
+    ) -> None: ...
+
+    def reset_password(
+        self,
+        audit: IdentityAudit,
+        *,
+        target_user_id: str,
+        password_hash: str,
     ) -> ManagedUser: ...
 
-    def activate(
-        self,
-        token_hash: str,
-        password_hash: str,
-        expected_role: str | None = None,
-    ) -> ManagedUser: ...
+    def own_credentials(self, audit: IdentityAudit) -> tuple[str, str]: ...
 
     def change_own_password(
-        self, audit: IdentityAudit, password_hash: str
+        self, audit: IdentityAudit, expected_password_hash: str, password_hash: str
     ) -> ManagedUser: ...
 
 
@@ -156,25 +150,35 @@ def _bounded_text(value: str, field: str, maximum: int) -> str:
     return normalized
 
 
-def _password(value: str) -> str:
-    if len(value) < 12 or len(value) > 128:
-        raise ValueError("password must contain between 12 and 128 characters")
-    return hash_password(value)
-
-
-def _token_digest(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+def _password(value: str, *, role: str) -> str:
+    if not value:
+        raise ValueError("password must not be blank")
+    if len(value) > 128:
+        raise ValueError("password must be at most 128 characters")
+    if role in {ADMIN_ROLE, SUPER_ADMIN_ROLE}:
+        if len(value) < 12:
+            raise ValueError("password must be at least 12 characters")
+        if not any(character.isupper() for character in value):
+            raise ValueError("password must contain an uppercase letter")
+        if not any(character.islower() for character in value):
+            raise ValueError("password must contain a lowercase letter")
+        if not any(character.isdigit() for character in value):
+            raise ValueError("password must contain a digit")
+        if not any(not character.isalnum() for character in value):
+            raise ValueError("password must contain a special character")
+        return hash_password(value, min_length=12)
+    if role == MANAGER_ROLE:
+        return hash_password(
+            value,
+            min_length=1,
+            reject_known_placeholder=False,
+        )
+    raise ValueError("unknown password policy")
 
 
 class AccessManagementService:
     def __init__(self, repository: AccessRepository) -> None:
         self._repository = repository
-
-    @staticmethod
-    def _grant_token() -> tuple[str, str, datetime]:
-        token = secrets.token_urlsafe(32)
-        expires_at = datetime.now(UTC) + timedelta(hours=24)
-        return token, _token_digest(token), expires_at
 
     def me(self, audit: IdentityAudit) -> AccessOverview:
         return self._repository.get_access_overview(audit)
@@ -204,29 +208,28 @@ class AccessManagementService:
     ) -> list[ManagedUser]:
         return self._repository.list_role(audit, role, portal_id)
 
-    def create_pending(
+    def create_active(
         self,
         audit: IdentityAudit,
         *,
         actor_roles: frozenset[str],
         username: str,
-        display_name: str,
+        display_name: str | None,
+        password: str,
         role: str,
         portal_ids: tuple[str, ...] = (),
-    ) -> ActivationGrant:
-        token, digest, expires_at = self._grant_token()
-        user = self._repository.create_pending(
+    ) -> ManagedUser:
+        return self._repository.create_active(
             audit,
             actor_roles=actor_roles,
             username=_bounded_text(username, "username", 254),
-            display_name=_bounded_text(display_name, "display_name", 120),
+            # Display names are no longer part of the product UI.  Keep the
+            # non-null legacy column populated with the canonical identifier.
+            display_name=_bounded_text(display_name or username, "username", 254),
             role=role,
             portal_ids=tuple(dict.fromkeys(portal_ids)),
-            placeholder_password_hash=hash_password(secrets.token_urlsafe(48)),
-            activation_token_hash=digest,
-            expires_at=expires_at,
+            password_hash=_password(password, role=role),
         )
-        return ActivationGrant(user, token, expires_at.isoformat())
 
     def replace_assignments(
         self,
@@ -262,35 +265,36 @@ class AccessManagementService:
             actor_roles=actor_roles,
         )
 
-    def credential_reset(
-        self, audit: IdentityAudit, target_user_id: str
-    ) -> ActivationGrant:
-        token, digest, expires_at = self._grant_token()
-        user = self._repository.issue_reset(
+    def delete_manager(
+        self,
+        audit: IdentityAudit,
+        *,
+        target_user_id: str,
+        actor_roles: frozenset[str],
+    ) -> None:
+        self._repository.delete_manager(
             audit,
             target_user_id=target_user_id,
-            placeholder_password_hash=hash_password(secrets.token_urlsafe(48)),
-            activation_token_hash=digest,
-            expires_at=expires_at,
+            actor_roles=actor_roles,
         )
-        return ActivationGrant(user, token, expires_at.isoformat())
 
-    def activate(
-        self,
-        token: str,
-        new_password: str,
-        *,
-        expected_role: str | None = None,
+    def reset_password(
+        self, audit: IdentityAudit, target_user_id: str, new_password: str
     ) -> ManagedUser:
-        if not token:
-            raise InvalidActivation()
-        return self._repository.activate(
-            _token_digest(token),
-            _password(new_password),
-            expected_role,
+        return self._repository.reset_password(
+            audit,
+            target_user_id=target_user_id,
+            password_hash=_password(new_password, role=MANAGER_ROLE),
         )
 
     def change_own_password(
-        self, audit: IdentityAudit, new_password: str
+        self, audit: IdentityAudit, current_password: str, new_password: str
     ) -> ManagedUser:
-        return self._repository.change_own_password(audit, _password(new_password))
+        role, current_hash = self._repository.own_credentials(audit)
+        if not verify_password(current_password, current_hash):
+            raise InvalidCurrentPassword()
+        return self._repository.change_own_password(
+            audit,
+            current_hash,
+            _password(new_password, role=role),
+        )

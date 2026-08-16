@@ -37,9 +37,14 @@ describe('dayKey / todayKey', () => {
     expect(dayKey('2026-01-05T08:00:00')).toBe('2026-01-05');
   });
 
-  it('falls back to today for missing/invalid input (never a technical failure)', () => {
-    expect(dayKey(null)).toBe(todayKey());
-    expect(dayKey('not-a-date')).toBe(todayKey());
+  it('accepts the PostgreSQL timestamps returned by the catalogue API', () => {
+    expect(dayKey('2026-08-14 15:33:10.533187+00')).toBe('2026-08-14');
+    expect(dayKey('2026-08-09 15:33:10.533187+00')).toBe('2026-08-09');
+  });
+
+  it('does not group missing/invalid dates under today', () => {
+    expect(dayKey(null)).toBe('');
+    expect(dayKey('not-a-date')).toBe('');
     expect(todayKey()).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 });
@@ -58,6 +63,10 @@ describe('countByDay', () => {
 
   it('is empty for no articles', () => {
     expect(countByDay([])).toEqual({});
+  });
+
+  it('ignores malformed timestamps instead of counting them today', () => {
+    expect(countByDay([article('not-a-date')])).toEqual({});
   });
 });
 

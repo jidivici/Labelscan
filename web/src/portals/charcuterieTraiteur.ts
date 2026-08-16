@@ -6,7 +6,7 @@ export const charcuterieTraiteurPortal = {
   label: 'Charcuterie–Traiteur',
   shortLabel: 'Charcuterie–Traiteur',
   description: 'Pilotage unifié des produits de charcuterie et des préparations traiteur.',
-  accent: '#9a611f',
+  accent: '#087f72',
   initials: 'CT',
   featureFlag: 'portal.charcuterie-traiteur',
   detailSections: [
@@ -90,18 +90,10 @@ export const charcuterieTraiteurPortal = {
   secondaryColumns: [
     { key: 'packaging-date', label: 'Conditionné le', source: 'packaging_date', format: 'date' },
     { key: 'expiry', label: 'DLC / DDM', source: 'use_by', format: 'date' },
-    { key: 'completeness', label: 'Complétude', source: 'completeness', format: 'percentage' },
-    { key: 'alert', label: 'Alerte', source: 'alert_state', format: 'alert' },
-  ],
-  kpis: [
-    { key: 'total', label: 'Réceptions', metric: 'total', description: 'Produits du périmètre filtré', tone: 'neutral' },
-    { key: 'expiry', label: 'DLC à surveiller', metric: 'flagged', description: 'Lots signalés pour échéance ou contrôle', tone: 'warning' },
-    { key: 'alerts', label: 'Alertes ouvertes', metric: 'openAlerts', description: 'Alertes non acquittées', tone: 'danger' },
-    { key: 'incomplete', label: 'Fiches incomplètes', metric: 'incomplete', description: 'Traçabilité à compléter', tone: 'warning' },
   ],
   labels: {
     pageTitle: 'Réceptions Charcuterie–Traiteur',
-    pageDescription: 'Contrôlez dans un même portail les familles, compositions, DLC et chaînes de conservation.',
+    pageDescription: 'Consultez dans un même portail les familles, compositions, DLC et chaînes de conservation.',
     searchPlaceholder: 'Produit, famille, lot, fabricant ou fournisseur…',
     emptyTitle: 'Aucune réception Charcuterie–Traiteur',
     emptyDescription: 'Aucun produit transformé ou préparé ne correspond aux critères professionnels sélectionnés.',

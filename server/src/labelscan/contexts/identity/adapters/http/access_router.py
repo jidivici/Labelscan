@@ -12,18 +12,16 @@ from labelscan.contexts.identity.application.access_management import (
     AccessDenied,
     AccessManagementService,
     AccessOverview,
-    ActivationGrant,
     AllowedPortal,
     AllowedStore,
     IdentityAlreadyExists,
     IdentityAudit,
     IdentityNotFound,
-    InvalidActivation,
+    InvalidCurrentPassword,
 )
 from labelscan.contexts.identity.domain.user import (
     ADMIN_ROLE,
     MANAGER_ROLE,
-    OPERATOR_ROLE,
     SUPER_ADMIN_ROLE,
     ManagedUser,
 )
@@ -70,20 +68,6 @@ class UserResponse(BaseModel):
                 **user.__dict__,
                 "business_portal_ids": list(user.business_portal_ids),
             }
-        )
-
-
-class ActivationResponse(BaseModel):
-    user: UserResponse
-    activation_token: str
-    expires_at: str
-
-    @classmethod
-    def from_domain(cls, grant: ActivationGrant) -> "ActivationResponse":
-        return cls(
-            user=UserResponse.from_domain(grant.user),
-            activation_token=grant.activation_token,
-            expires_at=grant.expires_at,
         )
 
 
@@ -145,15 +129,16 @@ class MeResponse(BaseModel):
 
 class CreateIdentityRequest(BaseModel):
     username: str = Field(min_length=1, max_length=254)
-    display_name: str = Field(min_length=1, max_length=120)
+    display_name: str | None = Field(default=None, min_length=1, max_length=120)
+    password: str = Field(min_length=1, max_length=128)
 
 
 class CreateManagerRequest(CreateIdentityRequest):
-    business_portal_ids: list[UUID] = Field(min_length=1)
+    business_portal_ids: list[UUID] = Field(min_length=1, max_length=1)
 
 
 class ManagerAssignmentsRequest(BaseModel):
-    business_portal_ids: list[UUID] = Field(min_length=1)
+    business_portal_ids: list[UUID] = Field(min_length=1, max_length=1)
 
 
 class ActiveRequest(BaseModel):
@@ -165,13 +150,13 @@ class OperatorUpdateRequest(BaseModel):
     active: bool | None = None
 
 
-class ActivateRequest(BaseModel):
-    token: str = Field(min_length=32, max_length=256)
-    new_password: str = Field(min_length=12, max_length=128)
-
-
 class ChangePasswordRequest(BaseModel):
-    new_password: str = Field(min_length=12, max_length=128)
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
+
+
+class ResetCredentialRequest(BaseModel):
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class SetPortalActiveRequest(BaseModel):
@@ -196,50 +181,16 @@ def _audit(request: Request, principal: Principal) -> IdentityAudit:
 
 def _map_error(exc: Exception) -> None:
     if isinstance(exc, AccessDenied):
-        raise ApiError("FORBIDDEN", "identity operation is outside your role or portal")
+        raise ApiError("FORBIDDEN", "cette opération dépasse vos droits ou votre périmètre")
     if isinstance(exc, IdentityNotFound):
-        raise ApiError("NOT_FOUND", "identity or portal not found")
+        raise ApiError("NOT_FOUND", "compte ou portail introuvable")
     if isinstance(exc, IdentityAlreadyExists):
-        raise ApiError("USER_ALREADY_EXISTS", "username is already in use")
-    if isinstance(exc, InvalidActivation):
-        raise ApiError("UNAUTHENTICATED", "activation token is invalid or expired")
+        raise ApiError("USER_ALREADY_EXISTS", "cet identifiant est déjà utilisé")
+    if isinstance(exc, InvalidCurrentPassword):
+        raise ApiError("INVALID_CURRENT_PASSWORD", "le mot de passe actuel est incorrect")
     if isinstance(exc, ValueError):
         raise ApiError("VALIDATION_ERROR", str(exc))
     raise exc
-
-
-@router.post("/v1/auth/activate", response_model=UserResponse)
-def activate_account(
-    body: ActivateRequest,
-    service: AccessManagementService = Depends(get_access_management_service),
-) -> UserResponse:
-    try:
-        return UserResponse.from_domain(service.activate(body.token, body.new_password))
-    except Exception as exc:
-        _map_error(exc)
-        raise
-
-
-@router.post(
-    "/v1/mobile/auth/activate",
-    response_model=UserResponse,
-    summary="Activate an operator account from the mobile application",
-)
-def activate_operator_account(
-    body: ActivateRequest,
-    service: AccessManagementService = Depends(get_access_management_service),
-) -> UserResponse:
-    try:
-        return UserResponse.from_domain(
-            service.activate(
-                body.token,
-                body.new_password,
-                expected_role=OPERATOR_ROLE,
-            )
-        )
-    except Exception as exc:
-        _map_error(exc)
-        raise
 
 
 @router.get(
@@ -262,7 +213,6 @@ def get_me(
     except Exception as exc:
         _map_error(exc)
         raise
-
 
 @router.get(
     "/v1/stores/{store_id}/portals",
@@ -327,7 +277,11 @@ def change_my_password(
 ) -> UserResponse:
     try:
         return UserResponse.from_domain(
-            service.change_own_password(_audit(request, principal), body.new_password)
+            service.change_own_password(
+                _audit(request, principal),
+                body.current_password,
+                body.new_password,
+            )
         )
     except Exception as exc:
         _map_error(exc)
@@ -349,23 +303,27 @@ def list_admins(
 
 
 @router.post(
-    "/v1/admins", response_model=ActivationResponse, status_code=status.HTTP_201_CREATED
+    "/v1/admins",
+    response_model=UserResponse,
+    status_code=status.HTTP_201_CREATED,
 )
 def create_admin(
     body: CreateIdentityRequest,
     request: Request,
     principal: Principal = Depends(require_scope("identity:admins:manage")),
     service: AccessManagementService = Depends(get_access_management_service),
-) -> ActivationResponse:
+) -> UserResponse:
     try:
-        grant = service.create_pending(
-            _audit(request, principal),
-            actor_roles=frozenset({SUPER_ADMIN_ROLE}),
-            username=body.username,
-            display_name=body.display_name,
-            role=ADMIN_ROLE,
+        return UserResponse.from_domain(
+            service.create_active(
+                _audit(request, principal),
+                actor_roles=frozenset({SUPER_ADMIN_ROLE}),
+                username=body.username,
+                display_name=body.display_name,
+                password=body.password,
+                role=ADMIN_ROLE,
+            )
         )
-        return ActivationResponse.from_domain(grant)
     except Exception as exc:
         _map_error(exc)
         raise
@@ -408,7 +366,7 @@ def list_managers(
 
 @router.post(
     "/v1/managers",
-    response_model=ActivationResponse,
+    response_model=UserResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def create_manager(
@@ -416,17 +374,20 @@ def create_manager(
     request: Request,
     principal: Principal = Depends(require_scope("identity:managers:manage")),
     service: AccessManagementService = Depends(get_access_management_service),
-) -> ActivationResponse:
+) -> UserResponse:
     try:
-        grant = service.create_pending(
-            _audit(request, principal),
-            actor_roles=frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}),
-            username=body.username,
-            display_name=body.display_name,
-            role=MANAGER_ROLE,
-            portal_ids=tuple(str(value) for value in body.business_portal_ids),
+        portal_ids = tuple(str(value) for value in body.business_portal_ids)
+        return UserResponse.from_domain(
+            service.create_active(
+                _audit(request, principal),
+                actor_roles=frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}),
+                username=body.username,
+                display_name=body.display_name,
+                password=body.password,
+                role=MANAGER_ROLE,
+                portal_ids=portal_ids,
+            )
         )
-        return ActivationResponse.from_domain(grant)
     except Exception as exc:
         _map_error(exc)
         raise
@@ -476,102 +437,28 @@ def set_manager_active(
         raise
 
 
-@router.get("/v1/portals/{portal_id}/operators", response_model=list[UserResponse])
-def list_operators(
-    portal_id: UUID,
-    request: Request,
-    principal: Principal = Depends(require_scope("identity:operators:manage")),
-    service: AccessManagementService = Depends(get_access_management_service),
-) -> list[UserResponse]:
-    try:
-        users = service.list_role(
-            _audit(request, principal), OPERATOR_ROLE, str(portal_id)
-        )
-        return [UserResponse.from_domain(user) for user in users]
-    except Exception as exc:
-        _map_error(exc)
-        raise
-
-
-@router.post(
-    "/v1/portals/{portal_id}/operators",
-    response_model=ActivationResponse,
-    status_code=status.HTTP_201_CREATED,
+@router.delete(
+    "/v1/managers/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a manager from active administration",
+    description=(
+        "Soft-deletes the account and revokes its access while preserving the "
+        "identity row used by historical labels. The username becomes reusable."
+    ),
 )
-def create_operator(
-    portal_id: UUID,
-    body: CreateIdentityRequest,
+def delete_manager(
+    user_id: UUID,
     request: Request,
-    principal: Principal = Depends(require_scope("identity:operators:manage")),
+    principal: Principal = Depends(require_scope("identity:managers:manage")),
     service: AccessManagementService = Depends(get_access_management_service),
-) -> ActivationResponse:
+) -> Response:
     try:
-        grant = service.create_pending(
+        service.delete_manager(
             _audit(request, principal),
-            actor_roles=frozenset({MANAGER_ROLE}),
-            username=body.username,
-            display_name=body.display_name,
-            role=OPERATOR_ROLE,
-            portal_ids=(str(portal_id),),
-        )
-        return ActivationResponse.from_domain(grant)
-    except Exception as exc:
-        _map_error(exc)
-        raise
-
-
-@router.patch(
-    "/v1/portals/{portal_id}/operators/{user_id}", response_model=UserResponse
-)
-def update_operator(
-    portal_id: UUID,
-    user_id: UUID,
-    body: OperatorUpdateRequest,
-    request: Request,
-    principal: Principal = Depends(require_scope("identity:operators:manage")),
-    service: AccessManagementService = Depends(get_access_management_service),
-) -> UserResponse:
-    try:
-        audit = _audit(request, principal)
-        user = service.list_role(audit, OPERATOR_ROLE, str(portal_id))
-        if str(user_id) not in {item.id for item in user}:
-            raise IdentityNotFound()
-        result = next(item for item in user if item.id == str(user_id))
-        if body.business_portal_id is not None:
-            result = service.replace_assignments(
-                audit,
-                target_user_id=str(user_id),
-                target_role=OPERATOR_ROLE,
-                portal_ids=(str(body.business_portal_id),),
-                actor_roles=frozenset({MANAGER_ROLE}),
-            )
-        if body.active is not None:
-            result = service.set_active(
-                audit,
-                target_user_id=str(user_id),
-                target_role=OPERATOR_ROLE,
-                active=body.active,
-                actor_roles=frozenset({MANAGER_ROLE}),
-            )
-        return UserResponse.from_domain(result)
-    except Exception as exc:
-        _map_error(exc)
-        raise
-
-
-@router.post(
-    "/v1/operators/{user_id}/credential-reset", response_model=ActivationResponse
-)
-def reset_operator_credential(
-    user_id: UUID,
-    request: Request,
-    principal: Principal = Depends(require_scope("identity:operators:manage")),
-    service: AccessManagementService = Depends(get_access_management_service),
-) -> ActivationResponse:
-    try:
-        return ActivationResponse.from_domain(
-            service.credential_reset(_audit(request, principal), str(user_id))
+            target_user_id=str(user_id),
+            actor_roles=frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}),
         )
     except Exception as exc:
         _map_error(exc)
         raise
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

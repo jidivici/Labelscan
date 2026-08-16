@@ -37,6 +37,8 @@ export const FIELD_LABELS_FR: Record<string, string> = {
   cutting_plant_approval: "Agrément de l’atelier de découpe",
   // Charcuterie / traiteur V1
   product_family: 'Famille de produit',
+  description: 'Description',
+  product_description: 'Description du produit',
   manufacturer_name: 'Fabricant',
   ingredients: 'Ingrédients',
   additives: 'Additifs',

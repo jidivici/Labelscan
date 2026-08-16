@@ -75,6 +75,27 @@ npm install
 npx expo start -c               # Metro ; app dev client sur le device
 ```
 
+Le démarrage local utilise la base dédiée `labelscan_demo` et installe
+automatiquement une démonstration idempotente :
+4 magasins nommés par ville, 1 super-administrateur, 1 administrateur,
+4 managers et 7 arrivages construits à partir de vraies photos d'étiquettes.
+Les anciennes projections issues des tests ne sont pas affichées.
+
+| Rôle | Identifiant | Mot de passe | Périmètre |
+|---|---|---|---|
+| Super-administrateur | `super_admin` | `Super_admin1!` | Toute l'organisation |
+| Administrateur | `admin` | `Admin1!` | Équipe et magasins |
+| Manager | `manager_p_f` | `Manager_p_f1!` | Poissonnerie · Fréjus |
+| Manager | `manager_p_n` | `Manager_p_n1!` | Poissonnerie · Nice |
+| Manager | `manager_p_c` | `Manager_p_c1!` | Poissonnerie · Cannes |
+| Manager | `manager_p_m` | `Manager_p_m1!` | Poissonnerie · Marseille |
+
+Convention manager : `p` = poissonnerie ; `f`, `n`, `c` et `m` = Fréjus,
+Nice, Cannes et Marseille.
+
+Ces identifiants sont réservés à la démonstration locale et ne doivent jamais
+être utilisés en production.
+
 Connexion mobile : compte opérateur créé par l’administrateur dans le portail ;
 l’app obtient un JWT via `POST /v1/mobile/auth/login`. Un compte administrateur
 est volontairement refusé sur l’application mobile.

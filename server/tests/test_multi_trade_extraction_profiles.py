@@ -89,8 +89,8 @@ def test_llm_schema_and_prompt_are_built_from_the_selected_profile(
     profile = trade_profile(trade_code)
     schema = _output_schema(profile.fields)
     fields_schema = schema["properties"]["fields"]
-    assert fields_schema["minItems"] == len(profile.fields)
-    assert fields_schema["maxItems"] == len(profile.fields)
+    assert "minItems" not in fields_schema
+    assert "maxItems" not in fields_schema
     assert fields_schema["items"]["properties"]["name"]["enum"] == list(profile.fields)
     prompt = _system_text_for(profile)
     assert profile.display_name in prompt

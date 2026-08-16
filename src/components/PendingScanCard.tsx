@@ -26,6 +26,7 @@ import { PulseDot } from './PulseDot';
 import { CompletenessGauge } from './CompletenessGauge';
 import { scanStepFromStatus } from '../services/scanSteps';
 import type { PendingScan } from '../services/scanQueue';
+import { RotatedPhoto } from './RotatedPhoto';
 import { colors, spacing, radius, typography } from '../theme';
 
 export const PENDING_CARD_HEIGHT = 88;
@@ -149,7 +150,11 @@ export const PendingScanCard = React.memo(function PendingScanCard({
             accessibilityLabel={openable ? 'Ouvrir la revue de cette étiquette' : activeLabel}
           >
             <View style={styles.thumbnail}>
-              <Image source={{ uri: scan.photoUri }} style={styles.thumbnailImage} resizeMode="cover" />
+              <RotatedPhoto
+                source={{ uri: scan.photoUri }}
+                style={styles.thumbnailImage}
+                resizeMode="cover"
+              />
             </View>
 
             <View style={styles.body}>

@@ -95,16 +95,30 @@ class SqlStoreRepository(StoreRepository):
                     .mappings()
                     .one()
                 )
+                available_professions = set(
+                    conn.execute(
+                        text(
+                            "SELECT code FROM identity.profession "
+                            "WHERE active = true"
+                        )
+                    ).scalars()
+                )
+                unknown_professions = set(store.profession_codes) - available_professions
+                if unknown_professions:
+                    raise ValueError("un ou plusieurs métiers sont invalides")
                 # Every newly-created store receives the same three versioned
                 # business portals as stores backfilled by migration 0025. Portal
-                # activation can then be managed idempotently through the IAM API;
+                # availability can then be managed idempotently through the IAM API;
                 # no later request has to manufacture ownership rows implicitly.
                 conn.execute(
                     text(
                         "INSERT INTO identity.business_portal "
-                        "(organization_id, store_id, profession_code, name, created_by) "
+                        "(organization_id, store_id, profession_code, name, active, "
+                        "created_by) "
                         "SELECT :organization_id, :store_id, profession.code, "
-                        "profession.name, :created_by "
+                        "profession.name, "
+                        "profession.code = ANY(CAST(:profession_codes AS text[])), "
+                        ":created_by "
                         "FROM identity.profession AS profession "
                         "WHERE profession.active = true"
                     ),
@@ -112,6 +126,7 @@ class SqlStoreRepository(StoreRepository):
                         "organization_id": organization_id,
                         "store_id": row["id"],
                         "created_by": store.created_by,
+                        "profession_codes": list(store.profession_codes),
                     },
                 )
         except IntegrityError as exc:
@@ -126,6 +141,8 @@ class SqlStoreRepository(StoreRepository):
         organization_id: str | None = None,
         active: bool | None,
         query: str | None,
+        actor_id: str | None = None,
+        include_all: bool = False,
     ) -> list[Store]:
         conditions: list[str] = []
         params: dict[str, object] = {}
@@ -135,6 +152,11 @@ class SqlStoreRepository(StoreRepository):
         if query is not None:
             conditions.append("(code ILIKE :query OR name ILIKE :query)")
             params["query"] = f"%{query}%"
+        if not include_all:
+            if not actor_id:
+                return []
+            conditions.append("created_by = :actor_id")
+            params["actor_id"] = actor_id
         with self._engine.begin() as conn:
             organization_id = organization_id or _default_organization_id(conn)
             set_tenant_context(conn, organization_id)
@@ -168,9 +190,15 @@ class SqlStoreRepository(StoreRepository):
                     text(
                         "SELECT id::text AS id, active "
                         "FROM identity.store WHERE organization_id = :organization_id "
-                        "AND code = :code FOR UPDATE"
+                        "AND code = :code AND (:manage_all OR created_by = :actor_id) "
+                        "FOR UPDATE"
                     ),
-                    {"organization_id": organization_id, "code": code},
+                    {
+                        "organization_id": organization_id,
+                        "code": code,
+                        "manage_all": audit.manage_all_stores,
+                        "actor_id": audit.actor_id,
+                    },
                 )
                 .mappings()
                 .first()

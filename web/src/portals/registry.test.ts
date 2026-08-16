@@ -11,7 +11,6 @@ describe('portal registry contract', () => {
       expect(portal.detailSections.length).toBeGreaterThanOrEqual(3);
       expect(portal.fieldFilters.length).toBeGreaterThan(0);
       expect(portal.secondaryColumns.length).toBeGreaterThan(0);
-      expect(portal.kpis.map((kpi) => kpi.metric)).toEqual(['total', 'flagged', 'openAlerts', 'incomplete']);
       expect(portal.labels.emptyTitle).not.toBe('');
     }
   });

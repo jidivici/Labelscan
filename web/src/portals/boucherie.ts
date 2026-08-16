@@ -6,7 +6,7 @@ export const boucheriePortal = {
   label: 'Boucherie',
   shortLabel: 'Boucherie',
   description: 'Pilotage des lots de viande, de leur origine et des établissements agréés.',
-  accent: '#a13e4d',
+  accent: '#087f72',
   initials: 'BO',
   featureFlag: 'portal.boucherie',
   detailSections: [
@@ -49,18 +49,10 @@ export const boucheriePortal = {
   ],
   secondaryColumns: [
     { key: 'expiry', label: 'Date limite de consommation', source: 'use_by', format: 'date' },
-    { key: 'completeness', label: 'Complétude traçabilité', source: 'completeness', format: 'percentage' },
-    { key: 'alert', label: 'Alerte sanitaire', source: 'alert_state', format: 'alert' },
-  ],
-  kpis: [
-    { key: 'total', label: 'Lots de viande', metric: 'total', description: 'Réceptions dans le périmètre filtré', tone: 'neutral' },
-    { key: 'flagged', label: 'Lots à contrôler', metric: 'flagged', description: 'Contrôles prioritaires à effectuer', tone: 'warning' },
-    { key: 'alerts', label: 'Alertes sanitaires', metric: 'openAlerts', description: 'Alertes ouvertes non acquittées', tone: 'danger' },
-    { key: 'incomplete', label: 'Traçabilités incomplètes', metric: 'incomplete', description: 'Origine ou informations réglementaires à compléter', tone: 'warning' },
   ],
   labels: {
     pageTitle: 'Réceptions boucherie',
-    pageDescription: 'Contrôlez les morceaux, les parcours d’origine et les agréments sanitaires de chaque lot.',
+    pageDescription: 'Consultez les morceaux, les parcours d’origine et les agréments sanitaires de chaque lot.',
     searchPlaceholder: 'Morceau, lot, origine, agrément ou fournisseur…',
     emptyTitle: 'Aucun lot de viande à afficher',
     emptyDescription: 'Aucune réception boucherie ne correspond aux critères professionnels sélectionnés.',

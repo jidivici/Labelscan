@@ -95,7 +95,7 @@ async function refreshAccessToken(): Promise<string | null> {
         return null;
       }
       if (
-        body.user?.role !== 'operator' ||
+        body.user?.role !== 'manager' ||
         typeof body.user.business_portal_id !== 'string' ||
         !isTradeCode(body.user.trade_code)
       ) {

@@ -143,6 +143,7 @@ class CatalogArrivalResponse(BaseModel):
     profession_code: str
     trade_profile_version: str
     captured_by_user_id: str | None
+    captured_by_user_name: str | None
     completeness: int
     alert_state: str | None
     alert_severity: str | None
@@ -165,6 +166,7 @@ class CatalogArrivalResponse(BaseModel):
             profession_code=arrival.profession_code,
             trade_profile_version=arrival.trade_profile_version,
             captured_by_user_id=arrival.captured_by_user_id,
+            captured_by_user_name=arrival.captured_by_user_name,
             completeness=arrival.completeness,
             alert_state=arrival.alert_state,
             alert_severity=arrival.alert_severity,
@@ -176,7 +178,7 @@ def _catalog_access(principal: Principal) -> CatalogAccess:
     return CatalogAccess(
         organization_id=organization_id,
         store_code=principal.store_code,
-        can_view_all_stores=principal.role in {"admin", "super_admin"},
+        can_view_all_stores=principal.role == "super_admin",
         context=access_context_for_principal(
             principal, default_organization_id=organization_id
         ),

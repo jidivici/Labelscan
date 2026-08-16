@@ -1,4 +1,4 @@
-import type { Arrival, ArrivalMetrics, ProfessionCode } from '../types';
+import type { Arrival, ProfessionCode } from '../types';
 
 export interface PortalSelectOption {
   value: string;
@@ -29,15 +29,7 @@ export interface PortalSecondaryColumn {
   key: string;
   label: string;
   source: keyof Arrival;
-  format?: 'text' | 'date' | 'percentage' | 'alert';
-}
-
-export interface PortalKpiDefinition {
-  key: string;
-  label: string;
-  metric: keyof ArrivalMetrics;
-  description: string;
-  tone: 'neutral' | 'positive' | 'warning' | 'danger';
+  format?: 'text' | 'date';
 }
 
 export interface PortalLabels {
@@ -61,6 +53,5 @@ export interface PortalDefinition {
   detailSections: readonly PortalDetailSection[];
   fieldFilters: readonly PortalFieldFilterDefinition[];
   secondaryColumns: readonly PortalSecondaryColumn[];
-  kpis: readonly PortalKpiDefinition[];
   labels: PortalLabels;
 }

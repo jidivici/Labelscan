@@ -26,17 +26,11 @@ interface LoginResponse {
   refresh_token: string;
   refresh_expires_in: number;
   user: {
-    role: 'admin' | 'operator';
+    role: 'admin' | 'manager' | 'super_admin';
     username: string;
     business_portal_id: string | null;
     trade_code: string | null;
   };
-}
-
-interface ActivationResponse {
-  username: string;
-  role: string;
-  active: boolean;
 }
 
 export interface OperatorSession extends OperatorContext {
@@ -44,8 +38,10 @@ export interface OperatorSession extends OperatorContext {
 }
 
 function operatorSession(response: LoginResponse): OperatorSession {
-  if (response.user.role !== 'operator') {
-    throw new Error('MOBILE_OPERATOR_ONLY');
+  // The capture/review app is intentionally manager-only. Administrators use
+  // the secured web portal for arrivals, stores and manager administration.
+  if (response.user.role !== 'manager') {
+    throw new Error('MOBILE_ACCESS_DENIED');
   }
   if (
     typeof response.user.username !== 'string' ||
@@ -103,23 +99,6 @@ export async function login(username: string, password: string): Promise<Operato
     },
   );
   return persistSession(res, username);
-}
-
-/**
- * Consume the one-use activation token, set the first password, then establish the
- * mobile session so its portal/trade context comes from the normal login response.
- */
-export async function activateOperator(
-  token: string,
-  newPassword: string,
-): Promise<OperatorSession> {
-  const activated = await apiRequest<ActivationResponse>('/v1/mobile/auth/activate', {
-    method: 'POST',
-    body: { token: token.trim(), new_password: newPassword },
-    skipAuth: true,
-  });
-  if (activated.role !== 'operator') throw new Error('MOBILE_OPERATOR_ONLY');
-  return login(activated.username, newPassword);
 }
 
 export async function logout(): Promise<void> {
