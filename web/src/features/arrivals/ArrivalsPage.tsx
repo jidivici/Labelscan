@@ -93,6 +93,18 @@ export function ArrivalsPage() {
     setSearchParams((current) => updatePortalFieldFilter(current, field, value), { replace: true });
   }
 
+  function updateDateRange(
+    fromKey: 'dateFrom' | 'expiryFrom',
+    toKey: 'dateTo' | 'expiryTo',
+    from: string,
+    to: string,
+  ) {
+    setSearchParams((current) => {
+      const withFrom = updateArrivalFilter(current, fromKey, from);
+      return updateArrivalFilter(withFrom, toKey, to);
+    }, { replace: true });
+  }
+
   function resetFilters() {
     setSearchParams(clearArrivalFilters(new URLSearchParams(serializedFilters)), { replace: true });
   }
@@ -112,7 +124,7 @@ export function ArrivalsPage() {
       </div>
     </section>
 
-    {filtersOpen && <FilterPanel portal={portal} filters={filters} stores={stores} onUpdate={update} onFieldFilter={updateFieldFilter} onReset={resetFilters} />}
+    {filtersOpen && <FilterPanel portal={portal} filters={filters} stores={stores} onUpdate={update} onDateRangeChange={updateDateRange} onFieldFilter={updateFieldFilter} onReset={resetFilters} />}
 
     {error && <div className="notice error" role="alert">{error}</div>}
     {loading ? <div className="catalog-loading"><div className="loader" /><p>Chargement des arrivages…</p></div> : <>

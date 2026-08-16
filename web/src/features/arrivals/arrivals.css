@@ -13,10 +13,55 @@
 
 .filter-group { display: grid; gap: 12px; }
 .filter-group + .filter-group { padding-top: 16px; border-top: 1px solid var(--line); }
+.filter-panel-topbar { min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.filter-panel-topbar > strong { color: var(--portal-accent, var(--primary)); font-size: 10px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; }
+.filter-panel-topbar .button { min-height: 32px; }
 .filter-group-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .filter-group-heading strong { font-size: 12px; }
 .filter-group-heading span { color: var(--muted); font-size: 10px; }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 11px; }
+.date-range-filter { position: relative; min-width: 0; display: grid; align-content: start; gap: 7px; }
+.date-range-label { color: #465450; font-size: 12px; font-weight: 700; }
+.date-range-trigger { width: 100%; min-height: 54px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 18px; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; color: var(--ink); text-align: left; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.date-range-trigger:hover { border-color: #93a39f; background: #fbfcfc; }
+.date-range-filter.open .date-range-trigger { border-color: var(--portal-accent, var(--primary)); box-shadow: 0 0 0 3px rgb(8 127 114 / 10%); }
+.date-range-trigger-icon { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--primary-soft); color: var(--primary-dark); font-size: 15px; }
+.date-range-trigger > span:nth-child(2) { min-width: 0; display: grid; gap: 3px; }
+.date-range-trigger strong { overflow: hidden; font-size: 10px; line-height: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.date-range-trigger small { overflow: hidden; color: var(--muted); font-size: 8px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.date-range-chevron { color: var(--primary); font-size: 17px; text-align: center; transition: transform .15s ease; }
+.date-range-filter.open .date-range-chevron { transform: rotate(180deg); }
+.labelscan-calendar { position: absolute; top: calc(100% + 8px); left: 0; z-index: 35; width: min(356px, calc(100vw - 42px)); padding: 16px; border: 1px solid #bcd4ce; border-radius: 14px; background: #fff; box-shadow: 0 20px 48px rgb(8 35 30 / 18%); animation: calendar-open .16s ease-out; }
+.labelscan-calendar-brand { display: grid; gap: 3px; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.labelscan-calendar-brand > span { color: var(--portal-accent, var(--primary)); font-size: 8px; font-weight: 800; letter-spacing: .09em; }
+.labelscan-calendar-brand strong { font-size: 14px; }
+.labelscan-calendar-brand small { color: var(--muted); font-size: 9px; line-height: 14px; }
+.labelscan-calendar-selection { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; margin: 12px 0 5px; padding: 10px; border-radius: 10px; background: #f1f7f5; color: var(--primary-dark); }
+.labelscan-calendar-selection > span:not([aria-hidden]) { min-width: 0; display: grid; gap: 3px; }
+.labelscan-calendar-selection small { color: #647873; font-size: 7px; font-weight: 800; letter-spacing: .08em; }
+.labelscan-calendar-selection strong { overflow: hidden; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.labelscan-calendar-navigation { height: 44px; display: grid; grid-template-columns: 38px 1fr 38px; align-items: center; }
+.labelscan-calendar-navigation strong { font-size: 12px; text-align: center; }
+.labelscan-calendar-navigation button { width: 34px; height: 34px; display: grid; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: #52635f; font-size: 22px; }
+.labelscan-calendar-navigation button:hover:not(:disabled) { background: var(--primary-soft); color: var(--primary-dark); }
+.labelscan-calendar-navigation button:disabled { color: #b8c3c0; cursor: default; }
+.labelscan-calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.labelscan-calendar-weekday, .labelscan-calendar-empty, .labelscan-calendar-day { height: 34px; display: grid; place-items: center; }
+.labelscan-calendar-weekday { color: #71817d; font-size: 8px; font-weight: 750; }
+.labelscan-calendar-day { padding: 0; border: 1px solid transparent; border-radius: 7px; background: var(--surface-soft); color: #41534e; font-size: 10px; }
+.labelscan-calendar-day:hover:not(:disabled) { border-color: #9bcfc5; background: #ddf4ef; color: var(--primary-dark); }
+.labelscan-calendar-day.today { border-color: #8fa09c; }
+.labelscan-calendar-day.in-range { border-color: #c4e5de; background: #ddf4ef; color: var(--primary-dark); }
+.labelscan-calendar-day.selected { border-color: var(--portal-accent, var(--primary)); background: var(--portal-accent, var(--primary)); color: #fff; font-weight: 800; }
+.labelscan-calendar-day:disabled { border-color: #e2e8e5; background: #edf1ef; color: #a6b1ae; opacity: .72; cursor: default; }
+.labelscan-calendar-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.labelscan-calendar-footer button { min-height: 32px; padding: 6px 9px; border: 0; border-radius: 8px; background: transparent; font-size: 9px; font-weight: 750; }
+.calendar-today-button { color: var(--primary-dark); }
+.calendar-today-button:hover { background: var(--primary-soft); }
+.calendar-clear-button { color: var(--muted); }
+.calendar-clear-button:hover:not(:disabled) { background: var(--surface-soft); color: var(--ink); }
+.calendar-clear-button:disabled { opacity: .4; cursor: default; }
+@keyframes calendar-open { from { opacity: 0; transform: translateY(-5px); } to { opacity: 1; transform: translateY(0); } }
 .portal-filter-group { padding: 16px; border-radius: 11px; background: #f5faf8; background: color-mix(in srgb, var(--portal-accent) 5%, white); }
 .all-professions-filter-note { padding: 12px 14px; border: 1px solid #cfe0dc; border-radius: 9px; background: #f2f8f6; color: #4f6661; font-size: 11px; line-height: 1.5; }
 .filter-footer { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; padding-top: 16px; border-top: 1px solid var(--line); }
@@ -139,6 +184,8 @@
 
 @media (max-width: 640px) {
   .filter-grid { grid-template-columns: 1fr; }
+  .filter-panel-topbar { align-items: flex-start; flex-direction: column; }
+  .labelscan-calendar { position: relative; top: 0; width: 100%; margin-top: 2px; box-shadow: 0 10px 28px rgb(8 35 30 / 12%); }
   .filter-footer, .sort-controls { align-items: stretch; flex-direction: column; }
   .sort-controls .field { min-width: 0; }
   .hb-pagination { flex-wrap: wrap; }
