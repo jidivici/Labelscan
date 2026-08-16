@@ -238,10 +238,12 @@ describe('IAM bounded actions', () => {
 
   it('removes a manager from the front through the soft-delete endpoint', async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
     renderAt('/o/labelscan/administration', adminSession);
     const section = (await screen.findByRole('heading', { name: 'Managers' })).closest('section')!;
     await user.click(within(section).getByRole('button', { name: 'Supprimer' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Supprimer ce manager ?' });
+    expect(within(dialog).getByText(/historique restera associé/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole('button', { name: 'Supprimer' }));
 
     await waitFor(() => expect(deleteManager).toHaveBeenCalledWith(adminSession, manager.id));
   });

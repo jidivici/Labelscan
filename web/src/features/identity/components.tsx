@@ -176,6 +176,66 @@ export function PasswordDialog({
   </div>;
 }
 
+export function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirmLabel = 'Supprimer',
+  busy,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  confirmLabel?: string;
+  busy: boolean;
+  onClose: () => void;
+  onConfirm: () => Promise<void>;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const focusable = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button:not([disabled])') ?? []);
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [busy, onClose, open]);
+
+  if (!open) return null;
+  return <div className="modal-backdrop" onMouseDown={() => !busy && onClose()}>
+    <div ref={dialogRef} className="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby={titleId} aria-describedby={descriptionId} onMouseDown={(event) => event.stopPropagation()}>
+      <div className="access-mark" aria-hidden="true">!</div>
+      <h2 id={titleId}>{title}</h2>
+      <p id={descriptionId}>{description}</p>
+      <div className="form-actions">
+        <button className="button secondary" type="button" autoFocus disabled={busy} onClick={onClose}>Annuler</button>
+        <button className="button danger" type="button" disabled={busy} onClick={() => void onConfirm()}>{busy ? 'Suppression…' : confirmLabel}</button>
+      </div>
+    </div>
+  </div>;
+}
+
 export function IdentityEmpty({ title, description }: { title: string; description: string }) {
   return <div className="empty-state">
     <h2>{title}</h2>
