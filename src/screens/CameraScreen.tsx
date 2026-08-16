@@ -236,9 +236,13 @@ export function CameraScreen() {
           const iOSLandscapeCapture =
             orientationAtShutter === 'landscapeLeft'
             || orientationAtShutter === 'landscapeRight';
-          const rotateLeft = Platform.OS === 'ios'
-            ? iOSLandscapeCapture
-            : screenWidth <= screenHeight && normalizedImage.width > normalizedImage.height;
+          // A landscape result must always become portrait-readable. On iOS we
+          // additionally retain the physical-orientation signal for the camera
+          // edge case that encodes a landscape-held capture in portrait pixels.
+          const rotateLeft = screenWidth <= screenHeight && (
+            normalizedImage.width > normalizedImage.height
+            || (Platform.OS === 'ios' && iOSLandscapeCapture)
+          );
           const outputWidth = rotateLeft ? srcH : srcW;
           const outputHeight = rotateLeft ? srcW : srcH;
           const resize =
