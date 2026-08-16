@@ -13,7 +13,12 @@ from labelscan.contexts.traceability.application.catalog import (
     CatalogQuery,
     CatalogService,
 )
-from labelscan.platform.http.access import AccessContext, postgres_scope
+from labelscan.platform.http.access import (
+    AccessContext,
+    access_context_for_principal,
+    postgres_scope,
+)
+from labelscan.platform.http.security import Principal
 
 
 class _ScopedRepository:
@@ -110,6 +115,42 @@ def test_postgres_scope_contains_tenant_store_and_portal_guards() -> None:
     assert params["access_organization_id"] == "organization-1"
     assert params["access_portal_ids"] == ["portal-1"]
     assert params["access_organization_wide"] is False
+
+
+def test_admin_scope_covers_its_entire_organization_without_a_store_assignment() -> None:
+    access = access_context_for_principal(
+        Principal(
+            actor_id="admin-1",
+            principal="admin-1",
+            scopes=frozenset({"catalog:read"}),
+            role="admin",
+            organization_id="organization-1",
+        )
+    )
+
+    assert access.organization_wide is True
+    assert access.permits(
+        organization_id="organization-1",
+        store_id="store-1",
+        business_portal_id="portal-1",
+    )
+    assert not access.permits(
+        organization_id="organization-2",
+        store_id="store-1",
+        business_portal_id="portal-1",
+    )
+
+    repository = _ScopedRepository()
+    CatalogService(repository).list(
+        CatalogQuery(
+            access=CatalogAccess(
+                store_code=None,
+                organization_id="organization-1",
+                context=access,
+            )
+        )
+    )
+    assert repository.filters.access == access
 
 
 def test_manager_catalogue_is_scoped_by_assigned_portals_without_store_code() -> None:

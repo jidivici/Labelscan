@@ -41,6 +41,29 @@ export const superAdminFixtureSession: Session = {
   },
 };
 
+export const adminFixtureSession: Session = {
+  token: 'fixture-token',
+  expiresAt: 4_102_444_800_000,
+  user: {
+    id: 'admin-1',
+    username: 'dir',
+    display_name: 'Direction',
+    role: 'admin',
+    store_code: null,
+    organization_id: 'organization-1',
+    organization_slug: 'labelscan',
+    capabilities: [
+      CAPABILITIES.WEB_ACCESS,
+      CAPABILITIES.ARRIVALS_READ,
+      CAPABILITIES.ADMIN_WORKSPACE_VIEW,
+      CAPABILITIES.STORES_READ,
+    ],
+    profession_codes: [],
+    accessible_stores: [],
+    business_portal_ids: [],
+  },
+};
+
 export const arrivalFixtures: Arrival[] = [
   {
     batch_id: 'batch-1',

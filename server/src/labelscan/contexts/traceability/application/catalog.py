@@ -96,10 +96,11 @@ class CatalogService:
             )
         )
         context = request.access.context
+        has_organization_scope = bool(context and context.organization_wide)
         has_dimension_scope = bool(
             context and (context.business_portal_ids or context.store_ids)
         )
-        if request.access.can_view_all_stores or has_dimension_scope:
+        if request.access.can_view_all_stores or has_organization_scope or has_dimension_scope:
             effective_stores = requested_stores
         else:
             if actor_store is None:
@@ -179,18 +180,20 @@ class CatalogService:
     def arrival(self, request: CatalogArrivalQuery) -> CatalogArrival:
         effective_store = _store_code(request.access.store_code)
         context = request.access.context
+        has_organization_scope = bool(context and context.organization_wide)
         has_dimension_scope = bool(
             context and (context.business_portal_ids or context.store_ids)
         )
         if (
             not request.access.can_view_all_stores
+            and not has_organization_scope
             and not has_dimension_scope
             and effective_store is None
         ):
             raise CatalogStoreRequired()
         store = (
             None
-            if request.access.can_view_all_stores or has_dimension_scope
+            if request.access.can_view_all_stores or has_organization_scope or has_dimension_scope
             else effective_store
         )
         try:
@@ -213,18 +216,20 @@ class CatalogService:
     def image_checksum(self, request: CatalogImageQuery) -> str:
         effective_store = _store_code(request.access.store_code)
         context = request.access.context
+        has_organization_scope = bool(context and context.organization_wide)
         has_dimension_scope = bool(
             context and (context.business_portal_ids or context.store_ids)
         )
         if (
             not request.access.can_view_all_stores
+            and not has_organization_scope
             and not has_dimension_scope
             and effective_store is None
         ):
             raise CatalogStoreRequired()
         store = (
             None
-            if request.access.can_view_all_stores or has_dimension_scope
+            if request.access.can_view_all_stores or has_organization_scope or has_dimension_scope
             else effective_store
         )
         try:

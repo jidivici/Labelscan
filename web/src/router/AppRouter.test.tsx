@@ -4,7 +4,7 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { AuthProvider } from '../auth/AuthContext';
-import { managerFixtureSession, superAdminFixtureSession } from '../fixtures/portalFixtures';
+import { adminFixtureSession, managerFixtureSession, superAdminFixtureSession } from '../fixtures/portalFixtures';
 import { ApplicationRoutes } from './AppRouter';
 
 function renderAt(path: string, session = managerFixtureSession) {
@@ -44,5 +44,17 @@ describe('capability based routing', () => {
   it('uses arrivals as the super-admin home', async () => {
     renderAt('/o/labelscan', superAdminFixtureSession);
     expect(await screen.findByRole('heading', { name: 'Tous les arrivages' })).toBeInTheDocument();
+  });
+
+  it('prompts for a profession in the administration workspace', async () => {
+    renderAt('/o/labelscan/administration', adminFixtureSession);
+
+    expect(await screen.findByRole('button', { name: 'Métier Choisir un métier' })).toBeInTheDocument();
+  });
+
+  it('keeps Tous les métiers selected in the global arrivals view', async () => {
+    renderAt('/o/labelscan/portails/tous/arrivages', adminFixtureSession);
+
+    expect(await screen.findByRole('button', { name: 'Métier Tous les métiers' })).toBeInTheDocument();
   });
 });
