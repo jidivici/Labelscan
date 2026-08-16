@@ -23,7 +23,7 @@ describe('DateRangeCalendar', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /du : à choisir/i }));
+    fireEvent.click(screen.getByRole('button', { name: /date de début : choisir/i }));
     fireEvent.click(screen.getByRole('button', { name: /lundi 10 août 2026/i }));
     expect(onChange).toHaveBeenLastCalledWith('2026-08-10', '');
 
@@ -35,6 +35,7 @@ describe('DateRangeCalendar', () => {
         onChange={onChange}
       />,
     );
+    fireEvent.click(screen.getByRole('button', { name: /date de fin : choisir/i }));
     fireEvent.click(screen.getByRole('button', { name: /jeudi 20 août 2026/i }));
     expect(onChange).toHaveBeenLastCalledWith('2026-08-10', '2026-08-20');
   });
@@ -50,8 +51,24 @@ describe('DateRangeCalendar', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /10 août 2026/i }));
+    fireEvent.click(screen.getByRole('button', { name: /date de début : 10 août 2026/i }));
     fireEvent.click(screen.getByRole('button', { name: /effacer la période/i }));
     expect(onChange).toHaveBeenCalledWith('', '');
+  });
+
+  it('allows the same start and end date for a single-day filter', () => {
+    const onChange = vi.fn();
+    render(
+      <DateRangeCalendar
+        label="Arrivage"
+        from="2026-08-10"
+        to=""
+        onChange={onChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /date de fin : choisir/i }));
+    fireEvent.click(screen.getByRole('button', { name: /lundi 10 août 2026/i }));
+    expect(onChange).toHaveBeenCalledWith('2026-08-10', '2026-08-10');
   });
 });

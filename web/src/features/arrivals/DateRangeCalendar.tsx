@@ -74,7 +74,8 @@ export function DateRangeCalendar({
   disableFuture = false,
   onChange,
 }: DateRangeCalendarProps) {
-  const [open, setOpen] = useState(false);
+  const [activeBoundary, setActiveBoundary] = useState<'from' | 'to' | null>(null);
+  const open = activeBoundary !== null;
   const [displayed, setDisplayed] = useState(() => monthOfKey(from || to));
   const rootRef = useRef<HTMLDivElement>(null);
   const today = dayKey(new Date());
@@ -92,16 +93,16 @@ export function DateRangeCalendar({
     || (displayed.year === currentMonth.year && displayed.month < currentMonth.month);
 
   useEffect(() => {
-    if (open) setDisplayed(monthOfKey(from || to));
-  }, [from, open, to]);
+    if (activeBoundary) setDisplayed(monthOfKey(activeBoundary === 'from' ? from : to || from));
+  }, [activeBoundary, from, to]);
 
   useEffect(() => {
     if (!open) return undefined;
     const closeOnOutsidePress = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+      if (!rootRef.current?.contains(event.target as Node)) setActiveBoundary(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
+      if (event.key === 'Escape') setActiveBoundary(null);
     };
     document.addEventListener('pointerdown', closeOnOutsidePress);
     document.addEventListener('keydown', closeOnEscape);
@@ -112,31 +113,29 @@ export function DateRangeCalendar({
   }, [open]);
 
   function selectDay(key: string) {
-    if (!from || to || key < from) onChange(key, '');
-    else onChange(from, key);
+    if (activeBoundary === 'from') onChange(key, to && to >= key ? to : '');
+    else if (!from) onChange(key, key);
+    else onChange(key < from ? key : from, key < from ? from : key);
+    setActiveBoundary(null);
   }
-
-  const summary = `Du : ${formatDate(from, 'À choisir')} · Au : ${formatDate(to, 'À choisir')}`;
 
   return <div className={`date-range-filter ${open ? 'open' : ''}`} ref={rootRef}>
     <span className="date-range-label">{label}</span>
-    <button
-      type="button"
-      className="date-range-trigger"
-      onClick={() => setOpen((value) => !value)}
-      aria-expanded={open}
-      aria-haspopup="dialog"
-    >
-      <span className="date-range-trigger-icon" aria-hidden="true">▦</span>
-      <span><strong>{summary}</strong></span>
-      <span className="date-range-chevron" aria-hidden="true">⌄</span>
-    </button>
+    <div className="date-range-fields">
+      <button type="button" className={`date-range-box ${activeBoundary === 'from' ? 'active' : ''}`} onClick={() => setActiveBoundary((value) => value === 'from' ? null : 'from')} aria-label={`Date de début : ${formatDate(from, 'Choisir')}`} aria-expanded={activeBoundary === 'from'} aria-haspopup="dialog">
+        <small>DÉBUT</small><strong>{formatDate(from, 'Choisir')}</strong>
+      </button>
+      <span aria-hidden="true">→</span>
+      <button type="button" className={`date-range-box ${activeBoundary === 'to' ? 'active' : ''}`} onClick={() => setActiveBoundary((value) => value === 'to' ? null : 'to')} aria-label={`Date de fin : ${formatDate(to, 'Choisir')}`} aria-expanded={activeBoundary === 'to'} aria-haspopup="dialog">
+        <small>FIN</small><strong>{formatDate(to, 'Choisir')}</strong>
+      </button>
+    </div>
 
     {open && <div className="labelscan-calendar" role="dialog" aria-label={`Période — ${label}`}>
       <header className="labelscan-calendar-brand">
         <span>LABELSCAN · ARRIVAGES</span>
         <strong>{label} du / au</strong>
-        <small>Sélectionnez le premier jour, puis le dernier.</small>
+        <small>{activeBoundary === 'from' ? 'Sélectionnez la date de début.' : 'Sélectionnez la date de fin.'}</small>
       </header>
 
       <div className="labelscan-calendar-selection" aria-live="polite">
@@ -178,7 +177,7 @@ export function DateRangeCalendar({
 
       <footer className="labelscan-calendar-footer">
         <button type="button" className="calendar-today-button" onClick={() => { setDisplayed(currentMonth); selectDay(today); }}>Aujourd’hui</button>
-        <button type="button" className="calendar-clear-button" disabled={!from && !to} onClick={() => onChange('', '')}>Effacer la période</button>
+        <button type="button" className="calendar-clear-button" disabled={!from && !to} onClick={() => { onChange('', ''); setActiveBoundary(null); }}>Effacer la période</button>
       </footer>
     </div>}
   </div>;

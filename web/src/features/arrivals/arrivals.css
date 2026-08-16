@@ -22,6 +22,13 @@
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 11px; }
 .date-range-filter { position: relative; min-width: 0; display: grid; align-content: start; gap: 7px; }
 .date-range-label { color: #465450; font-size: 12px; font-weight: 700; }
+.date-range-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); align-items: center; gap: 8px; }
+.date-range-fields > span { color: #82908c; font-size: 13px; }
+.date-range-box { min-width: 0; min-height: 54px; display: grid; align-content: center; gap: 4px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; color: var(--ink); text-align: left; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+.date-range-box:hover { border-color: #93a39f; background: #fbfcfc; }
+.date-range-box.active { border-color: var(--portal-accent, var(--primary)); background: #f7fbfa; box-shadow: 0 0 0 3px rgb(8 127 114 / 10%); }
+.date-range-box small { color: var(--primary); font-size: 7px; font-weight: 800; letter-spacing: .08em; }
+.date-range-box strong { overflow: hidden; font-size: 10px; line-height: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .date-range-trigger { width: 100%; min-height: 54px; display: grid; grid-template-columns: 28px minmax(0, 1fr) 18px; align-items: center; gap: 9px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: #fff; color: var(--ink); text-align: left; transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
 .date-range-trigger:hover { border-color: #93a39f; background: #fbfcfc; }
 .date-range-filter.open .date-range-trigger { border-color: var(--portal-accent, var(--primary)); box-shadow: 0 0 0 3px rgb(8 127 114 / 10%); }

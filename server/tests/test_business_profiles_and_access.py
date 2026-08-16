@@ -117,7 +117,7 @@ def test_postgres_scope_contains_tenant_store_and_portal_guards() -> None:
     assert params["access_organization_wide"] is False
 
 
-def test_admin_scope_covers_its_entire_organization_without_a_store_assignment() -> None:
+def test_admin_without_an_owned_store_has_an_empty_catalogue_scope() -> None:
     access = access_context_for_principal(
         Principal(
             actor_id="admin-1",
@@ -128,8 +128,8 @@ def test_admin_scope_covers_its_entire_organization_without_a_store_assignment()
         )
     )
 
-    assert access.organization_wide is True
-    assert access.permits(
+    assert access.organization_wide is False
+    assert not access.permits(
         organization_id="organization-1",
         store_id="store-1",
         business_portal_id="portal-1",
@@ -151,6 +151,26 @@ def test_admin_scope_covers_its_entire_organization_without_a_store_assignment()
         )
     )
     assert repository.filters.access == access
+
+
+def test_admin_scope_never_permits_a_store_it_does_not_own() -> None:
+    access = AccessContext(
+        organization_id="organization-1",
+        role="admin",
+        store_ids=frozenset({"owned-store"}),
+        business_portal_ids=frozenset({"owned-portal"}),
+    )
+
+    assert access.permits(
+        organization_id="organization-1",
+        store_id="owned-store",
+        business_portal_id="owned-portal",
+    )
+    assert not access.permits(
+        organization_id="organization-1",
+        store_id="another-store",
+        business_portal_id="another-portal",
+    )
 
 
 def test_manager_catalogue_is_scoped_by_assigned_portals_without_store_code() -> None:
