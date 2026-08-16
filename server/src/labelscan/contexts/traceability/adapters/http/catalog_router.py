@@ -106,6 +106,7 @@ class CatalogProductResponse(BaseModel):
     packaging_date: str | None
     recorded_at: str
     photo_available: bool
+    photo_rotation_degrees: int
     store_id: str | None
     business_portal_id: str | None
     profession_code: str

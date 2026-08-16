@@ -21,6 +21,7 @@ import { Article, ArticleField } from '../types/Article';
 import type { ExtractionRunResponse } from '../types/api';
 import type { ArticleStore } from './articleStore';
 import { AsyncStorageArticleStore } from './articleStoreAsyncStorage';
+import { queryClient } from './queryClient';
 
 const PHOTOS_DIR = `${FileSystem.documentDirectory}photos/`;
 // Workflow v1: photos of scans still in the queue (not yet validated). Durable — the
@@ -82,6 +83,11 @@ export function persistPendingPhoto(scanId: string, srcUri: string): Promise<str
   return persistPhotoInto(PENDING_DIR, scanId, srcUri);
 }
 
+/** Keep the reviewed photo available instantly after its pending scan is removed. */
+export function persistConfirmedPhoto(ingestionId: string, srcUri: string): Promise<string | null> {
+  return persistPhotoInto(PHOTOS_DIR, ingestionId, srcUri);
+}
+
 /** Delete a pending photo. Idempotent, never throws. */
 export async function deletePendingPhoto(uri: string): Promise<void> {
   // Only ever delete inside the pending dir (a failed persist can leave a scan
@@ -128,6 +134,9 @@ export async function getAllArticles(): Promise<Article[]> {
 }
 
 export async function getArticleById(id: string): Promise<Article | null> {
+  const cached = queryClient.getQueryData<Article[]>(['catalog', 'arrivals'])
+    ?.find((article) => article.id === id);
+  if (cached) return cached;
   const { getCatalogArticle } = await import('./catalogApi');
   const serverArticle = await getCatalogArticle(id);
   return serverArticle ?? store.getById(id);

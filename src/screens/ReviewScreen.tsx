@@ -26,7 +26,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
-import { getAllArticles } from '../services/storage';
+import { getAllArticles, persistConfirmedPhoto } from '../services/storage';
 import { queryClient } from '../services/queryClient';
 import { businessProfileFor } from '../services/businessProfiles';
 import { suggestAllergen } from '../services/allergenSuggestions';
@@ -620,13 +620,17 @@ export function ReviewScreen() {
       // This makes the card visible the moment the operator returns to "Aujourd'hui";
       // the next normal or pull-to-refresh fetch reconciles it with the server copy.
       const savedAt = new Date().toISOString();
+      const confirmedPhotoUri = photoUri
+        ? await persistConfirmedPhoto(ingestionId, photoUri)
+        : null;
       const optimisticArrival: Article = {
         id: `pending-${ingestionId}`,
         source: 'backend_extraction',
         ingestion_id: ingestionId,
         extraction_run_id: run.run_id,
         captured_at: capturedAt ?? savedAt,
-        photo_uri: photoUri ?? null,
+        photo_uri: confirmedPhotoUri,
+        photo_rotation_degrees: photoRotationDegrees,
         barcode_raw: barcodeRaw ?? ingestion.barcode_raw ?? null,
         ingestion_status: 'confirmed',
         fields: savedFields,
@@ -637,15 +641,14 @@ export function ReviewScreen() {
         trade_profile_version: reviewProfile.version,
         raw_extraction_run: run,
       };
+      // Remove the in-progress card before publishing the final one, preventing a
+      // transient duplicate. The photo has already been copied to permanent storage.
+      closingRef.current = true;
+      await completeScan(scan.id);
       queryClient.setQueryData<Article[]>(['catalog', 'arrivals'], (current = []) => [
         optimisticArrival,
         ...current.filter((article) => article.ingestion_id !== ingestionId),
       ]);
-
-      // The scan's job is done: leave the queue (and its pending photo copy). closingRef
-      // stops the !scan guard effect from double-navigating while this await yields.
-      closingRef.current = true;
-      await completeScan(scan.id);
 
       // Satisfying confirmation the arrivage was saved (light success haptic, non-blocking).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

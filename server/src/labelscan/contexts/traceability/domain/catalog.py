@@ -23,6 +23,7 @@ class CatalogProduct:
     packaging_date: str | None
     recorded_at: str
     photo_available: bool = True
+    photo_rotation_degrees: int = 0
     store_id: str | None = None
     business_portal_id: str | None = None
     profession_code: str = "poissonnerie"

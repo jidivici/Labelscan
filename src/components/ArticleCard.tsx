@@ -152,6 +152,7 @@ export const ArticleCard = React.memo(function ArticleCard({
                     styles.thumbnailImage,
                   ]}
                   resizeMode="cover"
+                  halfTurn={article.photo_rotation_degrees === 180}
                 />
               ) : (
                 <MaterialCommunityIcons

@@ -21,6 +21,7 @@ interface ArrivalSummary {
   packaging_date: string | null;
   recorded_at: string;
   photo_available: boolean;
+  photo_rotation_degrees?: 0 | 180;
   business_portal_id: string | null;
   profession_code: string;
   trade_profile_version: string;
@@ -50,6 +51,7 @@ interface ArrivalDetail {
   recorded_at: string;
   updated_at: string;
   photo_available: boolean;
+  photo_rotation_degrees?: 0 | 180;
   business_portal_id: string | null;
   profession_code: string;
   trade_profile_version: string;
@@ -112,6 +114,7 @@ export async function listCatalogArticles(): Promise<Article[]> {
         ? `${API_BASE_URL}/v1/arrivals/${encodeURIComponent(arrival.batch_id)}/image`
         : null,
       photo_headers: headers,
+      photo_rotation_degrees: arrival.photo_rotation_degrees ?? 0,
       barcode_raw: arrival.gtin,
       ingestion_status: arrival.status,
       fields: fieldsFromValues(values, {}, arrival.profession_code),
@@ -140,6 +143,7 @@ export async function getCatalogArticle(batchId: string): Promise<Article | null
         ? `${API_BASE_URL}/v1/arrivals/${encodeURIComponent(arrival.batch_id)}/image`
         : null,
       photo_headers: headers,
+      photo_rotation_degrees: arrival.photo_rotation_degrees ?? 0,
       barcode_raw: arrival.fields.gtin ?? null,
       ingestion_status: arrival.status,
       fields: fieldsFromValues(

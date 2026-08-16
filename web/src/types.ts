@@ -112,6 +112,7 @@ export interface Arrival {
   packaging_date: string | null;
   recorded_at: string;
   photo_available: boolean;
+  photo_rotation_degrees?: 0 | 180;
   store_id?: string | null;
   business_portal_id?: string | null;
   trade_profile_version?: string;
