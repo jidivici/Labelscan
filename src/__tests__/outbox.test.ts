@@ -1,9 +1,21 @@
 import {
   backoffDelayMs,
+  enqueueFinalizeReview,
   isRetryableError,
+  listAll,
   MAX_ATTEMPTS,
   operationMatchesOperatorContext,
+  updatePendingFinalizeReview,
 } from '../services/outbox';
+
+async function clearOutbox() {
+  const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+  await AsyncStorage.removeItem('@labelscan:outbox');
+}
+
+beforeEach(async () => {
+  await clearOutbox();
+});
 
 describe('outbox backoff', () => {
   it('first attempt delay is at least base', () => {
@@ -83,5 +95,26 @@ describe('local operator ownership', () => {
 
   it('keeps unowned historical operations replayable', () => {
     expect(operationMatchesOperatorContext({} as never, null)).toBe(true);
+  });
+});
+
+describe('pending review updates', () => {
+  it('keeps the manager-approved photo orientation before a retry is sent', async () => {
+    const operation = await enqueueFinalizeReview({
+      ingestion_id: 'ing-1',
+      fields: { commercial_designation: 'Saumon' },
+      photo_rotation_degrees: 0,
+    });
+
+    const updated = await updatePendingFinalizeReview(operation.id, {
+      ingestion_id: 'ing-1',
+      fields: { commercial_designation: 'Saumon' },
+      photo_rotation_degrees: 180,
+    });
+
+    expect(updated?.payload.photo_rotation_degrees).toBe(180);
+    expect((await listAll())[0]).toMatchObject({
+      payload: { photo_rotation_degrees: 180 },
+    });
   });
 });

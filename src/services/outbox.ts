@@ -328,6 +328,33 @@ export function enqueueFinalizeReview(
   return enqueue({ type: 'finalize_review', payload }, opts) as Promise<FinalizeReviewOperation>;
 }
 
+/**
+ * Replace a review payload that has not reached the server yet. This keeps the
+ * manager's latest corrections — including the chosen photo orientation — when a
+ * previously failed review is reopened and submitted again.
+ */
+export function updatePendingFinalizeReview(
+  id: string,
+  payload: FinalizeReviewPayload,
+  now: number = Date.now(),
+): Promise<FinalizeReviewOperation | null> {
+  return mutate((ops) => {
+    let updated: FinalizeReviewOperation | null = null;
+    const next = ops.map((op) => {
+      if (
+        op.id === id &&
+        op.type === 'finalize_review' &&
+        (op.status === 'pending' || op.status === 'dead_letter')
+      ) {
+        updated = { ...op, payload, updated_at: isoAt(now) };
+        return updated;
+      }
+      return op;
+    });
+    return { ops: next, result: updated };
+  });
+}
+
 // ── Status transitions ─────────────────────────────────────────────────────────
 
 /** Claim a pending op for execution. No-op (returns null) if not pending/found. */

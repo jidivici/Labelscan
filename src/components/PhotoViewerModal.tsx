@@ -27,7 +27,7 @@ import { PHOTO_DISPLAY_ROTATION } from './photoOrientation';
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 const DOUBLE_TAP_SCALE = 2.5;
-const INITIAL_SCALE = 1.15;
+const INITIAL_SCALE = 1;
 
 export interface PhotoViewerModalProps {
   visible: boolean;
@@ -66,8 +66,8 @@ export function PhotoViewerModal({
     savedTranslateY.value = 0;
   };
 
-  // Every open starts slightly zoomed and centered. This keeps the label readable
-  // immediately without carrying zoom/pan state over from the previous photo.
+  // Every open starts at its natural scale and centered, without carrying
+  // zoom/pan state over from the previous photo.
   useEffect(() => {
     if (visible) reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
