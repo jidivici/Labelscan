@@ -73,7 +73,9 @@ reset_demo_data() {
     psql -U labelscan_app -d postgres -v ON_ERROR_STOP=1 \
     -c 'CREATE DATABASE labelscan OWNER labelscan_app;'
   docker compose -f "$COMPOSE_FILE" run --rm --no-deps migrate
-  docker compose -f "$COMPOSE_FILE" run --rm --no-deps demo
+  # The VPS compose's API service owns the raw-data volume. Reuse that service
+  # with the demo command so seeded image references remain readable by API.
+  docker compose -f "$COMPOSE_FILE" run --rm --no-deps api demo
 }
 
 printf '==> Synchronizing deployable source for %s\n' "$commit_sha"
