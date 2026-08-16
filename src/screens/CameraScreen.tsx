@@ -35,7 +35,13 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { StatusBar } from 'react-native';
-import { CameraView, useCameraPermissions, BarcodeScanningResult } from 'expo-camera';
+import {
+  CameraView,
+  useCameraPermissions,
+  BarcodeScanningResult,
+  type CameraOrientation,
+  type ResponsiveOrientationChanged,
+} from 'expo-camera';
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -106,6 +112,10 @@ export function CameraScreen() {
   const cameraRef = useRef<CameraView>(null);
   const flashRef = useRef<FlashOverlayRef>(null);
   const lastBarcodeRef = useRef<BarcodeScanningResult | null>(null);
+  // `width > height` is not a reliable indicator on iOS: the camera may preserve
+  // a portrait-sized pixel buffer while the phone was held landscape. Expo Camera
+  // supplies the physical orientation independently of the locked app UI.
+  const captureOrientationRef = useRef<CameraOrientation>('portrait');
   const mountedRef = useRef(true);
 
   // ── Permission guard ──────────────────────────────────────────────────────
@@ -128,11 +138,21 @@ export function CameraScreen() {
     }
   }, [isFocused]);
 
+  const handleResponsiveOrientationChanged = useCallback(
+    ({ orientation }: ResponsiveOrientationChanged) => {
+      captureOrientationRef.current = orientation;
+    },
+    [],
+  );
+
   // ── Take a photo and enqueue it — TERMINAL: the operator keeps shooting ────
   const takePhoto = useCallback(async () => {
     // `taking` is the ONLY lock: N scans in flight is the point of the chained
     // workflow, so nothing here waits on the previous submit or extraction.
     if (!cameraRef.current || taking) return;
+    // Freeze the physical orientation at the shutter press. A user turning the
+    // phone while the JPEG is written must not change this photo's transform.
+    const orientationAtShutter = captureOrientationRef.current;
     setTaking(true);
     setFrameState('capturing');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -203,9 +223,16 @@ export function CameraScreen() {
         }
         const srcW = crop.width;
         const srcH = crop.height;
-        // The app preview stays portrait. A landscape sensor buffer therefore has
-        // to be turned left after the crop so the stored OCR image is upright.
-        const rotateLeft = screenWidth <= screenHeight && capturedPhoto.width > capturedPhoto.height;
+        // The app preview stays portrait. On iOS, use Expo Camera's physical
+        // orientation signal rather than the JPEG dimensions: with an orientation
+        // lock, those dimensions are not a trustworthy proxy. A landscape-held
+        // phone is always transformed left before OCR, exactly as requested.
+        const iOSLandscapeCapture =
+          orientationAtShutter === 'landscapeLeft'
+          || orientationAtShutter === 'landscapeRight';
+        const rotateLeft = Platform.OS === 'ios'
+          ? iOSLandscapeCapture
+          : screenWidth <= screenHeight && capturedPhoto.width > capturedPhoto.height;
         const outputWidth = rotateLeft ? srcH : srcW;
         const outputHeight = rotateLeft ? srcW : srcH;
         const resize =
@@ -337,6 +364,9 @@ export function CameraScreen() {
           // buffer then matches the live frame before our exact crop + left
           // rotation are applied. This prop does not rotate the React Native UI.
           responsiveOrientationWhenOrientationLocked={Platform.OS === 'ios'}
+          onResponsiveOrientationChanged={
+            Platform.OS === 'ios' ? handleResponsiveOrientationChanged : undefined
+          }
           flash={torchOn ? 'on' : 'off'}
           enableTorch={torchOn}
           onBarcodeScanned={taking ? undefined : handleBarcodeScanned}
