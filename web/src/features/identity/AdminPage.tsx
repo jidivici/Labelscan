@@ -269,6 +269,17 @@ export function AdminPage() {
     <ErrorNotice message={error} />
     <SuccessNotice message={success} />
 
+    {canManageManagers &&
+      <IdentityPanel title="Nouveau manager" description="Le compte sera actif dès sa création.">
+        <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
+          <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
+          <PasswordField value={password} onChange={setPassword} />
+          <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={portals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
+          <button className="button primary" disabled={saving || !selectedPortalId || password.length === 0}>{saving ? 'Création…' : 'Créer le compte'}</button>
+        </form>
+      </IdentityPanel>
+    }
+
     {canManagePortals && <IdentityPanel title="Nouveau magasin" description="Ajoutez un magasin et choisissez les métiers réellement utilisés.">
       <form className="identity-form manager-form" onSubmit={(event) => void submitStore(event)}>
         <label className="field"><span>Nom du magasin</span><input required maxLength={120} value={storeName} onChange={(event) => setStoreName(event.target.value)} /></label>
@@ -283,15 +294,6 @@ export function AdminPage() {
     </IdentityPanel>}
 
     {canManageManagers && <>
-      <IdentityPanel title="Nouveau manager" description="Le compte sera actif dès sa création.">
-        <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
-          <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-          <PasswordField value={password} onChange={setPassword} />
-          <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={portals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
-          <button className="button primary" disabled={saving || !selectedPortalId || password.length === 0}>{saving ? 'Création…' : 'Créer le compte'}</button>
-        </form>
-      </IdentityPanel>
-
       {managers.length === 0
         ? <IdentityEmpty title="Aucun manager" description="Créez un manager et attribuez-lui un magasin et un métier." />
         : <IdentityPanel title="Managers" description="Un manager est rattaché à un seul magasin et un seul métier.">
@@ -306,10 +308,9 @@ export function AdminPage() {
     {canManagePortals && <>
       <IdentityPanel title="Magasins" description="La suppression conserve l’historique de traçabilité. Un magasin utilisé doit d’abord être libéré de ses accès actifs.">
         <div className="table-scroll paged-content" key={`stores-${storePage}`}><table className="identity-admin-table">
-          <thead><tr><th>Magasin</th><th>Code</th><th>Statut</th><th>Actions</th></tr></thead>
+          <thead><tr><th>Magasin</th><th>Statut</th><th>Actions</th></tr></thead>
           <tbody>{visibleStores.map((store) => <tr key={store.id}>
             <td><strong>{store.name}</strong></td>
-            <td><span className="subtle">{store.code}</span></td>
             <td><ActiveBadge active={store.active} /></td>
             <td><div className="table-actions">
               <button className={`button ${store.active ? 'text danger-text' : 'secondary'} small`} type="button" disabled={saving} onClick={() => store.active ? setPendingDeletion({ kind: 'store', item: store }) : void toggleStore(store)}>{store.active ? 'Supprimer' : 'Réactiver'}</button>
@@ -320,7 +321,7 @@ export function AdminPage() {
       </IdentityPanel>
 
       <IdentityPanel title="Métiers par magasin" description="Activez uniquement les métiers utilisés dans chaque magasin.">
-      <label className="field compact-field panel-control"><span>Magasin</span><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name} · {store.code}</option>)}</select></label>
+      <label className="field compact-field panel-control"><span>Magasin</span><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
       {storePortals.length === 0
         ? <IdentityEmpty title="Aucun portail" description="Aucun portail métier n’est disponible pour ce magasin." />
         : <div className="table-scroll"><table className="identity-admin-table identity-portal-table">

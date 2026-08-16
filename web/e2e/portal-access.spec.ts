@@ -78,7 +78,9 @@ test('admin sees three stores, portals, managers, and direct account creation', 
   const creationHeadings = await page.locator('.data-panel h2').allTextContents();
   expect(creationHeadings).toContain('Nouveau magasin');
   expect(creationHeadings).toContain('Nouveau manager');
-  expect(creationHeadings.indexOf('Nouveau magasin')).toBeLessThan(creationHeadings.indexOf('Nouveau manager'));
+  expect(creationHeadings.indexOf('Nouveau manager')).toBeLessThan(creationHeadings.indexOf('Nouveau magasin'));
+  expect(creationHeadings.indexOf('Nouveau magasin')).toBeLessThan(creationHeadings.indexOf('Managers'));
+  expect(creationHeadings.indexOf('Managers')).toBeLessThan(creationHeadings.indexOf('Magasins'));
   const storeSelect = page.getByLabel('Magasin').last();
   await expect(storeSelect.locator('option')).toHaveCount(3);
   const invitePanel = page.locator('.data-panel').filter({ has: page.getByRole('heading', { name: 'Nouveau manager' }) });
@@ -114,11 +116,12 @@ test('admin can aggregate every profession and use the HBntory-style arrival car
   await expect.poll(() => backend.requests.some((request) => {
     if (!request.startsWith('GET /v1/arrivals?')) return false;
     const url = new URL(request.slice(4), 'http://e2e.local');
-    return url.searchParams.get('limit') === '50' && !url.searchParams.has('profession');
+    return url.searchParams.get('limit') === '30' && !url.searchParams.has('profession');
   })).toBe(true);
 
   await page.getByRole('button', { name: 'Vue liste' }).click();
   await expect(page.locator('.arrival-row')).toHaveCount(1);
+  await expect(page.locator('.table-panel').getByRole('columnheader', { name: 'Statut' })).toHaveCount(0);
   await page.getByRole('button', { name: 'Vue cartes' }).click();
   await expect(page.locator('.arrival-card')).toHaveCount(1);
   await expect(page.locator('.arrival-card')).toContainText('Saumon atlantique');
@@ -155,7 +158,9 @@ test('search accepts spaces and remains independent from filters', async ({ page
   })).toBe(true);
 
   await page.getByRole('button', { name: /^Filtres/ }).click();
-  await page.locator('.advanced-filter-panel label.field').filter({ hasText: /^Statut/ }).locator('select').selectOption('registered');
+  await expect(page.locator('.advanced-filter-panel label.field').filter({ hasText: /^Statut/ })).toHaveCount(0);
+  await expect(page.getByRole('option', { name: 'Statut' })).toHaveCount(0);
+  await page.getByRole('textbox', { name: 'Fournisseur' }).fill('Océan Frais');
   await expect(page.locator('.filter-count')).toHaveText('1');
   await page.getByRole('button', { name: 'Réinitialiser tous les filtres' }).click();
   await expect(search).toHaveValue('saumon atlantique');
@@ -199,6 +204,9 @@ test('super-admin can see administrators and the single combined Charcuterie–T
 
   await useNavigationLink(page, 'Administrateurs');
   await expect(page.getByRole('heading', { name: 'Administrateurs', exact: true })).toBeVisible();
+  await openSidebarIfNeeded(page);
+  await expect(page.getByRole('button', { name: /^Métier/ })).toContainText('Choisir un métier');
+  if (await page.getByRole('button', { name: 'Fermer le menu' }).isVisible()) await page.keyboard.press('Escape');
   await expect(page.getByText('admin.nord')).toBeVisible();
   await expect(page.getByText('admin.sud')).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Nouvel administrateur' })).toBeVisible();
@@ -219,7 +227,7 @@ test('super-admin creates an active account with a direct password', async ({ pa
 
 test('professional filters persist in the URL, reach the server, and reset pagination', async ({ page }) => {
   const backend = await login(page, 'manager');
-  await expect(page.getByRole('navigation', { name: 'Pagination' })).toContainText('1–50 sur 101');
+  await expect(page.getByRole('navigation', { name: 'Pagination' })).toContainText('1–30 sur 101');
   await page.getByRole('button', { name: /^Filtres/ }).click();
   await expect(page.getByLabel('Complétude minimale')).toHaveCount(0);
   await expect(page.getByRole('option', { name: 'Signalés' })).toHaveCount(0);
@@ -236,8 +244,8 @@ test('professional filters persist in the URL, reach the server, and reset pagin
   await expect.poll(() => backend.requests.some((request) => {
     if (!request.startsWith('GET /v1/arrivals?')) return false;
     const url = new URL(request.slice(4), 'http://e2e.local');
-    return url.searchParams.get('limit') === '50'
-      && url.searchParams.get('offset') === '50'
+    return url.searchParams.get('limit') === '30'
+      && url.searchParams.get('offset') === '30'
       && expectedFilters.every((filter) => url.searchParams.getAll('field_filter').includes(filter));
   })).toBe(true);
 });

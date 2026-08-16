@@ -106,7 +106,6 @@ export async function listArrivals(
 interface ArrivalQueryOptions {
   limit: number;
   offset: number;
-  status?: string;
 }
 
 export function arrivalQueryParams(
@@ -118,8 +117,6 @@ export function arrivalQueryParams(
   if (profession) params.set('profession', profession);
   if (filters.query.trim()) params.set('q', filters.query.trim());
   if (filters.storeCode) params.set('store_code', filters.storeCode);
-  const status = options.status ?? filters.status;
-  if (status) params.set('status', status);
   if (filters.supplier) params.set('supplier', filters.supplier);
   if (filters.lotCode) params.set('lot_code', filters.lotCode);
   if (filters.gtin) params.set('gtin', filters.gtin);

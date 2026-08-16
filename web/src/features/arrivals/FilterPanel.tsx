@@ -21,7 +21,6 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onFieldFilter, 
       <div className="filter-group-heading"><strong>Périmètre</strong><span>Critères communs</span></div>
       <div className="filter-grid">
         {stores.length > 1 && <label className="field"><span>Magasin</span><select value={filters.storeCode} onChange={(event) => onUpdate('storeCode', event.target.value)}><option value="">Tous les magasins autorisés</option>{stores.map((store) => <option value={store.code} key={store.code}>{store.name}</option>)}</select></label>}
-        <label className="field"><span>Statut</span><select value={filters.status} onChange={(event) => onUpdate('status', event.target.value)}><option value="">Tous les statuts</option><option value="registered">Enregistrés</option></select></label>
       </div>
     </div>
 
@@ -51,7 +50,7 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onFieldFilter, 
 
     <div className="filter-footer">
       <div className="sort-controls">
-        <label className="field"><span>Trier par</span><select value={filters.sortBy} onChange={(event) => onUpdate('sortBy', event.target.value)}><option value="recorded_at">Date d’enregistrement</option><option value="expiry_date">Date d’expiration</option><option value="product_name">Produit</option><option value="supplier">Fournisseur</option><option value="lot_code">Lot</option><option value="status">Statut</option></select></label>
+        <label className="field"><span>Trier par</span><select value={filters.sortBy} onChange={(event) => onUpdate('sortBy', event.target.value)}><option value="recorded_at">Date d’enregistrement</option><option value="expiry_date">Date d’expiration</option><option value="product_name">Produit</option><option value="supplier">Fournisseur</option><option value="lot_code">Lot</option></select></label>
         <label className="field"><span>Ordre</span><select value={filters.sortDirection} onChange={(event) => onUpdate('sortDirection', event.target.value)}><option value="desc">Décroissant</option><option value="asc">Croissant</option></select></label>
       </div>
       <button type="button" className="button text" onClick={onReset}>Réinitialiser tous les filtres</button>
