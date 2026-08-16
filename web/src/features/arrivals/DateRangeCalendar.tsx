@@ -9,7 +9,6 @@ interface CalendarCell {
 
 interface DateRangeCalendarProps {
   label: string;
-  description: string;
   from: string;
   to: string;
   disableFuture?: boolean;
@@ -70,7 +69,6 @@ function formatLongDate(key: string): string {
 
 export function DateRangeCalendar({
   label,
-  description,
   from,
   to,
   disableFuture = false,
@@ -118,9 +116,7 @@ export function DateRangeCalendar({
     else onChange(from, key);
   }
 
-  const summary = from
-    ? `${formatDate(from, 'Début')} → ${formatDate(to, 'Fin à choisir')}`
-    : 'Choisir une période';
+  const summary = `Du : ${formatDate(from, 'À choisir')} · Au : ${formatDate(to, 'À choisir')}`;
 
   return <div className={`date-range-filter ${open ? 'open' : ''}`} ref={rootRef}>
     <span className="date-range-label">{label}</span>
@@ -132,14 +128,14 @@ export function DateRangeCalendar({
       aria-haspopup="dialog"
     >
       <span className="date-range-trigger-icon" aria-hidden="true">▦</span>
-      <span><strong>{summary}</strong><small>{description}</small></span>
+      <span><strong>{summary}</strong></span>
       <span className="date-range-chevron" aria-hidden="true">⌄</span>
     </button>
 
     {open && <div className="labelscan-calendar" role="dialog" aria-label={`Période — ${label}`}>
       <header className="labelscan-calendar-brand">
-        <span>LABELSCAN · FILTRE DATE</span>
-        <strong>{label}</strong>
+        <span>LABELSCAN · ARRIVAGES</span>
+        <strong>{label} du / au</strong>
         <small>Sélectionnez le premier jour, puis le dernier.</small>
       </header>
 

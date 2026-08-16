@@ -43,8 +43,8 @@ export function parseArrivalFilters(params: URLSearchParams): ArrivalFilters {
     gtin: params.get('gtin')?.trim() ?? '',
     dateFrom: params.get('from') ?? '',
     dateTo: params.get('to') ?? '',
-    expiryFrom: params.get('expiry_from') ?? '',
-    expiryTo: params.get('expiry_to') ?? '',
+    expiryFrom: '',
+    expiryTo: '',
     sortBy: params.get('sort')?.trim() || 'recorded_at',
     sortDirection: params.get('direction') === 'asc' ? 'asc' : 'desc',
     fieldFilters: params.getAll('field_filter').map(parseFieldFilter).filter((value): value is ArrivalFieldFilter => value !== null),
@@ -108,8 +108,6 @@ export function activeArrivalFilterCount(filters: ArrivalFilters): number {
     filters.gtin,
     filters.dateFrom,
     filters.dateTo,
-    filters.expiryFrom,
-    filters.expiryTo,
     ...filters.fieldFilters.map((filter) => filter.value),
   ].filter(Boolean).length;
 }

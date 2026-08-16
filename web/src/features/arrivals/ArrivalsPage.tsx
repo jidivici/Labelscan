@@ -93,15 +93,10 @@ export function ArrivalsPage() {
     setSearchParams((current) => updatePortalFieldFilter(current, field, value), { replace: true });
   }
 
-  function updateDateRange(
-    fromKey: 'dateFrom' | 'expiryFrom',
-    toKey: 'dateTo' | 'expiryTo',
-    from: string,
-    to: string,
-  ) {
+  function updateDateRange(from: string, to: string) {
     setSearchParams((current) => {
-      const withFrom = updateArrivalFilter(current, fromKey, from);
-      return updateArrivalFilter(withFrom, toKey, to);
+      const withFrom = updateArrivalFilter(current, 'dateFrom', from);
+      return updateArrivalFilter(withFrom, 'dateTo', to);
     }, { replace: true });
   }
 

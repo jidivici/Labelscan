@@ -56,6 +56,16 @@ describe('arrival URL filter state', () => {
     expect(parseArrivalFilters(new URLSearchParams()).view).toBe('cards');
   });
 
+  it('keeps arrival dates as the only date filters exposed by the catalogue', () => {
+    const filters = parseArrivalFilters(new URLSearchParams('from=2026-08-01&to=2026-08-04&expiry_from=2026-08-10&expiry_to=2026-08-20'));
+
+    expect(filters.dateFrom).toBe('2026-08-01');
+    expect(filters.dateTo).toBe('2026-08-04');
+    expect(filters.expiryFrom).toBe('');
+    expect(filters.expiryTo).toBe('');
+    expect(activeArrivalFilterCount(filters)).toBe(2);
+  });
+
   it('keeps repeated field_filter values in the URL and API query', () => {
     let params = new URLSearchParams('q=saumon&page=3');
     params = updatePortalFieldFilter(params, 'FAO_area', '27');

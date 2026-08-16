@@ -16,22 +16,20 @@ describe('DateRangeCalendar', () => {
     const onChange = vi.fn();
     const { rerender } = render(
       <DateRangeCalendar
-        label="Date d’expiration"
-        description="Période de date limite"
+        label="Arrivage"
         from=""
         to=""
         onChange={onChange}
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /choisir une période/i }));
+    fireEvent.click(screen.getByRole('button', { name: /du : à choisir/i }));
     fireEvent.click(screen.getByRole('button', { name: /lundi 10 août 2026/i }));
     expect(onChange).toHaveBeenLastCalledWith('2026-08-10', '');
 
     rerender(
       <DateRangeCalendar
-        label="Date d’expiration"
-        description="Période de date limite"
+        label="Arrivage"
         from="2026-08-10"
         to=""
         onChange={onChange}
@@ -45,8 +43,7 @@ describe('DateRangeCalendar', () => {
     const onChange = vi.fn();
     render(
       <DateRangeCalendar
-        label="Date d’expiration"
-        description="Période de date limite"
+        label="Arrivage"
         from="2026-08-10"
         to="2026-08-20"
         onChange={onChange}
