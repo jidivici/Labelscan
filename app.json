@@ -32,10 +32,16 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "LabelScan uses your camera to photograph product labels and scan barcodes."
+          "cameraPermission": "LabelScan uses your camera to photograph product labels and scan barcodes.",
+          "recordAudioAndroid": false
         }
       ],
       "expo-secure-store"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "124ba152-f25f-4cdb-ae98-ea1a550561fc"
+      }
+    }
   }
 }
