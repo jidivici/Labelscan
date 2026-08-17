@@ -3,14 +3,14 @@ import type { CameraOrientation } from 'expo-camera';
 export type PhysicalQuarterTurn = -90 | 0 | 90;
 
 /**
- * Quarter-turn baked into a landscape crop so the queued JPEG is portrait.
- * Android currently falls back to the non-left branch because Expo Camera does
- * not expose its physical orientation callback there.
+ * Quarter-turn baked into the framed crop so the queued JPEG is readable.
+ * The capture posture used in stores requires one fixed counter-clockwise turn
+ * so label text is horizontal and readable in review and by OCR.
  */
 export function physicalQuarterTurnForPortrait(
   needsQuarterTurn: boolean,
-  orientationAtShutter: CameraOrientation,
+  _orientationAtShutter: CameraOrientation,
 ): PhysicalQuarterTurn {
   if (!needsQuarterTurn) return 0;
-  return orientationAtShutter === 'landscapeLeft' ? -90 : 90;
+  return -90;
 }
