@@ -10,7 +10,8 @@
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
-        "NSCameraUsageDescription": "LabelScan uses your camera to photograph product labels and scan barcodes."
+        "NSCameraUsageDescription": "LabelScan uses your camera to photograph product labels and scan barcodes.",
+        "ITSAppUsesNonExemptEncryption": false
       },
       "bundleIdentifier": "com.anonymous.LabelScan"
     },
