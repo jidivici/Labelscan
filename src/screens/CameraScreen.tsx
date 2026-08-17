@@ -237,7 +237,7 @@ export function CameraScreen() {
           // The app preview stays portrait. On iOS, use Expo Camera's physical
           // orientation signal rather than the JPEG dimensions: with an orientation
           // lock, those dimensions are not a trustworthy proxy. A landscape-held
-          // phone is always transformed left before OCR, exactly as requested.
+          // phone needs the fixed left turn used by the store capture posture.
           const iOSLandscapeCapture =
             orientationAtShutter === 'landscapeLeft'
             || orientationAtShutter === 'landscapeRight';
@@ -248,10 +248,8 @@ export function CameraScreen() {
             normalizedImage.width > normalizedImage.height
             || (Platform.OS === 'ios' && iOSLandscapeCapture)
           );
-          // `landscapeLeft` is the opposite image basis to `landscapeRight`.
-          // The previous mapping produced a portrait result facing the wrong way
-          // on device. Invert the physical quarter-turn while keeping the crop
-          // mapping tied to the orientation observed at the shutter.
+          // Bake the fixed -90° left turn into the JPEG before it reaches OCR or
+          // review, so both consume the same readable image without another turn.
           const physicalRotationDegrees = physicalQuarterTurnForPortrait(
             needsPhysicalQuarterTurn,
             orientationAtShutter,
@@ -408,8 +406,8 @@ export function CameraScreen() {
           // Keep the application UI portrait while letting the native iOS camera
           // use the phone's *physical* orientation for the captured pixels. This
           // is essential when the operator holds the phone landscape: the source
-          // buffer then matches the live frame before our exact crop + left
-          // rotation are applied. This prop does not rotate the React Native UI.
+          // buffer then matches the live frame before our exact crop + matching
+          // quarter-turn are applied. This prop does not rotate the React Native UI.
           responsiveOrientationWhenOrientationLocked={Platform.OS === 'ios'}
           onResponsiveOrientationChanged={
             Platform.OS === 'ios' ? handleResponsiveOrientationChanged : undefined
