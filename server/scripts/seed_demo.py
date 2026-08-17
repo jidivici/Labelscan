@@ -1,7 +1,7 @@
 """Install the local LabelScan demonstration data.
 
 The seed is deliberately idempotent. It hides old test projections from the
-catalogue, keeps the append-only source history intact, and creates seven fresh
+catalogue, keeps the append-only source history intact, and creates nine fresh
 arrivals backed by the real label photographs in ``server/demo/images``.
 """
 
@@ -80,7 +80,7 @@ ARRIVALS = (
         "packaging_date": "2026-06-17", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "GB BB027", "weight": "3 kg",
         "price": None, "gtin": None, "FAO_area": "FAO 27",
-        "production_method": "wild_caught", "fishing_gear_or_farming_method": "Jigger",
+        "production_method": "wild_caught", "fishing_gear_or_farming_method": "Chaluts de fond à panneaux (OTB)",
     }),
     DemoArrival("truite", "CANNES", "truite.jpg", {
         "commercial_designation": "Truite arc-en-ciel PAC", "scientific_name": "Oncorhynchus mykiss",
@@ -108,6 +108,24 @@ ARRIVALS = (
         "allergens": "Poisson", "health_mark": "IS A-003 EFTA", "weight": "3 kg",
         "price": None, "gtin": None, "FAO_area": "FAO 27",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Lignes et hameçons",
+    }),
+    DemoArrival("espadon", "MARSEILLE", "espadon-longe.jpg", {
+        "commercial_designation": "Longe d'espadon", "scientific_name": "Xiphias gladius",
+        "producer_name": "Médi-Pêche Set", "reseller_brand": None,
+        "batch_number": "107083-21526", "origin_country": None, "expiry_date": "2026-08-12",
+        "packaging_date": "2026-08-03", "storage_temperature": "0 à 2 °C",
+        "allergens": "Poisson", "health_mark": "FR 34-108-593 CE", "weight": "4,500 kg",
+        "price": None, "gtin": "93000502900206", "FAO_area": "FAO 27.VIII",
+        "production_method": "wild_caught", "fishing_gear_or_farming_method": "Palangres calées",
+    }),
+    DemoArrival("encornet", "MARSEILLE", "encornet-rouge.jpg", {
+        "commercial_designation": "Encornet rouge", "scientific_name": "Illex coindetii",
+        "producer_name": "Michel Marée", "reseller_brand": "U Enseigne Vendargues",
+        "batch_number": "MM215", "origin_country": None, "expiry_date": None,
+        "packaging_date": None, "storage_temperature": "0 à 2 °C",
+        "allergens": "Mollusques", "health_mark": "FR 34.108.534 CE", "weight": "3,000 kg",
+        "price": None, "gtin": None, "FAO_area": "FAO 37.1",
+        "production_method": "wild_caught", "fishing_gear_or_farming_method": "Chaluts de fond à panneaux OTB",
     }),
     DemoArrival("saumon", "FREJUS", "saumon.jpg", {
         "commercial_designation": "Saumon fjord 4/5", "scientific_name": "Salmo salar",
@@ -298,7 +316,7 @@ def seed() -> None:
                     "checksum": checksum, "recorded_at": recorded_at, "portal_id": portal_id,
                     "actor_id": actor_id})
 
-    print("LabelScan demo installed: 4 city stores, 6 accounts, 7 photographed arrivals")
+    print(f"LabelScan demo installed: 4 city stores, 6 accounts, {len(ARRIVALS)} photographed arrivals")
 
 
 if __name__ == "__main__":
