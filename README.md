@@ -78,7 +78,8 @@ npx expo start -c               # Metro ; app dev client sur le device
 Le démarrage local utilise la base dédiée `labelscan_demo` et installe
 automatiquement une démonstration idempotente :
 4 magasins nommés par ville, 1 super-administrateur, 1 administrateur,
-4 managers et 7 arrivages construits à partir de vraies photos d'étiquettes.
+4 managers et 9 arrivages construits à partir de vraies photos d'étiquettes,
+normalisées pour être lues dans le bon sens.
 Les anciennes projections issues des tests ne sont pas affichées.
 
 | Rôle | Identifiant | Mot de passe | Périmètre |
