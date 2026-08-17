@@ -46,10 +46,10 @@ describe('capability based routing', () => {
     expect(await screen.findByRole('heading', { name: 'Tous les arrivages' })).toBeInTheDocument();
   });
 
-  it('prompts for a profession in the administration workspace', async () => {
+  it('keeps all professions selected in the administration workspace', async () => {
     renderAt('/o/labelscan/administration', adminFixtureSession);
 
-    expect(await screen.findByRole('button', { name: 'Métier Choisir un métier' })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Métier Tous les métiers' })).toBeInTheDocument();
   });
 
   it('keeps Tous les métiers selected in the global arrivals view', async () => {

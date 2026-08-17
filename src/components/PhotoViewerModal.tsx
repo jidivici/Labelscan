@@ -22,7 +22,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { colors, spacing } from '../theme';
-import { PHOTO_DISPLAY_ROTATION, type PhotoBaseRotationDegrees } from './photoOrientation';
+import { photoDisplayRotation, type PhotoBaseRotationDegrees } from './photoOrientation';
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
@@ -54,6 +54,7 @@ export function PhotoViewerModal({
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const quarterTurn = baseRotationDegrees === -90;
+  const displayRotation = photoDisplayRotation(baseRotationDegrees, halfTurn);
   const scale = useSharedValue(INITIAL_SCALE);
   const savedScale = useSharedValue(INITIAL_SCALE);
   const translateX = useSharedValue(0);
@@ -114,11 +115,10 @@ export function PhotoViewerModal({
   const composed = Gesture.Simultaneous(pinch, pan);
   const gesture = Gesture.Race(doubleTap, composed);
 
-  // Keep the same left-facing orientation in the full-screen viewer and thumbnails.
+  // Use the exact same base + manager-approved rotation as every thumbnail/card.
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
-      ...(quarterTurn ? [{ rotate: PHOTO_DISPLAY_ROTATION }] : []),
-      ...(halfTurn ? [{ rotate: '180deg' as const }] : []),
+      ...(displayRotation === '0deg' ? [] : [{ rotate: displayRotation }]),
       { translateX: translateX.value },
       { translateY: translateY.value },
       { scale: scale.value },

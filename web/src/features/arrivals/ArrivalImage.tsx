@@ -3,6 +3,11 @@ import { useEffect, useState, type CSSProperties } from 'react';
 import { arrivalImagePath, authorizedFetch } from '../../api';
 import { useAuth } from '../../auth/AuthContext';
 import { BrandMark } from '../../BrandMark';
+import {
+  resolvedPhotoRotationDegrees,
+  type PhotoBaseRotationDegrees,
+  type PhotoRotationDegrees,
+} from './photoOrientation';
 
 export function ArrivalImage({
   batchId,
@@ -19,13 +24,13 @@ export function ArrivalImage({
   onOpen?: (url: string) => void;
   /** Preserve every edge of the label in larger detail frames. */
   fit?: 'cover' | 'contain';
-  rotationDegrees?: 0 | 180;
-  baseRotationDegrees?: -90 | 0;
+  rotationDegrees?: PhotoRotationDegrees;
+  baseRotationDegrees?: PhotoBaseRotationDegrees;
 }) {
   const { session } = useAuth();
   const [url, setUrl] = useState<string>();
   const imageStyle = {
-    '--arrival-photo-rotation': `${rotationDegrees + baseRotationDegrees}deg`,
+    '--arrival-photo-rotation': `${resolvedPhotoRotationDegrees(rotationDegrees, baseRotationDegrees)}deg`,
   } as CSSProperties;
 
   useEffect(() => {

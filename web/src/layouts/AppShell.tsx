@@ -140,7 +140,7 @@ function ShellContent({ children }: { children: ReactNode }) {
           ? <SidebarScopeSelect
               label="Métier"
               placeholder="Choisir un métier"
-              value={administrationWorkspace ? '' : allProfessions ? 'tous' : currentPortal?.code ?? ''}
+              value={administrationWorkspace || allProfessions ? 'tous' : currentPortal?.code ?? ''}
               options={[{ value: 'tous', label: 'Tous les métiers' }, ...availablePortals.map((portal) => ({ value: portal.code, label: portal.shortLabel }))]}
               onChange={(next) => changeProfession(next as ProfessionCode | 'tous')}
             />

@@ -1,7 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0, baseRotationDegrees = -90 }: { url: string; onClose: () => void; rotationDegrees?: 0 | 180; baseRotationDegrees?: -90 | 0 }) {
+import {
+  resolvedPhotoRotationDegrees,
+  type PhotoBaseRotationDegrees,
+  type PhotoRotationDegrees,
+} from './photoOrientation';
+
+export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0, baseRotationDegrees = -90 }: { url: string; onClose: () => void; rotationDegrees?: PhotoRotationDegrees; baseRotationDegrees?: PhotoBaseRotationDegrees }) {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
@@ -31,7 +37,7 @@ export function ProductPhotoViewer({ url, onClose, rotationDegrees = 0, baseRota
         <button ref={closeButtonRef} type="button" onClick={onClose} aria-label="Fermer la photo agrandie">×</button>
       </div>
       <div className="photo-viewer-stage" onMouseDown={(event) => event.stopPropagation()}>
-        <img src={url} alt="Étiquette du produit agrandie" style={{ transform: `rotate(${rotationDegrees + baseRotationDegrees}deg)` }} />
+        <img src={url} alt="Étiquette du produit agrandie" style={{ transform: `rotate(${resolvedPhotoRotationDegrees(rotationDegrees, baseRotationDegrees)}deg)` }} />
       </div>
     </div>,
     document.body,

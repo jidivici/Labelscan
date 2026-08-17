@@ -16,9 +16,14 @@
  * rouge=erreur). Sober by design — no progress bar, no confidence.
  */
 
-import React, { useCallback } from 'react';
+import React, { useCallback, useEffect } from 'react';
 import { Alert, Image, Pressable, StyleSheet, Text, View } from 'react-native';
-import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withSpring,
+} from 'react-native-reanimated';
 import { GestureDetector, Gesture } from 'react-native-gesture-handler';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -46,6 +51,12 @@ export interface PendingScanCardProps {
   onOpen: (scan: PendingScan) => void;
   onRetry: (id: string) => void;
   onDiscard: (id: string) => void;
+  /** True only for the one pending card currently revealing Supprimer. */
+  swipeOpen: boolean;
+  /** Makes this card the sole open swipe and closes the previously open card. */
+  onSwipeStart: (id: string) => void;
+  /** Clears the parent's open-swipe ownership when this card returns home. */
+  onSwipeClose: (id: string) => void;
 }
 
 export const PendingScanCard = React.memo(function PendingScanCard({
@@ -56,6 +67,9 @@ export const PendingScanCard = React.memo(function PendingScanCard({
   onOpen,
   onRetry,
   onDiscard,
+  swipeOpen,
+  onSwipeStart,
+  onSwipeClose,
 }: PendingScanCardProps) {
   const { activeLabel, openable } = scanStepFromStatus(scan.status, scan.ocrDone === true);
   const errored = scan.status === 'submit_error' || scan.status === 'extract_error';
@@ -73,6 +87,13 @@ export const PendingScanCard = React.memo(function PendingScanCard({
 
   const translateX = useSharedValue(0);
 
+  // The parent owns which scan may expose Supprimer. When another card starts a
+  // horizontal swipe, this prop turns false and the previously open card springs
+  // back into place instead of leaving two destructive actions visible.
+  useEffect(() => {
+    if (!swipeOpen) translateX.value = withSpring(0);
+  }, [swipeOpen, translateX]);
+
   const hasDraft = scan.edits != null && Object.keys(scan.edits).length > 0;
   const confirmDiscard = useCallback(() => {
     Alert.alert(
@@ -87,24 +108,37 @@ export const PendingScanCard = React.memo(function PendingScanCard({
           // Close the swipe back — same behavior as ArticleCard's cancel.
           onPress: () => {
             translateX.value = withSpring(0);
+            onSwipeClose(scan.id);
           },
         },
-        { text: 'Supprimer', style: 'destructive', onPress: () => onDiscard(scan.id) },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: () => {
+            onSwipeClose(scan.id);
+            onDiscard(scan.id);
+          },
+        },
       ],
     );
-  }, [onDiscard, scan.id, hasDraft, translateX]);
+  }, [onDiscard, onSwipeClose, scan.id, hasDraft, translateX]);
 
   // Left-swipe reveal — replicated from ArticleCard (activeOffsetX keeps vertical
   // FlatList scrolling and the card tap intact).
   const panGesture = Gesture.Pan()
     .activeOffsetX([-10, 10])
+    .onStart(() => {
+      runOnJS(onSwipeStart)(scan.id);
+    })
     .onUpdate((e) => {
       if (e.translationX < 0) {
         translateX.value = Math.max(e.translationX, -DELETE_WIDTH);
       }
     })
     .onEnd((e) => {
-      translateX.value = withSpring(e.translationX < SWIPE_THRESHOLD ? -DELETE_WIDTH : 0);
+      const shouldOpen = e.translationX < SWIPE_THRESHOLD;
+      translateX.value = withSpring(shouldOpen ? -DELETE_WIDTH : 0);
+      if (!shouldOpen) runOnJS(onSwipeClose)(scan.id);
     });
 
   const cardAnimStyle = useAnimatedStyle(() => ({

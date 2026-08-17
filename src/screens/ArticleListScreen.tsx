@@ -99,6 +99,10 @@ export function ArticleListScreen() {
     [businessPortalId, pendingScans],
   );
   const [listHeaderHeight, setListHeaderHeight] = useState(0);
+  // At most one in-progress scan may expose its destructive action. Starting a
+  // swipe on another scan changes ownership; the previous card observes the change
+  // and animates back to its resting position.
+  const [openPendingSwipeId, setOpenPendingSwipeId] = useState<string | null>(null);
   const handleListHeaderLayout = useCallback((e: LayoutChangeEvent) => {
     setListHeaderHeight(e.nativeEvent.layout.height);
   }, []);
@@ -119,7 +123,14 @@ export function ArticleListScreen() {
     void retryScan(id);
   }, []);
   const handleDiscardScan = useCallback((id: string) => {
+    setOpenPendingSwipeId((current) => (current === id ? null : current));
     void discardScan(id);
+  }, []);
+  const handlePendingSwipeStart = useCallback((id: string) => {
+    setOpenPendingSwipeId(id);
+  }, []);
+  const handlePendingSwipeClose = useCallback((id: string) => {
+    setOpenPendingSwipeId((current) => (current === id ? null : current));
   }, []);
 
   // List header: "En cours" scans (day-independent — active work is always visible),
@@ -157,6 +168,9 @@ export function ArticleListScreen() {
               onOpen={handleOpenScan}
               onRetry={handleRetryScan}
               onDiscard={handleDiscardScan}
+              swipeOpen={openPendingSwipeId === scan.id}
+              onSwipeStart={handlePendingSwipeStart}
+              onSwipeClose={handlePendingSwipeClose}
             />
           );
         })}
@@ -201,6 +215,9 @@ export function ArticleListScreen() {
     handleOpenScan,
     handleRetryScan,
     handleDiscardScan,
+    openPendingSwipeId,
+    handlePendingSwipeStart,
+    handlePendingSwipeClose,
     tradeCode,
   ]);
 

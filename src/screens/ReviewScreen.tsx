@@ -721,9 +721,9 @@ export function ReviewScreen() {
   return (
     <View style={styles.root}>
       {/* Fixed photo header — SAME system as ArticleDetail: the photo stays put while the
-          content sheet scrolls over it. The stored OCR source keeps its capture orientation;
-          RotatedPhoto applies the single left rotation used by every final display. Tap the
-          photo to open it full-screen; the return control is the bottom action bar. */}
+          content sheet scrolls over it. RotatedPhoto composes the capture base with the
+          manager-approved half-turn exactly as every final display does. Tap the photo to
+          open it full-screen; the return control is the bottom action bar. */}
       <View style={styles.photoContainer}>
         {photoUri ? (
           <Pressable

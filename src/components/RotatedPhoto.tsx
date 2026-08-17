@@ -10,7 +10,7 @@ import {
   type ViewStyle,
 } from 'react-native';
 
-import { PHOTO_DISPLAY_ROTATION, type PhotoBaseRotationDegrees } from './photoOrientation';
+import { photoDisplayRotation, type PhotoBaseRotationDegrees } from './photoOrientation';
 
 interface RotatedPhotoProps {
   source: ImageSourcePropType;
@@ -23,8 +23,8 @@ interface RotatedPhotoProps {
 }
 
 /**
- * A photo frame whose image dimensions are swapped before the left rotation.
- * This prevents the rotated bitmap from becoming a narrow band in rectangular frames.
+ * A photo frame whose image dimensions are swapped for historical quarter-turned
+ * captures. This prevents the bitmap from becoming a narrow band in rectangular frames.
  */
 export function RotatedPhoto({
   source,
@@ -36,6 +36,7 @@ export function RotatedPhoto({
 }: RotatedPhotoProps) {
   const [frame, setFrame] = useState({ width: 0, height: 0 });
   const quarterTurn = baseRotationDegrees === -90;
+  const displayRotation = photoDisplayRotation(baseRotationDegrees, halfTurn);
 
   return (
     <View
@@ -56,10 +57,7 @@ export function RotatedPhoto({
             top: quarterTurn ? (frame.height - frame.width) / 2 : 0,
             width: quarterTurn ? frame.height : frame.width,
             height: quarterTurn ? frame.width : frame.height,
-            transform: [
-              ...(quarterTurn ? [{ rotate: PHOTO_DISPLAY_ROTATION }] : []),
-              ...(halfTurn ? [{ rotate: '180deg' as const }] : []),
-            ],
+            transform: displayRotation === '0deg' ? [] : [{ rotate: displayRotation }],
           }}
         />
       ) : null}
