@@ -107,7 +107,7 @@
 }
 .arrival-card:hover { transform: translateY(-1px); border-color: #aecfc8; border-color: color-mix(in srgb, var(--portal-accent) 38%, var(--line)); box-shadow: 0 10px 24px rgb(18 47 42 / 10%); }
 .arrival-card:focus-visible { outline: 3px solid rgb(8 127 114 / 24%); outline-offset: 2px; }
-.arrival-card-visual { position: relative; display: block; margin: 0; overflow: hidden; background: #eef3f1; }
+.arrival-card-visual { position: relative; display: block; height: 132px; margin: 8px 0 8px 8px; overflow: hidden; border-radius: 12px; background: #eef3f1; }
 .arrival-card-visual > .arrival-image, .arrival-card-visual > .image-placeholder { width: 100%; height: 100%; }
 .arrival-card-visual > .arrival-image > img { transition: transform .25s ease; }
 .arrival-card:hover .arrival-card-visual > .arrival-image > img { transform: translate(-50%, -50%) rotate(var(--arrival-photo-rotation, -90deg)) scale(1.025); }
@@ -209,6 +209,7 @@
 @media (max-width: 440px) {
   .arrival-grid { grid-template-columns: 1fr; }
   .arrival-card { grid-template-columns: 98px minmax(0, 1fr); min-height: 138px; }
+  .arrival-card-visual { height: 122px; }
   .arrival-card .arrival-card-body { padding: 12px 11px 11px; }
   .card-heading .status-badge { display: none; }
 }

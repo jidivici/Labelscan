@@ -8,3 +8,11 @@ export function resolvedPhotoRotationDegrees(
 ): number {
   return baseRotationDegrees + rotationDegrees;
 }
+
+/** Width and height only need swapping when the final display is quarter-turned. */
+export function photoUsesQuarterTurnLayout(
+  rotationDegrees: PhotoRotationDegrees = 0,
+  baseRotationDegrees: PhotoBaseRotationDegrees = -90,
+): boolean {
+  return Math.abs(resolvedPhotoRotationDegrees(rotationDegrees, baseRotationDegrees)) === 90;
+}
