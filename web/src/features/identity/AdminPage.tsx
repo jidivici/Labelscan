@@ -27,7 +27,7 @@ import {
   PasswordField,
   SuccessNotice,
 } from './components';
-import { ManagerPortalSelect } from './ManagerPortalSelect';
+import { ManagerPortalSelect, StoreSelect } from './ManagerPortalSelect';
 import type { IamOverview, IamPortal, IamUser } from './types';
 
 type StoreItem = IamOverview['stores'][number] & { id: string };
@@ -324,7 +324,7 @@ export function AdminPage() {
       </IdentityPanel>
 
       <IdentityPanel title="Métiers par magasin" description="Activez uniquement les métiers utilisés dans chaque magasin.">
-      <label className="field compact-field panel-control"><span>Magasin</span><select value={selectedStoreId} onChange={(event) => setSelectedStoreId(event.target.value)}>{stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}</select></label>
+      <div className="field compact-field panel-control"><span>Magasin</span><StoreSelect stores={stores} selected={selectedStoreId} onChange={setSelectedStoreId} disabled={stores.length === 0} /></div>
       {storePortals.length === 0
         ? <IdentityEmpty title="Aucun portail" description="Aucun portail métier n’est disponible pour ce magasin." />
         : <div className="table-scroll"><table className="identity-admin-table identity-portal-table">

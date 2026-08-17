@@ -13,7 +13,7 @@ import type { IamPortal } from './types';
 
 const PLACEHOLDER = 'Choisir un magasin et un métier';
 
-type PortalOption = { value: string; label: string };
+type SelectOption = { value: string; label: string };
 type MenuPosition = Pick<CSSProperties, 'bottom' | 'left' | 'maxHeight' | 'top' | 'width'>;
 
 export function ManagerPortalSelect({
@@ -33,12 +33,61 @@ export function ManagerPortalSelect({
   inTable?: boolean;
   disabled?: boolean;
 }) {
-  const options: PortalOption[] = [
+  const options: SelectOption[] = [
     { value: '', label: PLACEHOLDER },
     ...portals
       .filter((portal) => portal.active)
       .map((portal) => ({ value: portal.id, label: `${portal.store_name} · ${portal.profession_name}` })),
   ];
+  return <MenuSelect
+    options={options}
+    selected={selected}
+    onChange={onChange}
+    name={name}
+    ariaLabel={ariaLabel}
+    inTable={inTable}
+    disabled={disabled}
+  />;
+}
+
+export function StoreSelect({
+  stores,
+  selected,
+  onChange,
+  disabled = false,
+}: {
+  stores: Array<{ id: string; name: string }>;
+  selected: string;
+  onChange: (id: string) => void;
+  disabled?: boolean;
+}) {
+  return <MenuSelect
+    options={stores.map((store) => ({ value: store.id, label: store.name }))}
+    selected={selected}
+    onChange={onChange}
+    name="store-profession-scope"
+    ariaLabel="Magasin"
+    disabled={disabled}
+  />;
+}
+
+function MenuSelect({
+  options,
+  selected,
+  onChange,
+  name,
+  ariaLabel,
+  inTable = false,
+  disabled = false,
+}: {
+  options: SelectOption[];
+  selected: string;
+  onChange: (id: string) => void;
+  name: string;
+  ariaLabel: string;
+  inTable?: boolean;
+  disabled?: boolean;
+}) {
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === selected));
   const [open, setOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<MenuPosition>({});

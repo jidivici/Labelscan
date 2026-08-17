@@ -328,10 +328,17 @@ describe('IAM bounded actions', () => {
     const user = userEvent.setup();
     renderAt('/o/labelscan/administration', adminSession);
     const section = (await screen.findByRole('heading', { name: 'Métiers par magasin' })).closest('section')!;
+    const storeTrigger = within(section).getByRole('button', { name: 'Magasin' });
+    expect(within(section).queryByRole('combobox')).not.toBeInTheDocument();
+    await user.click(storeTrigger);
+    expect(screen.getByRole('listbox', { name: 'Magasin' })).toBeInTheDocument();
+    expect(screen.getAllByRole('option')).toHaveLength(2);
+    await user.click(screen.getByRole('option', { name: 'Lyon Part-Dieu' }));
+    expect(storeTrigger).toHaveTextContent('Lyon Part-Dieu');
     await user.click((await within(section).findAllByRole('button', { name: 'Désactiver' }))[0]);
     await waitFor(() => expect(setStorePortalActive).toHaveBeenCalledWith(
       adminSession,
-      'store-paris',
+      'store-lyon',
       'portal-fish-paris',
       false,
     ));

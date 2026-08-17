@@ -81,8 +81,13 @@ test('admin sees three stores, portals, managers, and direct account creation', 
   expect(creationHeadings.indexOf('Nouveau manager')).toBeLessThan(creationHeadings.indexOf('Nouveau magasin'));
   expect(creationHeadings.indexOf('Nouveau magasin')).toBeLessThan(creationHeadings.indexOf('Managers'));
   expect(creationHeadings.indexOf('Managers')).toBeLessThan(creationHeadings.indexOf('Magasins'));
-  const storeSelect = page.getByLabel('Magasin').last();
-  await expect(storeSelect.locator('option')).toHaveCount(3);
+  const storeSelect = page.getByRole('button', { name: 'Magasin' }).last();
+  await storeSelect.click();
+  const storeMenu = page.getByRole('listbox', { name: 'Magasin' });
+  await expect(storeMenu.getByRole('option')).toHaveCount(3);
+  await storeMenu.getByRole('option', { name: 'Marché République' }).click();
+  await expect(storeSelect).toContainText('Marché République');
+  await expect(page.locator('.data-panel').filter({ has: page.getByRole('heading', { name: 'Métiers par magasin' }) }).locator('select')).toHaveCount(0);
   const invitePanel = page.locator('.data-panel').filter({ has: page.getByRole('heading', { name: 'Nouveau manager' }) });
   const storePanel = page.locator('.data-panel').filter({ has: page.getByRole('heading', { name: 'Nouveau magasin' }) });
   const managerPortalTrigger = invitePanel.getByRole('button', { name: 'Magasin et métier attribués' });
