@@ -27,11 +27,16 @@ jobs:
 
     steps:
       - name: Check out the exact revision
-        uses: actions/checkout@v4
-        with:
-          clean: true
-          fetch-depth: 1
-          persist-credentials: false
+        shell: bash
+        env:
+          CHECKOUT_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://x-access-token:${CHECKOUT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git -C "$GITHUB_WORKSPACE" fetch --depth=1 origin "$GITHUB_SHA"
+          git -C "$GITHUB_WORKSPACE" checkout --detach FETCH_HEAD
+          git -C "$GITHUB_WORKSPACE" remote set-url origin "https://github.com/${GITHUB_REPOSITORY}"
 
       - name: Verify deployment source
         shell: bash
