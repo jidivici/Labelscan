@@ -59,7 +59,7 @@ import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
 import { computeFrameCrop } from '../services/frameCrop';
-import { physicalQuarterTurnForPortrait } from '../services/captureOrientation';
+import { physicalQuarterTurnForLandscapeCrop } from '../services/captureOrientation';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
@@ -234,26 +234,15 @@ export function CameraScreen() {
           }
           const srcW = crop.width;
           const srcH = crop.height;
-          // The app preview stays portrait. On iOS, use Expo Camera's physical
-          // orientation signal rather than the JPEG dimensions: with an orientation
-          // lock, those dimensions are not a trustworthy proxy. A landscape-held
-          // phone needs the fixed right turn used by the store capture posture.
-          const iOSLandscapeCapture =
-            orientationAtShutter === 'landscapeLeft'
-            || orientationAtShutter === 'landscapeRight';
           // Rotate the cropped pixels themselves before the image enters the queue.
           // The app stays in portrait; this only normalizes the saved JPEG so OCR,
           // the review card and the manager all see the same upright photo.
-          const needsPhysicalQuarterTurn = screenWidth <= screenHeight && (
-            normalizedImage.width > normalizedImage.height
-            || (Platform.OS === 'ios' && iOSLandscapeCapture)
-          );
-          // Bake the fixed +90° right turn into the JPEG before it reaches OCR or
-          // review, so both consume the same readable image without another turn.
-          const physicalRotationDegrees = physicalQuarterTurnForPortrait(
-            needsPhysicalQuarterTurn,
-            orientationAtShutter,
-          );
+          // Decide from the actual crop, after EXIF normalization and frame mapping:
+          // a portrait crop needs the store posture's left turn to become landscape;
+          // an already-landscape crop must not receive a second quarter-turn.
+          // Bake the fixed -90° left turn into the JPEG before it reaches OCR and
+          // the "À contrôler" screen. Display components then keep a 0° base.
+          const physicalRotationDegrees = physicalQuarterTurnForLandscapeCrop(srcW, srcH);
           const outputWidth = physicalRotationDegrees ? srcH : srcW;
           const outputHeight = physicalRotationDegrees ? srcW : srcH;
           const resize =
