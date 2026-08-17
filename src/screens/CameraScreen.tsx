@@ -59,6 +59,7 @@ import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
 import { computeFrameCrop } from '../services/frameCrop';
+import { physicalQuarterTurnForPortrait } from '../services/captureOrientation';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
@@ -248,10 +249,13 @@ export function CameraScreen() {
             || (Platform.OS === 'ios' && iOSLandscapeCapture)
           );
           // `landscapeLeft` is the opposite image basis to `landscapeRight`.
-          // Match the preview-direction mapping used for the frame crop.
-          const physicalRotationDegrees = !needsPhysicalQuarterTurn
-            ? 0
-            : orientationAtShutter === 'landscapeLeft' ? 90 : -90;
+          // The previous mapping produced a portrait result facing the wrong way
+          // on device. Invert the physical quarter-turn while keeping the crop
+          // mapping tied to the orientation observed at the shutter.
+          const physicalRotationDegrees = physicalQuarterTurnForPortrait(
+            needsPhysicalQuarterTurn,
+            orientationAtShutter,
+          );
           const outputWidth = physicalRotationDegrees ? srcH : srcW;
           const outputHeight = physicalRotationDegrees ? srcW : srcH;
           const resize =

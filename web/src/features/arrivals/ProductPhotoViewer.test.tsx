@@ -11,6 +11,21 @@ describe('ProductPhotoViewer', () => {
     expect(screen.queryByRole('button', { name: /Tourner la photo/ })).not.toBeInTheDocument();
   });
 
+  it('affiche exactement le demi-tour validé par le manager', () => {
+    render(
+      <ProductPhotoViewer
+        url="blob:photo"
+        baseRotationDegrees={0}
+        rotationDegrees={180}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByAltText('Étiquette du produit agrandie')).toHaveStyle({
+      transform: 'rotate(180deg)',
+    });
+  });
+
   it('se ferme avec la touche Échap', () => {
     const onClose = vi.fn();
     render(<ProductPhotoViewer url="blob:photo" onClose={onClose} />);
