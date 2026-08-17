@@ -118,6 +118,7 @@ select {
 /* Authentication */
 .login-page {
   min-height: 100vh;
+  min-height: 100dvh;
   display: grid;
   place-items: center;
   padding: 28px;
@@ -447,8 +448,22 @@ tbody tr:hover { background: #fafcfb; }
 }
 
 @media (max-width: 640px) {
-  .login-page { padding: 16px; }
+  .login-page {
+    width: 100%;
+    height: 100dvh;
+    min-height: 100dvh;
+    align-items: safe center;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: none;
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-right: max(16px, env(safe-area-inset-right));
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    padding-left: max(16px, env(safe-area-inset-left));
+  }
+  .login-panel { min-height: 100%; align-items: safe center; }
   .login-form { padding: 26px 22px; }
+  .login-form .field input { font-size: 16px; }
   .page-header { align-items: flex-start; }
   .heading-stat { min-width: auto; }
   .heading-stat strong { font-size: 24px; }
