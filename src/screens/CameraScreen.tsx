@@ -237,7 +237,7 @@ export function CameraScreen() {
           // The app preview stays portrait. On iOS, use Expo Camera's physical
           // orientation signal rather than the JPEG dimensions: with an orientation
           // lock, those dimensions are not a trustworthy proxy. A landscape-held
-          // phone needs the fixed left turn used by the store capture posture.
+          // phone needs the fixed right turn used by the store capture posture.
           const iOSLandscapeCapture =
             orientationAtShutter === 'landscapeLeft'
             || orientationAtShutter === 'landscapeRight';
@@ -248,7 +248,7 @@ export function CameraScreen() {
             normalizedImage.width > normalizedImage.height
             || (Platform.OS === 'ios' && iOSLandscapeCapture)
           );
-          // Bake the fixed -90° left turn into the JPEG before it reaches OCR or
+          // Bake the fixed +90° right turn into the JPEG before it reaches OCR or
           // review, so both consume the same readable image without another turn.
           const physicalRotationDegrees = physicalQuarterTurnForPortrait(
             needsPhysicalQuarterTurn,
