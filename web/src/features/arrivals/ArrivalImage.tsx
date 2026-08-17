@@ -4,6 +4,7 @@ import { arrivalImagePath, authorizedFetch } from '../../api';
 import { useAuth } from '../../auth/AuthContext';
 import { BrandMark } from '../../BrandMark';
 import {
+  photoUsesQuarterTurnLayout,
   resolvedPhotoRotationDegrees,
   type PhotoBaseRotationDegrees,
   type PhotoRotationDegrees,
@@ -29,6 +30,8 @@ export function ArrivalImage({
 }) {
   const { session } = useAuth();
   const [url, setUrl] = useState<string>();
+  const quarterTurn = photoUsesQuarterTurnLayout(rotationDegrees, baseRotationDegrees);
+  const frameClassName = `arrival-image arrival-image--${fit}${quarterTurn ? ' arrival-image--quarter-turn' : ''}`;
   const imageStyle = {
     '--arrival-photo-rotation': `${resolvedPhotoRotationDegrees(rotationDegrees, baseRotationDegrees)}deg`,
   } as CSSProperties;
@@ -51,13 +54,13 @@ export function ArrivalImage({
   }, [available, batchId, session]);
 
   if (url && onOpen) {
-    return <button className={`arrival-image arrival-image-button arrival-image--${fit}`} type="button" onClick={() => onOpen(url)} aria-label="Agrandir la photo du produit">
+    return <button className={`${frameClassName} arrival-image-button`} type="button" onClick={() => onOpen(url)} aria-label="Agrandir la photo du produit">
       <img src={url} alt={alt} style={imageStyle} />
       <span className="arrival-image-hint" aria-hidden="true">Agrandir ↗</span>
     </button>;
   }
 
   return url
-    ? <span className={`arrival-image arrival-image--${fit}`}><img src={url} alt={alt} style={imageStyle} /></span>
+    ? <span className={frameClassName}><img src={url} alt={alt} style={imageStyle} /></span>
     : <div className="image-placeholder" aria-label="Photo indisponible"><BrandMark /></div>;
 }
