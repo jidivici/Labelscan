@@ -22,8 +22,22 @@ describe('ProductPhotoViewer', () => {
     );
 
     expect(screen.getByAltText('Étiquette du produit agrandie')).toHaveStyle({
-      transform: 'rotate(180deg)',
+      '--photo-viewer-rotation': '180deg',
     });
+  });
+
+  it('inverse le cadre pour afficher entièrement une photo tournée sur mobile', () => {
+    render(
+      <ProductPhotoViewer
+        url="blob:photo"
+        baseRotationDegrees={-90}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByAltText('Étiquette du produit agrandie').parentElement).toHaveClass(
+      'photo-viewer-image-frame--quarter-turn',
+    );
   });
 
   it('se ferme avec la touche Échap', () => {
