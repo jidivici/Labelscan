@@ -9,6 +9,7 @@ export function ArrivalImage({
   available,
   alt = '',
   onOpen,
+  fit = 'cover',
   rotationDegrees = 0,
   baseRotationDegrees = -90,
 }: {
@@ -16,6 +17,8 @@ export function ArrivalImage({
   available: boolean;
   alt?: string;
   onOpen?: (url: string) => void;
+  /** Preserve every edge of the label in larger detail frames. */
+  fit?: 'cover' | 'contain';
   rotationDegrees?: 0 | 180;
   baseRotationDegrees?: -90 | 0;
 }) {
@@ -43,13 +46,13 @@ export function ArrivalImage({
   }, [available, batchId, session]);
 
   if (url && onOpen) {
-    return <button className="arrival-image arrival-image-button" type="button" onClick={() => onOpen(url)} aria-label="Agrandir la photo du produit">
+    return <button className={`arrival-image arrival-image-button arrival-image--${fit}`} type="button" onClick={() => onOpen(url)} aria-label="Agrandir la photo du produit">
       <img src={url} alt={alt} style={imageStyle} />
       <span className="arrival-image-hint" aria-hidden="true">Agrandir ↗</span>
     </button>;
   }
 
   return url
-    ? <span className="arrival-image"><img src={url} alt={alt} style={imageStyle} /></span>
+    ? <span className={`arrival-image arrival-image--${fit}`}><img src={url} alt={alt} style={imageStyle} /></span>
     : <div className="image-placeholder" aria-label="Photo indisponible"><BrandMark /></div>;
 }
