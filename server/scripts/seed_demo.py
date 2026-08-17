@@ -52,6 +52,10 @@ class DemoArrival:
     image: str
     fields: dict[str, str | None]
     flagged: bool = False
+    # Demo JPEGs are stored already upright.  Runtime captures retain the
+    # application's -90° default, but the catalogue must not rotate these
+    # curated source images a second time.
+    photo_base_rotation_degrees: int = 0
 
 
 ARRIVALS = (
@@ -267,15 +271,21 @@ def seed() -> None:
                 INSERT INTO ingestion.ingestion
                     (id, status, image_ref, checksum_sha256, client_captured_at,
                      correlation_id, trace_id, store_code, organization_id, store_id,
-                     business_portal_id, trade_code_snapshot, trade_profile_version, captured_by_user_id)
+                     business_portal_id, trade_code_snapshot, trade_profile_version, captured_by_user_id,
+                     photo_rotation_degrees, photo_base_rotation_degrees)
                 VALUES (:id, 'confirmed', :image_ref, :checksum, :recorded_at,
                         :correlation, :correlation, :code, :org, :store_id, :portal_id,
-                        'poissonnerie', '1', :actor_id)
-                ON CONFLICT (id) DO NOTHING
+                        'poissonnerie', '1', :actor_id, 0, :photo_base_rotation_degrees)
+                ON CONFLICT (id) DO UPDATE SET
+                    image_ref=excluded.image_ref,
+                    checksum_sha256=excluded.checksum_sha256,
+                    photo_rotation_degrees=excluded.photo_rotation_degrees,
+                    photo_base_rotation_degrees=excluded.photo_base_rotation_degrees
             """), {"id": ingestion_id, "image_ref": image_ref, "checksum": checksum,
                     "recorded_at": recorded_at, "correlation": correlation, "code": code,
                     "org": organization_id, "store_id": store_id, "portal_id": portal_id,
-                    "actor_id": actor_id})
+                    "actor_id": actor_id,
+                    "photo_base_rotation_degrees": arrival.photo_base_rotation_degrees})
             conn.execute(text("""
                 INSERT INTO ingestion.raw_artifact
                     (id, occurred_at, ingestion_id, artifact_kind, storage_ref,
