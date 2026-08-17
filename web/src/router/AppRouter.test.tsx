@@ -27,6 +27,7 @@ describe('capability based routing', () => {
   it('opens the super-admin workspace for an authorized principal', async () => {
     renderAt('/o/labelscan/super-administration', superAdminFixtureSession);
     expect(await screen.findByRole('heading', { name: 'Administrateurs' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Métier Tous les métiers' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Nouvel administrateur' })).toBeInTheDocument();
     const navigationElement = screen.getByRole('navigation', { name: 'Navigation principale' });
     const navigation = within(navigationElement);
@@ -56,5 +57,12 @@ describe('capability based routing', () => {
     renderAt('/o/labelscan/portails/tous/arrivages', adminFixtureSession);
 
     expect(await screen.findByRole('button', { name: 'Métier Tous les métiers' })).toBeInTheDocument();
+  });
+
+  it('keeps Tous les métiers selected on the super-admin account page', async () => {
+    renderAt('/o/labelscan/compte', superAdminFixtureSession);
+
+    expect(await screen.findByRole('heading', { name: 'Mon compte' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Métier Tous les métiers' })).toBeInTheDocument();
   });
 });
