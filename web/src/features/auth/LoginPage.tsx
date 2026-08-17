@@ -49,7 +49,7 @@ export function LoginPage() {
         <div className="login-brand"><BrandMark /><div><strong>LabelScan</strong><span>Portail professionnel</span></div></div>
         <header><h1>Connexion</h1><p>Accédez à votre espace de traçabilité.</p></header>
         {error && <div className="notice error" role="alert">{error}</div>}
-        <label className="field">Identifiant<input name="username" autoComplete="username" required autoFocus /></label>
+        <label className="field">Identifiant<input name="username" autoComplete="username" required /></label>
         <label className="field">Mot de passe<input name="password" type="password" autoComplete="current-password" maxLength={128} required /></label>
         <button className="button primary wide" disabled={busy}>{busy ? 'Connexion…' : 'Se connecter'}</button>
       </form>
