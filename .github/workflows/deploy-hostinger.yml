@@ -34,7 +34,7 @@ jobs:
           set -Eeuo pipefail
           git init "$GITHUB_WORKSPACE"
           git -C "$GITHUB_WORKSPACE" reset --hard
-          git -C "$GITHUB_WORKSPACE" clean --force --force --directories --exclude .git
+          git -C "$GITHUB_WORKSPACE" clean --force --force --directories
           git -C "$GITHUB_WORKSPACE" remote remove origin || true
           git -C "$GITHUB_WORKSPACE" remote add origin "https://x-access-token:${CHECKOUT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
           git -C "$GITHUB_WORKSPACE" fetch --depth=1 origin "$GITHUB_SHA"
