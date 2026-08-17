@@ -21,7 +21,7 @@ from labelscan.contexts.identity.domain.password import hash_password
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.engine import make_engine
 from labelscan.platform.db.tenant_context import set_tenant_context
-from labelscan.platform.storage.filesystem_raw_store import FilesystemRawStore
+from labelscan.platform.storage_factory import build_raw_store
 
 NAMESPACE = uuid.UUID("6df40d77-d761-4a76-a259-a75209ca88bd")
 DEMO_PASSWORDS = {
@@ -169,17 +169,27 @@ def upsert_user(conn, organization_id: str, username: str, role: str,
 
 def seed() -> None:
     image_dir = Path(os.environ.get("LABELSCAN_DEMO_IMAGE_DIR", "/app/demo/images"))
-    raw_dir = os.environ.get("LABELSCAN_RAW_STORE_DIR", "/app/data/raw")
-    raw_store = FilesystemRawStore(raw_dir)
-    images: dict[str, tuple[str, str]] = {}
+    image_content: dict[str, tuple[str, bytes]] = {}
     for arrival in ARRIVALS:
         content = (image_dir / arrival.image).read_bytes()
         checksum = hashlib.sha256(content).hexdigest()
-        images[arrival.key] = (checksum, raw_store.put(content, checksum=checksum))
+        image_content[arrival.key] = (checksum, content)
 
     engine = make_engine()
     with engine.begin() as conn:
         organization_id = str(conn.execute(text("SELECT id FROM identity.organization WHERE slug='labelscan'")).scalar_one())
+        raw_store = build_raw_store()
+        images = {
+            key: (
+                checksum,
+                raw_store.put(
+                    content,
+                    checksum=checksum,
+                    organization_id=organization_id,
+                ),
+            )
+            for key, (checksum, content) in image_content.items()
+        }
         set_tenant_context(conn, organization_id)
         bootstrap_actor = conn.execute(text("SELECT id::text FROM identity.app_user WHERE organization_id=:org AND active=true ORDER BY CASE role WHEN 'super_admin' THEN 0 ELSE 1 END LIMIT 1"), {"org": organization_id}).scalar_one_or_none()
         bootstrap_actor = bootstrap_actor or stable_id("user:super_admin")
