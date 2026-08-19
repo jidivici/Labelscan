@@ -26,7 +26,7 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
-import { getAllArticles, persistConfirmedPhoto } from '../services/storage';
+import { deletePendingPhoto, getAllArticles, persistConfirmedPhoto } from '../services/storage';
 import { queryClient } from '../services/queryClient';
 import { businessProfileFor } from '../services/businessProfiles';
 import { suggestAllergen } from '../services/allergenSuggestions';
@@ -66,7 +66,12 @@ import {
   saveScanEdits,
   saveScanPhotoRotation,
 } from '../services/scanQueue';
-import { filledCountFromValues } from '../services/fieldCompleteness';
+import {
+  filledCountFromValues,
+  normalizeFinalReviewValue,
+  NOT_COMMUNICATED_VALUE,
+  notCommunicatedSuggestion,
+} from '../services/fieldCompleteness';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
 import { RotatedPhoto } from '../components/RotatedPhoto';
@@ -147,10 +152,14 @@ function WeightInput({
   draft,
   onChange,
   highlighted,
+  onFocus,
+  onBlur,
 }: {
   draft: string;
   onChange: (text: string) => void;
   highlighted: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
 }) {
   const seed = parseWeight(draft);
   const [amount, setAmount] = useState(seed.amount);
@@ -161,11 +170,18 @@ function WeightInput({
       <TextInput
         value={amount}
         onChangeText={(t) => {
+          if (notCommunicatedSuggestion(t)) {
+            setAmount(t);
+            onChange(t);
+            return;
+          }
           const v = t.replace(/[^0-9.,]/g, '');
           setAmount(v);
           onChange(formatWeight(v, unit));
         }}
-        keyboardType="decimal-pad"
+        onFocus={onFocus}
+        onBlur={onBlur}
+        keyboardType="default"
         placeholder="0"
         placeholderTextColor={colors.onSurfaceVariant}
         style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
@@ -195,10 +211,14 @@ function TempRangeInput({
   draft,
   onChange,
   highlighted,
+  onFocus,
+  onBlur,
 }: {
   draft: string;
   onChange: (text: string) => void;
   highlighted: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
 }) {
   const seed = parseTemp(draft);
   const [min, setMin] = useState(seed.min);
@@ -209,10 +229,18 @@ function TempRangeInput({
       <TextInput
         value={min}
         onChangeText={(t) => {
+          if (notCommunicatedSuggestion(t)) {
+            setMin(t);
+            setMax('');
+            onChange(t);
+            return;
+          }
           setMin(t);
           onChange(formatTemp(t, max));
         }}
-        keyboardType="numbers-and-punctuation"
+        onFocus={onFocus}
+        onBlur={onBlur}
+        keyboardType="default"
         placeholder="min"
         placeholderTextColor={colors.onSurfaceVariant}
         style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
@@ -222,10 +250,18 @@ function TempRangeInput({
       <TextInput
         value={max}
         onChangeText={(t) => {
+          if (notCommunicatedSuggestion(t)) {
+            setMin('');
+            setMax(t);
+            onChange(t);
+            return;
+          }
           setMax(t);
           onChange(formatTemp(min, t));
         }}
-        keyboardType="numbers-and-punctuation"
+        onFocus={onFocus}
+        onBlur={onBlur}
+        keyboardType="default"
         placeholder="max"
         placeholderTextColor={colors.onSurfaceVariant}
         style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
@@ -245,10 +281,14 @@ function PriceInput({
   draft,
   onChange,
   highlighted,
+  onFocus,
+  onBlur,
 }: {
   draft: string;
   onChange: (text: string) => void;
   highlighted: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
 }) {
   const seed = parsePrice(draft);
   const [amount, setAmount] = useState(seed.amount);
@@ -259,11 +299,18 @@ function PriceInput({
       <TextInput
         value={amount}
         onChangeText={(t) => {
+          if (notCommunicatedSuggestion(t)) {
+            setAmount(t);
+            onChange(t);
+            return;
+          }
           const v = t.replace(/[^0-9.,]/g, '');
           setAmount(v);
           onChange(formatPrice(v, currency));
         }}
-        keyboardType="decimal-pad"
+        onFocus={onFocus}
+        onBlur={onBlur}
+        keyboardType="default"
         placeholder="0.00"
         placeholderTextColor={colors.onSurfaceVariant}
         style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
@@ -303,19 +350,29 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
   // formats the digits the operator reads off the label — it never computes a date.
   const isDate = isDateField(field.field_name);
+  const isNotCommunicated = draft.trim().toUpperCase() === NOT_COMMUNICATED_VALUE;
   // Health mark ("estampille sanitaire"): the official stamp is always uppercase, so
   // every keystroke is force-cased — never a stripped/computed character.
   const isHealthMark = isHealthMarkField(field.field_name);
-  const handleChange = (text: string) =>
+  const handleChange = (text: string) => {
+    if (notCommunicatedSuggestion(text)) {
+      emit(text);
+      return;
+    }
     emit(isDate ? maskDate(text) : isHealthMark ? maskHealthMark(text) : text);
+  };
   // History autocomplete (workflow v2.1): chips shown ONLY while this row's input is
   // focused, so the 16 other rows never render suggestion clutter. suggestForField
   // returns [] for non-history fields (dates, lot, gtin, affix inputs) — no per-field
   // wiring needed here. Applying a chip goes through emit → a HUMAN edit, exactly like
   // typing it (no-fabrication gate untouched).
   const [focused, setFocused] = useState(false);
-  const historySuggestions =
-    focused && history ? suggestForField(history, field.field_name, draft) : [];
+  const historySuggestions = useMemo(() => {
+    if (!focused) return [];
+    const nc = notCommunicatedSuggestion(draft);
+    const saved = history ? suggestForField(history, field.field_name, draft) : [];
+    return [...(nc ? [nc] : []), ...saved.filter((value) => value !== nc)].slice(0, 3);
+  }, [focused, history, field.field_name, draft]);
 
   // Real-time, NEUTRAL, non-blocking validity hint (Clean UI: no red, never blocks the
   // save). Computed from the live draft so it updates as the operator types; null while
@@ -335,12 +392,42 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           <Text style={[typography.labelSmall, styles.attentionTag]}>À compléter</Text>
         ) : null}
       </View>
-      {field.field_name === 'weight' ? (
-        <WeightInput draft={draft} onChange={emit} highlighted={empty} />
+      {isNotCommunicated && ['weight', 'storage_temperature', 'price'].includes(field.field_name) ? (
+        <TextInput
+          value={draft}
+          onChangeText={emit}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          selectTextOnFocus
+          style={[typography.bodyMedium, styles.input]}
+          autoCapitalize="characters"
+          autoCorrect={false}
+          accessibilityLabel={`Champ ${fieldLabelFr(field.field_name)}`}
+        />
+      ) : field.field_name === 'weight' ? (
+        <WeightInput
+          draft={draft}
+          onChange={emit}
+          highlighted={empty}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+        />
       ) : field.field_name === 'storage_temperature' ? (
-        <TempRangeInput draft={draft} onChange={emit} highlighted={empty} />
+        <TempRangeInput
+          draft={draft}
+          onChange={emit}
+          highlighted={empty}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+        />
       ) : field.field_name === 'price' ? (
-        <PriceInput draft={draft} onChange={emit} highlighted={empty} />
+        <PriceInput
+          draft={draft}
+          onChange={emit}
+          highlighted={empty}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+        />
       ) : (
         <TextInput
           value={draft}
@@ -456,6 +543,10 @@ export function ReviewScreen() {
 
   const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
   const fields = run?.fields ?? [];
+  const fieldsByName = useMemo(
+    () => new Map(fields.map((field) => [field.field_name, field])),
+    [fields],
+  );
 
   // Per-field autocomplete history (workflow v2.1): built ONCE at mount from the saved
   // articles (validated truth). A stable reference — rows recompute their own chips
@@ -520,7 +611,7 @@ export function ReviewScreen() {
   const effectiveValues = useMemo(() => {
     const out: Record<string, string> = {};
     for (const name of fieldOrder) {
-      const field = fields.find((f) => f.field_name === name);
+      const field = fieldsByName.get(name);
       const extracted = field
         ? isDateField(name)
           ? displayDate(field.value ?? '')
@@ -529,7 +620,7 @@ export function ReviewScreen() {
       out[name] = edits[name] ?? extracted;
     }
     return out;
-  }, [fields, edits, fieldOrder]);
+  }, [fieldsByName, edits, fieldOrder]);
   // How many of the 17 fields are filled (non-blank). "Enregistrer l'arrivage" unlocks
   // only at 17/17 — until then the arrivage stays "en cours" and is never counted.
   const filledCount = useMemo(
@@ -564,30 +655,29 @@ export function ReviewScreen() {
     }
     setSaving(true);
     try {
-      const savedFields: ArticleField[] = run.fields.map((f): ArticleField => {
-        const draft = edits[f.field_name];
+      const savedFields: ArticleField[] = fieldOrder.map((name): ArticleField => {
+        const extractedField = fieldsByName.get(name);
+        const draft = edits[name];
         const hasEdit = draft !== undefined;
-        const rawNext = hasEdit ? (draft.trim() === '' ? null : draft.trim()) : f.value;
+        const rawNext = normalizeFinalReviewValue(hasEdit ? draft : extractedField?.value);
         // Dates are stored CANONICAL ISO (the operator types DD/MM/YYYY; we keep
         // YYYY-MM-DD) so storage, display (displayDate) and the backend chronological gate
         // stay in sync. toIsoDate is the exact inverse of the displayDate that seeds the
         // field, so the persisted value renders back to what the operator saw (audit §7.2
         // step 4 / §4.3 / §4.4).
         const nextValue =
-          rawNext != null && isDateField(f.field_name) ? toIsoDate(rawNext) : rawNext;
+          rawNext !== NOT_COMMUNICATED_VALUE && isDateField(name)
+            ? toIsoDate(rawNext)
+            : rawNext;
         // Compare CANONICAL values: re-typing the same date is no longer a false "édité"
         // (audit §5 step 3 — the old code compared a DD/MM/YYYY draft to an ISO value).
-        const changed = hasEdit && nextValue !== f.value;
+        const changed = nextValue !== extractedField?.value;
         return {
-          field_name: f.field_name,
+          field_name: name,
           value: nextValue,
-          combined_confidence: f.combined_confidence,
-          confidence_band: f.confidence_band,
-          validation_status: changed
-            ? nextValue == null
-              ? 'missing'
-              : 'present'
-            : f.validation_status,
+          combined_confidence: extractedField?.combined_confidence ?? 0,
+          confidence_band: extractedField?.confidence_band ?? 'low',
+          validation_status: 'present',
           edited: changed || undefined,
         };
       });
@@ -603,7 +693,9 @@ export function ReviewScreen() {
         fields: Object.fromEntries(
           fieldOrder.map((name) => [
             name,
-            savedFields.find((field) => field.field_name === name)?.value ?? null,
+            normalizeFinalReviewValue(
+              savedFields.find((field) => field.field_name === name)?.value,
+            ),
           ]),
         ),
         photo_rotation_degrees: photoRotationDegrees,
@@ -639,8 +731,13 @@ export function ReviewScreen() {
       // This makes the card visible the moment the operator returns to "Aujourd'hui";
       // the next normal or pull-to-refresh fetch reconciles it with the server copy.
       const savedAt = new Date().toISOString();
-      const confirmedPhotoUri = photoUri
-        ? await persistConfirmedPhoto(ingestionId, photoUri)
+      // Start the durable copy, but do not make the user wait for it: the cropped
+      // photo is already a local, durable pending file and is safe to render now.
+      // Some labels are several MB, so awaiting this copy made the just-saved card
+      // appear on the home page with a noticeable delay.
+      const localPhotoUri = photoUri ?? null;
+      const promotePhoto = localPhotoUri
+        ? persistConfirmedPhoto(ingestionId, localPhotoUri)
         : null;
       const optimisticArrival: Article = {
         id: `pending-${ingestionId}`,
@@ -648,7 +745,7 @@ export function ReviewScreen() {
         ingestion_id: ingestionId,
         extraction_run_id: run.run_id,
         captured_at: capturedAt ?? savedAt,
-        photo_uri: confirmedPhotoUri,
+        photo_uri: localPhotoUri,
         photo_rotation_degrees: photoRotationDegrees,
         photo_base_rotation_degrees: scan.photoBaseRotationDegrees ?? -90,
         barcode_raw: barcodeRaw ?? ingestion.barcode_raw ?? null,
@@ -662,13 +759,25 @@ export function ReviewScreen() {
         raw_extraction_run: run,
       };
       // Remove the in-progress card before publishing the final one, preventing a
-      // transient duplicate. The photo has already been copied to permanent storage.
+      // transient duplicate. Keep its local photo until the asynchronous promotion
+      // completes, so the home card can display it immediately.
       closingRef.current = true;
-      await completeScan(scan.id);
+      await completeScan(scan.id, { keepPhoto: Boolean(localPhotoUri) });
       queryClient.setQueryData<Article[]>(['catalog', 'arrivals'], (current = []) => [
         optimisticArrival,
         ...current.filter((article) => article.ingestion_id !== ingestionId),
       ]);
+      if (promotePhoto && localPhotoUri) {
+        void promotePhoto.then((confirmedPhotoUri) => {
+          if (!confirmedPhotoUri) return;
+          queryClient.setQueryData<Article[]>(['catalog', 'arrivals'], (current = []) =>
+            current.map((article) => article.ingestion_id === ingestionId
+              ? { ...article, photo_uri: confirmedPhotoUri }
+              : article),
+          );
+          void deletePendingPhoto(localPhotoUri);
+        });
+      }
 
       // Satisfying confirmation the arrivage was saved (light success haptic, non-blocking).
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -701,6 +810,7 @@ export function ReviewScreen() {
     user,
     businessPortalId,
     fieldOrder,
+    fieldsByName,
     reviewProfile,
     photoRotationDegrees,
     navigation,
@@ -835,12 +945,27 @@ export function ReviewScreen() {
                   </View>
                   <View style={styles.fieldGroupCard}>
                     {group.fields.map((name) => {
-                      const field = fields.find((item) => item.field_name === name);
-                      if (field) {
+                      const field = fieldsByName.get(name);
+                      const editableField: ExtractionField | null = field ?? (ready ? {
+                        field_name: name,
+                        value: null,
+                        evidence: null,
+                        provenance: null,
+                        source_raw_artifact_id: null,
+                        validation_status: 'missing',
+                        warnings: null,
+                        llm_confidence: null,
+                        ocr_confidence: null,
+                        combined_confidence: 0,
+                        confidence_band: 'low',
+                        source: 'missing',
+                        created_at: '',
+                      } : null);
+                      if (editableField) {
                         return (
                           <EditableFieldRow
                             key={name}
-                            field={field}
+                            field={editableField}
                             draft={effectiveValues[name]}
                             onChange={handleFieldChange}
                             suggestion={name === 'allergens' ? allergenSuggestion : undefined}

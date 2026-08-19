@@ -1,6 +1,6 @@
-"""Integration proofs — registration consumer skips non-extracted outcomes.
+"""Integration proofs — automatic extraction never publishes to the catalogue.
 
-Verifies that needs_review and extraction_failed outcomes never produce a batch.
+Only the later operator ``review.finalized`` event may produce a batch.
 """
 
 from __future__ import annotations
@@ -73,6 +73,21 @@ def test_extraction_failed_produces_no_batch(engine):
             "ingestion_id": "00000000-0000-0000-0000-000000000099",
             "run_id": "00000000-0000-0000-0000-000000000101",
             "outcome": "extraction_failed",
+        }
+    )
+    with engine.begin() as conn:
+        consumer(msg, conn)
+    assert _batch_count(engine) == before
+
+
+def test_successful_automatic_extraction_produces_no_batch(engine):
+    before = _batch_count(engine)
+    consumer = RegistrationConsumer(engine=engine)
+    msg = _Msg(
+        {
+            "ingestion_id": "00000000-0000-0000-0000-000000000099",
+            "run_id": "00000000-0000-0000-0000-000000000102",
+            "outcome": "extracted",
         }
     )
     with engine.begin() as conn:

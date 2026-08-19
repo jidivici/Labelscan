@@ -202,3 +202,28 @@ def test_legacy_catalogue_route_remains_available(client, catalog_record):
     )
     assert response.status_code == 200
     assert response.json()["items"][0]["batch_id"] == catalog_record["batch_id"]
+
+
+def test_unconfirmed_ingestion_is_hidden_from_catalogue(client, engine, catalog_record):
+    with engine.begin() as conn:
+        conn.execute(
+            text(
+                "UPDATE ingestion.ingestion SET status = 'extracted' "
+                "WHERE id = (SELECT source_ingestion_id FROM traceability.batch WHERE id = :batch_id)"
+            ),
+            {"batch_id": catalog_record["batch_id"]},
+        )
+
+    listing = client.get(
+        "/v1/arrivals",
+        headers=bearer("catalog:read identity:admin"),
+        params={"q": catalog_record["lot_code"]},
+    )
+    detail = client.get(
+        f"/v1/arrivals/{catalog_record['batch_id']}",
+        headers=bearer("catalog:read identity:admin"),
+    )
+
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 0
+    assert detail.status_code == 404

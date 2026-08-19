@@ -415,10 +415,14 @@ export function attachFinalizeOperation(id: string, operationId: string): void {
   });
 }
 
-/** Remove a validated scan (the article save already copied the photo out). */
-export async function completeScan(id: string): Promise<void> {
+/**
+ * Remove a validated scan.  A caller may keep its pending photo briefly while
+ * promoting it to durable storage in the background, so the home card can render
+ * it without waiting for a potentially large file copy.
+ */
+export async function completeScan(id: string, options: { keepPhoto?: boolean } = {}): Promise<void> {
   const removed = removeScan(id);
-  if (removed) await deletePendingPhoto(removed.photoUri);
+  if (removed && !options.keepPhoto) await deletePendingPhoto(removed.photoUri);
 }
 
 /**

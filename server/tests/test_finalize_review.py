@@ -123,7 +123,7 @@ def _seed_review_ready(atomic_client, engine, raw_store) -> str:
 
 
 def _fields() -> dict[str, str | None]:
-    fields = {name: None for name in FINAL_REVIEW_FIELDS}
+    fields = {name: "NC" for name in FINAL_REVIEW_FIELDS}
     fields.update(
         {
             "commercial_designation": "Cabillaud",
@@ -175,6 +175,12 @@ def test_atomic_review_replays_without_duplicate_and_updates_projection(
         ).scalar_one() == "confirmed"
 
     projection_worker = OutboxWorker(engine)
+    registration = RegistrationConsumer(engine=engine)
+    projection_worker.register(
+        registration.review_event_type,
+        registration.consumer_name,
+        registration,
+    )
     projection = ReviewProjectionConsumer()
     projection_worker.register(
         projection.event_type,
@@ -191,7 +197,20 @@ def test_atomic_review_replays_without_duplicate_and_updates_projection(
             {"ingestion_id": ingestion_id},
         ).mappings().one()
     assert current["fields"]["FAO_area"] == "27.8.b.1"
-    assert current["revision_no"] == 2
+    assert current["revision_no"] == 1
+
+    with engine.connect() as conn:
+        finalized_fields = {
+            row["field_name"]: (row["value"], row["source"], row["validation_status"])
+            for row in conn.execute(
+                text(
+                    "SELECT field_name, value, source, validation_status "
+                    "FROM ingestion.extracted_field WHERE extraction_run_id = :run_id"
+                ),
+                {"run_id": run_id},
+            ).mappings()
+        }
+    assert finalized_fields["gtin"] == ("NC", "human", "present")
 
 
 def test_final_review_registers_a_batch_when_the_initial_run_needed_review(
@@ -312,3 +331,16 @@ def test_atomic_review_requires_exact_contract(atomic_client, engine):
     )
     assert response.status_code == 400
     assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_atomic_review_rejects_empty_values(atomic_client, engine):
+    fields = _fields()
+    fields["gtin"] = None
+    response = atomic_client.post(
+        f"/v1/ingestions/{uuid.uuid4()}/reviews",
+        json={"fields": fields},
+        headers=_review_headers(engine, f"review-{uuid.uuid4().hex}"),
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+    assert "gtin" in response.json()["detail"]

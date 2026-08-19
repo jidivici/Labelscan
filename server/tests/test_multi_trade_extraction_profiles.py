@@ -102,7 +102,7 @@ def test_llm_schema_and_prompt_are_built_from_the_selected_profile(
     "trade_code", ["poissonnerie", "boucherie", "charcuterie_traiteur"]
 )
 def test_final_review_accepts_each_exact_versioned_contract(trade_code: str) -> None:
-    fields = {name: None for name in trade_profile(trade_code).fields}
+    fields = {name: "NC" for name in trade_profile(trade_code).fields}
     repository = _ReviewRepository()
     result = FinalizeReview(repository)(_review_command(fields))
     assert result.status == "confirmed"
@@ -282,7 +282,7 @@ def test_sql_final_review_persists_the_authoritative_ingestion_profile(
             },
         )
 
-    fields = {name: None for name in trade_profile(trade_code).fields}
+    fields = {name: "NC" for name in trade_profile(trade_code).fields}
     result = FinalizeReview(SqlReviewRepository(engine))(
         FinalizeReviewCommand(
             ingestion_id=ingestion_id,
