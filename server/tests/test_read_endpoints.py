@@ -86,13 +86,13 @@ READ_OCR = (
 READ_FIELDS = traceable_fields(lot="READLOT", supplier="Read Supplier Co")
 
 
-def _full_worker(engine, raw_store):
+def _full_worker(engine, raw_store, *, lot: str):
     w = OutboxWorker(engine)
     ext = ExtractionConsumer(
         engine=engine,
         raw_store=raw_store,
-        ocr=FakeOcr(READ_OCR),
-        llm=FakeLlm(READ_FIELDS),
+        ocr=FakeOcr(READ_OCR.replace("READLOT", lot)),
+        llm=FakeLlm(traceable_fields(lot=lot, supplier="Read Supplier Co")),
         rule_set=RULES,
     )
     w.register(ext.event_type, ext.consumer_name, ext)
@@ -150,11 +150,12 @@ def seeded(client, engine, raw_store):
         headers={"Idempotency-Key": f"rk-{uuid.uuid4()}", **AUTH},
     )
     ingestion_id = r.json()["ingestion_id"]
-    _full_worker(engine, raw_store).run_once()
+    lot = f"READ-{uuid.uuid4().hex[:12].upper()}"
+    _full_worker(engine, raw_store, lot=lot).run_once()
     finalize_poissonnerie(
         engine,
         ingestion_id,
-        lot="READLOT",
+        lot=lot,
         supplier="Read Supplier Co",
     )
     _publication_worker(engine).run_once()
