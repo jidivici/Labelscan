@@ -59,7 +59,7 @@ import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
 import { computeFrameCrop } from '../services/frameCrop';
-import { physicalQuarterTurnForLandscapeCrop } from '../services/captureOrientation';
+import { physicalQuarterTurnForCapturedCrop } from '../services/captureOrientation';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
@@ -237,12 +237,20 @@ export function CameraScreen() {
           // Rotate the cropped pixels themselves before the image enters the queue.
           // The app stays in portrait; this only normalizes the saved JPEG so OCR,
           // the review card and the manager all see the same upright photo.
-          // Decide from the actual crop, after EXIF normalization and frame mapping:
-          // a portrait crop needs the store posture's left turn to become landscape;
-          // an already-landscape crop must not receive a second quarter-turn.
-          // Bake the fixed -90° left turn into the JPEG before it reaches OCR and
-          // the "À contrôler" screen. Display components then keep a 0° base.
-          const physicalRotationDegrees = physicalQuarterTurnForLandscapeCrop(srcW, srcH);
+          // Decide from the actual crop and source buffer after EXIF normalization.
+          // A landscape sensor buffer in the portrait preview needs the same
+          // quarter-turn as that preview, even when the mapped crop is landscape.
+          // Bake that turn into the JPEG before it reaches OCR and the
+          // "À contrôler" screen. Display components then keep a 0° base.
+          const physicalRotationDegrees = physicalQuarterTurnForCapturedCrop(
+            srcW,
+            srcH,
+            normalizedImage.width,
+            normalizedImage.height,
+            screenWidth,
+            screenHeight,
+            previewQuarterTurn,
+          );
           const outputWidth = physicalRotationDegrees ? srcH : srcW;
           const outputHeight = physicalRotationDegrees ? srcW : srcH;
           const resize =

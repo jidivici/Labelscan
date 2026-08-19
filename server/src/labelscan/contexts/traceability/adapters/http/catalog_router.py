@@ -379,5 +379,13 @@ def get_arrival_image(
     return Response(
         content=image.content,
         media_type=image.media_type,
-        headers={"Cache-Control": "no-store"},
+        # Arrival images are immutable for a batch.  Keep them in the browser's
+        # private cache so changing pages or reloading the catalogue does not
+        # download every thumbnail again.  Vary by both auth mechanisms to
+        # prevent a cached image from being reused for another signed-in user.
+        headers={
+            "Cache-Control": "private, max-age=86400, immutable",
+            "ETag": f'"{checksum}"',
+            "Vary": "Authorization, Cookie",
+        },
     )

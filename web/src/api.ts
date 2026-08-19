@@ -15,7 +15,7 @@ export class ApiProblem extends Error {
   }
 }
 
-export const ARRIVAL_PAGE_SIZE = 30;
+export const ARRIVAL_PAGE_SIZE = 12;
 
 let refreshPromise: Promise<AuthPayload | null> | null = null;
 

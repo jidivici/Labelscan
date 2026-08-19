@@ -57,5 +57,9 @@ def test_operator_can_load_only_its_store_arrival_image() -> None:
 
     assert visible.status_code == 200
     assert visible.headers["content-type"] == "image/png"
+    assert visible.headers["cache-control"] == "private, max-age=86400, immutable"
+    assert visible.headers["etag"] == f'"{"a" * 64}"'
+    assert visible.headers["vary"] == "Authorization, Cookie"
+    assert "pragma" not in visible.headers
     assert visible.content.startswith(b"\x89PNG")
     assert hidden.status_code == 404
