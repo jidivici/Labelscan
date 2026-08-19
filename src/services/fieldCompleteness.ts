@@ -19,6 +19,22 @@ import type { ExtractionField } from '../types/api';
 
 /** The closed field set length — the "/17" denominator shown in the UI. */
 export const CANONICAL_FIELD_COUNT = fieldOrderForTrade('poissonnerie').length;
+export const NOT_COMMUNICATED_VALUE = 'NC';
+
+/** Final catalogue values are always explicit: blank/absent means non communiqué. */
+export function normalizeFinalReviewValue(
+  value: string | null | undefined,
+): string {
+  const normalized = value?.trim() ?? '';
+  return normalized.toUpperCase() === NOT_COMMUNICATED_VALUE
+    ? NOT_COMMUNICATED_VALUE
+    : normalized;
+}
+
+/** Typing a single n/N explicitly offers the canonical non-communicated value. */
+export function notCommunicatedSuggestion(value: string): string | null {
+  return value.trim().toLowerCase() === 'n' ? NOT_COMMUNICATED_VALUE : null;
+}
 
 export function canonicalFieldCount(tradeCode?: string | null): number {
   return fieldOrderForTrade(tradeCode).length;
