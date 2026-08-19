@@ -462,8 +462,8 @@ paths:
       - bearerAuth: []
     delete:
       summary: Delete a manager from active administration
-      description: Soft-deletes the account and revokes its access while preserving
-        the identity row used by historical labels. The username becomes reusable.
+      description: Soft-deletes the account and revokes its access while preserving the identity row used
+        by historical labels. The username becomes reusable.
       operationId: delete_manager_v1_managers__user_id__delete
       parameters:
       - name: user_id
@@ -476,141 +476,6 @@ paths:
       responses:
         '204':
           description: Successful Response
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
-  /v1/portals/{portal_id}/operators:
-    get:
-      summary: List Operators
-      operationId: list_operators_v1_portals__portal_id__operators_get
-      parameters:
-      - name: portal_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Portal Id
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/UserResponse'
-                title: Response List Operators V1 Portals  Portal Id  Operators Get
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
-    post:
-      summary: Create Operator
-      operationId: create_operator_v1_portals__portal_id__operators_post
-      parameters:
-      - name: portal_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Portal Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateIdentityRequest'
-      responses:
-        '201':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
-  /v1/portals/{portal_id}/operators/{user_id}:
-    patch:
-      summary: Update Operator
-      operationId: update_operator_v1_portals__portal_id__operators__user_id__patch
-      parameters:
-      - name: portal_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: Portal Id
-      - name: user_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: User Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/OperatorUpdateRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
-        '400':
-          description: Request validation failed
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/Problem'
-      security:
-      - bearerAuth: []
-  /v1/operators/{user_id}/credential-reset:
-    post:
-      summary: Reset Operator Credential
-      operationId: reset_operator_credential_v1_operators__user_id__credential_reset_post
-      parameters:
-      - name: user_id
-        in: path
-        required: true
-        schema:
-          type: string
-          format: uuid
-          title: User Id
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ResetCredentialRequest'
-      responses:
-        '200':
-          description: Successful Response
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/UserResponse'
         '400':
           description: Request validation failed
           content:
@@ -1812,6 +1677,9 @@ components:
         photo_rotation_degrees:
           type: integer
           title: Photo Rotation Degrees
+        photo_base_rotation_degrees:
+          type: integer
+          title: Photo Base Rotation Degrees
         store_id:
           anyOf:
           - type: string
@@ -1864,6 +1732,7 @@ components:
       - updated_at
       - photo_available
       - photo_rotation_degrees
+      - photo_base_rotation_degrees
       - store_id
       - business_portal_id
       - profession_code
@@ -1962,6 +1831,9 @@ components:
         photo_rotation_degrees:
           type: integer
           title: Photo Rotation Degrees
+        photo_base_rotation_degrees:
+          type: integer
+          title: Photo Base Rotation Degrees
         store_id:
           anyOf:
           - type: string
@@ -2013,6 +1885,7 @@ components:
       - recorded_at
       - photo_available
       - photo_rotation_degrees
+      - photo_base_rotation_degrees
       - store_id
       - business_portal_id
       - profession_code
@@ -2032,7 +1905,7 @@ components:
         new_password:
           type: string
           maxLength: 128
-          minLength: 8
+          minLength: 1
           title: New Password
       type: object
       required:
@@ -2064,19 +1937,20 @@ components:
           minLength: 1
           title: Username
         display_name:
-          type: string
-          maxLength: 120
-          minLength: 1
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
           title: Display Name
         password:
           type: string
           maxLength: 128
-          minLength: 8
+          minLength: 1
           title: Password
       type: object
       required:
       - username
-      - display_name
       - password
       title: CreateIdentityRequest
     CreateManagerRequest:
@@ -2087,26 +1961,28 @@ components:
           minLength: 1
           title: Username
         display_name:
-          type: string
-          maxLength: 120
-          minLength: 1
+          anyOf:
+          - type: string
+            maxLength: 120
+            minLength: 1
+          - type: 'null'
           title: Display Name
         password:
           type: string
           maxLength: 128
-          minLength: 8
+          minLength: 1
           title: Password
         business_portal_ids:
           items:
             type: string
             format: uuid
           type: array
+          maxItems: 1
           minItems: 1
           title: Business Portal Ids
       type: object
       required:
       - username
-      - display_name
       - password
       - business_portal_ids
       title: CreateManagerRequest
@@ -2357,11 +2233,12 @@ components:
           title: Note
         photo_rotation_degrees:
           type: integer
-          enum:
-          - 0
-          - 180
-          default: 0
           title: Photo Rotation Degrees
+          default: 0
+        photo_base_rotation_degrees:
+          type: integer
+          title: Photo Base Rotation Degrees
+          default: -90
       type: object
       required:
       - fields
@@ -2561,6 +2438,7 @@ components:
             type: string
             format: uuid
           type: array
+          maxItems: 1
           minItems: 1
           title: Business Portal Ids
       type: object
@@ -2631,21 +2509,6 @@ components:
       - refresh_token
       - refresh_expires_in
       title: MobileLoginResponse
-    OperatorUpdateRequest:
-      properties:
-        business_portal_id:
-          anyOf:
-          - type: string
-            format: uuid
-          - type: 'null'
-          title: Business Portal Id
-        active:
-          anyOf:
-          - type: boolean
-          - type: 'null'
-          title: Active
-      type: object
-      title: OperatorUpdateRequest
     OverriddenFieldResponse:
       properties:
         ingestion_id:
@@ -2817,17 +2680,6 @@ components:
       required:
       - refresh_token
       title: RefreshRequest
-    ResetCredentialRequest:
-      properties:
-        new_password:
-          type: string
-          maxLength: 128
-          minLength: 8
-          title: New Password
-      type: object
-      required:
-      - new_password
-      title: ResetCredentialRequest
     RunSummary:
       properties:
         run_id:

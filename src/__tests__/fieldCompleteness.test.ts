@@ -11,6 +11,9 @@ import {
   filledCountFromValues,
   isProductNameKnownFromInterim,
   isProductNameKnownFromRun,
+  normalizeFinalReviewValue,
+  NOT_COMMUNICATED_VALUE,
+  notCommunicatedSuggestion,
   PRODUCT_NAME_FIELD,
 } from '../services/fieldCompleteness';
 import type { ExtractionField } from '../types/api';
@@ -38,6 +41,20 @@ function field(
 }
 
 describe('fieldCompleteness', () => {
+  it('keeps empty review values empty and canonicalizes an explicit NC', () => {
+    expect(normalizeFinalReviewValue(null)).toBe('');
+    expect(normalizeFinalReviewValue(undefined)).toBe('');
+    expect(normalizeFinalReviewValue('   ')).toBe('');
+    expect(normalizeFinalReviewValue(' nc ')).toBe(NOT_COMMUNICATED_VALUE);
+    expect(normalizeFinalReviewValue('  Cabillaud  ')).toBe('Cabillaud');
+  });
+
+  it('proposes NC only after the operator types n or N', () => {
+    expect(notCommunicatedSuggestion('n')).toBe(NOT_COMMUNICATED_VALUE);
+    expect(notCommunicatedSuggestion(' N ')).toBe(NOT_COMMUNICATED_VALUE);
+    expect(notCommunicatedSuggestion('')).toBeNull();
+    expect(notCommunicatedSuggestion('na')).toBeNull();
+  });
   it('CANONICAL_FIELD_COUNT is 17 (the closed LLM field set)', () => {
     expect(CANONICAL_FIELD_COUNT).toBe(17);
     expect(canonicalFieldCount('boucherie')).toBe(22);

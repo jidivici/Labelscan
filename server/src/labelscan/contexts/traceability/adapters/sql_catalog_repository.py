@@ -116,6 +116,9 @@ class SqlCatalogRepository(CatalogRepository):
         else:
             scope, scope_params = postgres_scope(filters.access, alias="projection")
             conditions = [scope]
+        # Catalogue invariant: ingestion/extraction data is private until the
+        # operator has finalized the review atomically.
+        conditions.append("ingestion.status = 'confirmed'")
         params: dict[str, object] = {
             "organization_id": filters.organization_id,
             "limit": filters.limit,
@@ -280,6 +283,7 @@ class SqlCatalogRepository(CatalogRepository):
         else:
             scope, scope_params = postgres_scope(access, alias="projection")
             conditions = [scope]
+        conditions.append("ingestion.status = 'confirmed'")
         conditions.append("projection.batch_id::text = :batch_id")
         params: dict[str, object] = {
             "organization_id": organization_id,
@@ -380,6 +384,7 @@ class SqlCatalogRepository(CatalogRepository):
         else:
             scope, scope_params = postgres_scope(access, alias="projection")
             conditions = [scope]
+        conditions.append("ingestion.status = 'confirmed'")
         conditions.append("projection.batch_id::text = :batch_id")
         params: dict[str, object] = {
             "organization_id": organization_id,
@@ -395,6 +400,8 @@ class SqlCatalogRepository(CatalogRepository):
                 text(
                     "SELECT projection.image_checksum "
                     "FROM traceability.arrival_projection AS projection "
+                    "JOIN ingestion.ingestion AS ingestion "
+                    "ON ingestion.id = projection.ingestion_id "
                     f"WHERE {' AND '.join(conditions)}"
                 ),
                 params,

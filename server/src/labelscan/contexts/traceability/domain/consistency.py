@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date
 
 _PRODUCTION_METHODS = frozenset({"wild_caught", "farmed"})
+_NOT_COMMUNICATED = "NC"
 
 
 @dataclass(frozen=True)
@@ -48,6 +49,7 @@ def check_consistency(
 
     if (
         candidate.production_method
+        and candidate.production_method.upper() != _NOT_COMMUNICATED
         and candidate.production_method not in _PRODUCTION_METHODS
     ):
         issues.append("invalid_production_method")

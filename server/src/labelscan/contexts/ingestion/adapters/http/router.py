@@ -43,6 +43,7 @@ from labelscan.contexts.ingestion.application.confirm_ingestion import (
 from labelscan.contexts.ingestion.application.finalize_review import (
     FinalizeReview,
     FinalizeReviewCommand,
+    IncompleteReviewFields,
     InvalidReviewFields,
     ReviewIdempotencyConflict,
     ReviewNotAllowed,
@@ -455,6 +456,11 @@ def finalize_review(
         if exc.extra:
             detail_parts.append(f"unknown: {', '.join(sorted(exc.extra))}")
         raise ApiError("VALIDATION_ERROR", "; ".join(detail_parts))
+    except IncompleteReviewFields as exc:
+        raise ApiError(
+            "VALIDATION_ERROR",
+            f"empty: {', '.join(sorted(exc.fields))}",
+        )
     except ReviewNotFound:
         raise ApiError("NOT_FOUND", f"ingestion {ingestion_id} not found")
     except ReviewNotAllowed as exc:

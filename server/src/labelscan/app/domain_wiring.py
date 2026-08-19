@@ -1,7 +1,7 @@
 """Composition root for the traceability + HACCP consumers.
 
 Registers the event-driven chain onto the relay worker:
-    extraction.completed / review.finalized -> traceability (RegistrationConsumer)
+    review.finalized -> traceability (RegistrationConsumer)
     batch.registered / batch.flagged -> haccp (AlertingConsumer)
 Each consumer imports only its own context; integration is via events.
 """
@@ -27,7 +27,6 @@ def register_domain_consumers(
     engine = engine or make_engine()
 
     registration = RegistrationConsumer(engine=engine)
-    worker.register(registration.event_type, registration.consumer_name, registration)
     worker.register(
         registration.review_event_type,
         registration.consumer_name,

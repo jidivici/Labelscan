@@ -1,7 +1,8 @@
-"""Traceability registration consumer for extracted or human-reviewed labels.
+"""Traceability registration consumer for operator-validated labels.
 
-Consumes ONLY validated extractions (outcome == 'extracted'); needs_review or
-failed runs never produce a batch. Applies the domain-truth consistency checks,
+Consumes ONLY ``review.finalized`` events. Automatic ingestion and extraction
+results never produce a catalogue batch, even when their outcome is ``extracted``.
+Applies the domain-truth consistency checks,
 then either registers the full chain (product -> supplier -> batch -> source run
 -> source ingestion) and emits `batch.registered`, or records a FLAGGED batch and
 emits `batch.flagged` — never silently accepting/correcting bad data, never
@@ -17,6 +18,7 @@ from datetime import date
 from sqlalchemy import text
 from sqlalchemy.engine import Connection, Engine
 
+from labelscan.business_profiles import trade_profile
 from labelscan.contexts.traceability.domain.consistency import (
     BatchCandidate,
     check_consistency,
@@ -24,6 +26,7 @@ from labelscan.contexts.traceability.domain.consistency import (
 from labelscan.platform.db.audit_context import set_audit_context
 
 SYSTEM_ACTOR = "00000000-0000-0000-0000-000000000001"
+NOT_COMMUNICATED = "NC"
 
 
 def _to_date(s: str | None) -> date | None:
@@ -37,6 +40,12 @@ def _to_date(s: str | None) -> date | None:
         return None
 
 
+def _to_production_method(value: str | None) -> str | None:
+    """Map the review-level ``NC`` marker to the nullable registry column."""
+
+    return None if value == NOT_COMMUNICATED else value
+
+
 class RegistrationConsumer:
     consumer_name = "traceability"
     event_type = "extraction.completed"
@@ -46,15 +55,10 @@ class RegistrationConsumer:
         self._engine = engine
 
     def __call__(self, msg, conn: Connection) -> None:
-        # An automatic run may be trusted immediately only when its extracted
-        # outcome passed the gate. A human final review produces a new extracted
-        # run, but intentionally emits ``review.finalized`` (so the audit trail
-        # distinguishes a human decision from an automatic result). Both are
-        # valid sources for registering a batch.
-        if msg.event_type == self.event_type:
-            if msg.payload.get("outcome") != "extracted":
-                return
-        elif msg.event_type != self.review_event_type:
+        # Publishing is a human decision. ``extraction.completed`` is deliberately
+        # ignored regardless of outcome; only the atomic final-review operation
+        # emits this event after setting the ingestion to ``confirmed``.
+        if msg.event_type != self.review_event_type:
             return
 
         ingestion_id = msg.payload["ingestion_id"]
@@ -68,30 +72,47 @@ class RegistrationConsumer:
                     "business_portal_id::text AS business_portal_id, "
                     "trade_code_snapshot, trade_profile_version, "
                     "captured_by_user_id::text AS captured_by_user_id "
-                    "FROM ingestion.ingestion WHERE id = :ingestion_id"
+                    "FROM ingestion.ingestion "
+                    "WHERE id = :ingestion_id AND status = 'confirmed'"
                 ),
                 {"ingestion_id": ingestion_id},
             )
             .mappings()
-            .one()
+            .first()
         )
+        if tenant is None:
+            return
 
-        vals = {
-            r["field_name"]: r["value"]
-            for r in conn.execute(
+        field_rows = (
+            conn.execute(
                 text(
-                    "SELECT field_name, value FROM ingestion.extracted_field WHERE extraction_run_id = :r"
+                    "SELECT field_name, value, source "
+                    "FROM ingestion.extracted_field WHERE extraction_run_id = :r"
                 ),
                 {"r": run_id},
             )
             .mappings()
             .all()
-        }
+        )
+        vals = {row["field_name"]: row["value"] for row in field_rows}
+        # Defence in depth: a forged/malformed review event cannot publish an
+        # automatic run or a partial contract. ``NC`` is a real, explicit value.
+        if not field_rows or any(row["source"] != "human" for row in field_rows):
+            return
+        if any(
+            not isinstance(value, str) or not value.strip() for value in vals.values()
+        ):
+            return
+        expected_fields = set(
+            trade_profile(
+                tenant["trade_code_snapshot"], tenant["trade_profile_version"]
+            ).fields
+        )
+        if set(vals) != expected_fields:
+            return
 
-        # The usual path is: automatic extraction -> one registration. If an
-        # operator later finalizes an already extracted item, the separate review
-        # projection consumer refreshes its fields. Never create a second batch
-        # for that same ingestion.
+        # Idempotent relay/retry: never create a second batch for the same finalized
+        # ingestion. Later human revisions are refreshed by ReviewProjectionConsumer.
         already_registered = conn.execute(
             text(
                 "SELECT 1 FROM traceability.batch "
@@ -288,7 +309,7 @@ class RegistrationConsumer:
                 "store": tenant["store_code"],
                 "sci": c.scientific_name,
                 "fao": c.fao_area,
-                "pm": c.production_method,
+                "pm": _to_production_method(c.production_method),
                 "ub": c.use_by,
                 "pkg": c.packaging_date,
                 "iid": ingestion_id,
@@ -365,7 +386,7 @@ class RegistrationConsumer:
                 "store": tenant["store_code"],
                 "sci": c.scientific_name,
                 "fao": c.fao_area,
-                "pm": c.production_method,
+                "pm": _to_production_method(c.production_method),
                 "ub": c.use_by,
                 "pkg": c.packaging_date,
                 "iid": ingestion_id,
