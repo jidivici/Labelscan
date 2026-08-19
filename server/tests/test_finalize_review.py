@@ -132,7 +132,7 @@ def _fields() -> dict[str, str | None]:
         {
             "commercial_designation": "Cabillaud",
             "scientific_name": "Gadus morhua",
-            "batch_number": "LOT-ATOMIC-01",
+            "batch_number": f"LOT-{uuid.uuid4().hex[:12].upper()}",
             "FAO_area": "27.8.b.1",
         }
     )
