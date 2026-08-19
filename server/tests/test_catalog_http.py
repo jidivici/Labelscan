@@ -145,13 +145,18 @@ def client(engine):
     return TestClient(app)
 
 
-def test_operator_can_search_only_its_store_arrivals(client, catalog_record):
+def test_manager_can_search_only_its_store_arrivals(client, engine, catalog_record):
+    with engine.connect() as conn:
+        organization_id = str(
+            conn.execute(text("SELECT platform.default_organization_id()")).scalar_one()
+        )
     response = client.get(
         "/v1/arrivals",
         headers=bearer(
             "catalog:read",
-            role="operator",
+            role="manager",
             store_code=STORE_CODE,
+            organization_id=organization_id,
         ),
         params={
             "q": catalog_record["lot_code"],
@@ -167,13 +172,18 @@ def test_operator_can_search_only_its_store_arrivals(client, catalog_record):
     assert page["items"][0]["product_name"] == catalog_record["product_name"]
 
 
-def test_operator_cannot_override_its_store_filter(client, catalog_record):
+def test_manager_cannot_override_its_store_filter(client, engine, catalog_record):
+    with engine.connect() as conn:
+        organization_id = str(
+            conn.execute(text("SELECT platform.default_organization_id()")).scalar_one()
+        )
     response = client.get(
         "/v1/arrivals",
         headers=bearer(
             "catalog:read",
-            role="operator",
+            role="manager",
             store_code=STORE_CODE,
+            organization_id=organization_id,
         ),
         params={"store_code": "ANOTHER-STORE"},
     )
@@ -206,6 +216,13 @@ def test_legacy_catalogue_route_remains_available(client, catalog_record):
 
 def test_unconfirmed_ingestion_is_hidden_from_catalogue(client, engine, catalog_record):
     with engine.begin() as conn:
+        set_audit_context(
+            conn,
+            actor_id=ACTOR_ID,
+            action="ingestion.catalog_test_unconfirmed",
+            correlation_id="catalog-unconfirmed",
+            trace_id="catalog-unconfirmed",
+        )
         conn.execute(
             text(
                 "UPDATE ingestion.ingestion SET status = 'extracted' "

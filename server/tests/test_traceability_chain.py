@@ -31,6 +31,7 @@ from labelscan.contexts.traceability.domain.consistency import (
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import FakeLlm, FakeOcr, traceable_fields
+from tests._review import finalize_poissonnerie
 from tests.conftest import ACTOR_ID
 
 RULES = RuleSet(
@@ -93,6 +94,21 @@ def _full_worker(engine, raw_store, ocr, llm, today: date) -> OutboxWorker:
     return w
 
 
+def _publish_review(engine, ingestion_id: str, *, today: date, **field_values) -> None:
+    finalize_poissonnerie(engine, ingestion_id, **field_values)
+    worker = OutboxWorker(engine)
+    registration = RegistrationConsumer(engine=engine)
+    worker.register(
+        registration.review_event_type,
+        registration.consumer_name,
+        registration,
+    )
+    alerts = AlertingConsumer(engine=engine, today=lambda: today)
+    for event_type in alerts.event_types:
+        worker.register(event_type, alerts.consumer_name, alerts)
+    worker.run_once()
+
+
 def test_supplier_mismatch_pure():
     cand = BatchCandidate(
         lot_code="L1",
@@ -120,6 +136,7 @@ def test_full_chain_registered_and_queryable(submit, engine, raw_store):
         FakeLlm(traceable_fields()),
         today=date(2026, 6, 18),
     ).run_once()
+    _publish_review(engine, res.ingestion_id, today=date(2026, 6, 18))
 
     with engine.connect() as c:
         chain = (
@@ -149,7 +166,7 @@ def test_full_chain_registered_and_queryable(submit, engine, raw_store):
     assert row["supplier"] == "Nordic Seafood AS"
     assert row["sci"] == "Gadus morhua"
     assert row["outcome"] == "extracted"
-    assert row["ing_status"] == "extracted"
+    assert row["ing_status"] == "confirmed"
     assert (
         row["image_id"] is not None
     )  # full chain product->supplier->run->ingestion->raw image
@@ -190,6 +207,13 @@ def test_supplier_mismatch_flags_batch_and_alerts(submit, engine, raw_store):
         FakeLlm(traceable_fields(lot="LOTX", supplier="Alpha Foods")),
         today=date(2026, 6, 1),
     ).run_once()
+    _publish_review(
+        engine,
+        res_a.ingestion_id,
+        today=date(2026, 6, 1),
+        lot="LOTX",
+        supplier="Alpha Foods",
+    )
 
     _quiesce(engine)
     res_b = submit(_cmd(b"trace-mismatch-B"))
@@ -200,6 +224,13 @@ def test_supplier_mismatch_flags_batch_and_alerts(submit, engine, raw_store):
         FakeLlm(traceable_fields(lot="LOTX", supplier="Beta Foods")),
         today=date(2026, 6, 1),
     ).run_once()
+    _publish_review(
+        engine,
+        res_b.ingestion_id,
+        today=date(2026, 6, 1),
+        lot="LOTX",
+        supplier="Beta Foods",
+    )
 
     with engine.connect() as c:
         status_a = c.execute(
@@ -249,6 +280,13 @@ def test_batch_is_append_only(submit, engine, raw_store):
         FakeLlm(traceable_fields(lot="IMMUT1", supplier="Immco")),
         today=date(2026, 6, 1),
     ).run_once()
+    _publish_review(
+        engine,
+        res.ingestion_id,
+        today=date(2026, 6, 1),
+        lot="IMMUT1",
+        supplier="Immco",
+    )
 
     with engine.connect() as c:
         batch_id = c.execute(

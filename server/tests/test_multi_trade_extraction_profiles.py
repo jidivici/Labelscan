@@ -281,6 +281,22 @@ def test_sql_final_review_persists_the_authoritative_ingestion_profile(
                 "correlation_id": correlation_id,
             },
         )
+        conn.execute(
+            text(
+                "INSERT INTO ingestion.raw_artifact ("
+                "organization_id, ingestion_id, artifact_kind, storage_ref, "
+                "checksum_sha256, correlation_id, trace_id"
+                ") VALUES ("
+                ":organization_id, :ingestion_id, 'image', 'sha256://profile', "
+                ":checksum, :correlation_id, :correlation_id)"
+            ),
+            {
+                "organization_id": organization_id,
+                "ingestion_id": ingestion_id,
+                "checksum": uuid.uuid4().hex.ljust(64, "0"),
+                "correlation_id": correlation_id,
+            },
+        )
 
     fields = {name: "NC" for name in trade_profile(trade_code).fields}
     result = FinalizeReview(SqlReviewRepository(engine))(

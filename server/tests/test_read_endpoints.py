@@ -29,6 +29,7 @@ from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import FakeLlm, FakeOcr, traceable_fields
+from tests._review import finalize_poissonnerie
 from tests.conftest import ACTOR_ID, bearer, jpeg_bytes
 
 RULES = RuleSet(
@@ -117,6 +118,20 @@ def _extraction_only_worker(engine, raw_store):
     return w
 
 
+def _publication_worker(engine):
+    worker = OutboxWorker(engine)
+    registration = RegistrationConsumer(engine=engine)
+    worker.register(
+        registration.review_event_type,
+        registration.consumer_name,
+        registration,
+    )
+    alerts = AlertingConsumer(engine=engine, today=lambda: date(2026, 6, 18))
+    for event_type in alerts.event_types:
+        worker.register(event_type, alerts.consumer_name, alerts)
+    return worker
+
+
 @pytest.fixture
 def seeded(client, engine, raw_store):
     """Create one ingestion, run extraction+traceability+haccp, then a 2nd
@@ -130,6 +145,13 @@ def seeded(client, engine, raw_store):
     )
     ingestion_id = r.json()["ingestion_id"]
     _full_worker(engine, raw_store).run_once()
+    finalize_poissonnerie(
+        engine,
+        ingestion_id,
+        lot="READLOT",
+        supplier="Read Supplier Co",
+    )
+    _publication_worker(engine).run_once()
 
     # second extraction run for the same ingestion (append-only; new attempt)
     with engine.begin() as c:
