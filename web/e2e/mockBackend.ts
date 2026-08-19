@@ -163,11 +163,11 @@ async function json(route: Route, body: unknown, status = 200) {
 }
 
 function arrivalPage(url: URL) {
-  const limit = Number(url.searchParams.get('limit') ?? 30);
+  const limit = Number(url.searchParams.get('limit') ?? 12);
   const offset = Number(url.searchParams.get('offset') ?? 0);
   let total = 101;
   if (url.searchParams.get('completeness_min') === '100') total = 80;
-  const items = limit === 30 ? [{
+  const items = limit === 12 ? [{
     batch_id: `batch-${offset}`,
     store_code: 'PARIS-01',
     profession_code: url.searchParams.get('profession') ?? 'poissonnerie',
