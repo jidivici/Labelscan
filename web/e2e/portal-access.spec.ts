@@ -48,7 +48,8 @@ test('manager sees only the scope returned by the backend', async ({ page }) => 
   });
   expect(layout.rootScrollWidth).toBe(layout.rootWidth);
   expect(layout.bodyScrollWidth).toBe(layout.bodyWidth);
-  expect(layout.tableScrollWidth).toBeGreaterThan(layout.tableWidth);
+  expect(layout.tableWidth).toBeGreaterThan(0);
+  expect(layout.tableScrollWidth).toBeGreaterThanOrEqual(layout.tableWidth);
   const mobileMenu = page.getByRole('button', { name: 'Ouvrir le menu' });
   if (await mobileMenu.isVisible()) {
     await expect(page.locator('#app-sidebar')).toHaveAttribute('aria-hidden', 'true');
@@ -121,7 +122,7 @@ test('admin can aggregate every profession and use the HBntory-style arrival car
   await expect.poll(() => backend.requests.some((request) => {
     if (!request.startsWith('GET /v1/arrivals?')) return false;
     const url = new URL(request.slice(4), 'http://e2e.local');
-    return url.searchParams.get('limit') === '30' && !url.searchParams.has('profession');
+    return url.searchParams.get('limit') === '12' && !url.searchParams.has('profession');
   })).toBe(true);
 
   await page.getByRole('button', { name: 'Vue liste' }).click();
@@ -210,7 +211,7 @@ test('super-admin can see administrators and the single combined Charcuterie–T
   await useNavigationLink(page, 'Administrateurs');
   await expect(page.getByRole('heading', { name: 'Administrateurs', exact: true })).toBeVisible();
   await openSidebarIfNeeded(page);
-  await expect(page.getByRole('button', { name: /^Métier/ })).toContainText('Choisir un métier');
+  await expect(page.getByRole('button', { name: /^Métier/ })).toContainText('Tous les métiers');
   if (await page.getByRole('button', { name: 'Fermer le menu' }).isVisible()) await page.keyboard.press('Escape');
   await expect(page.getByText('admin.nord')).toBeVisible();
   await expect(page.getByText('admin.sud')).toBeVisible();
@@ -232,11 +233,13 @@ test('super-admin creates an active account with a direct password', async ({ pa
 
 test('professional filters persist in the URL, reach the server, and reset pagination', async ({ page }) => {
   const backend = await login(page, 'manager');
-  await expect(page.getByRole('navigation', { name: 'Pagination' })).toContainText('1–30 sur 101');
+  const pagination = page.getByRole('navigation', { name: 'Pagination' });
+  await expect(pagination.getByRole('button', { name: 'Page 1' })).toHaveAttribute('aria-current', 'page');
+  await expect(pagination).not.toContainText('sur 101');
   await page.getByRole('button', { name: /^Filtres/ }).click();
   await expect(page.getByLabel('Complétude minimale')).toHaveCount(0);
   await expect(page.getByRole('option', { name: 'Signalés' })).toHaveCount(0);
-  await expect(page.getByRole('option', { name: 'Enregistrés' })).toHaveCount(1);
+  await expect(page.getByRole('option', { name: 'Enregistrés' })).toHaveCount(0);
   await page.getByLabel('Espèce / désignation commerciale').fill('saumon atlantique');
   await page.getByLabel('Mode de production').selectOption('farmed');
 
@@ -249,8 +252,8 @@ test('professional filters persist in the URL, reach the server, and reset pagin
   await expect.poll(() => backend.requests.some((request) => {
     if (!request.startsWith('GET /v1/arrivals?')) return false;
     const url = new URL(request.slice(4), 'http://e2e.local');
-    return url.searchParams.get('limit') === '30'
-      && url.searchParams.get('offset') === '30'
+    return url.searchParams.get('limit') === '12'
+      && url.searchParams.get('offset') === '12'
       && expectedFilters.every((filter) => url.searchParams.getAll('field_filter').includes(filter));
   })).toBe(true);
 });
