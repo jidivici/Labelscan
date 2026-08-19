@@ -104,8 +104,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
         if request.url.path.startswith("/v1"):
-            response.headers.setdefault("Cache-Control", "no-store")
-            response.headers.setdefault("Pragma", "no-cache")
+            # APIs are non-cacheable by default.  Endpoints serving immutable,
+            # private assets (such as authenticated arrival photos) may opt in
+            # to a narrower cache policy by supplying Cache-Control themselves.
+            if "Cache-Control" not in response.headers:
+                response.headers["Cache-Control"] = "no-store"
+                response.headers["Pragma"] = "no-cache"
         if request.url.path.startswith("/backoffice"):
             response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")
