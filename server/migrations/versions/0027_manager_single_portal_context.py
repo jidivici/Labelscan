@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from alembic import op
 
-
 revision = "0027_manager_portal"
 down_revision = "0026_remove_account_activation"
 branch_labels = None

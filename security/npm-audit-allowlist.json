@@ -16,6 +16,15 @@
       "owner": "engineering",
       "expires": "2026-09-02",
       "rationale": "Expo SDK 54 transitive build-tool dependencies reviewed again on 2026-08-03 after GHSA-rgw5-rvv9-x895 and GHSA-fxqj-rqcc-2cmp were published. The shipped React Native application does not run these Node build tools or pass attacker-controlled YAML, CSS/sourceMappingURL, shell expressions, or glob/brace patterns to them. Upgrade within SDK 54 when Expo publishes compatible fixes; do not force Expo 57."
+    },
+    {
+      "advisories": [
+        "GHSA-w3rx-r6r6-pgpr",
+        "GHSA-5p2g-fcmc-qvqq"
+      ],
+      "owner": "engineering",
+      "expires": "2026-09-02",
+      "rationale": "Expo SDK 54 pins Metro to image-size 1.2.1 and no corrected image-size release exists. The affected ICNS, JXL and HEIF parsers are build-time tooling and receive only repository-controlled application assets, not uploaded label photos. Reassess when image-size or Expo publishes an SDK 54-compatible fix."
     }
   ]
 }
