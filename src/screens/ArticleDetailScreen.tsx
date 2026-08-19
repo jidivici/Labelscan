@@ -494,17 +494,6 @@ export function ArticleDetailScreen() {
     [dismissTranslateY, handleSwipeDismiss, restoreSheetPosition, saving],
   );
 
-  const enterEdit = useCallback(() => {
-    const seed: Record<string, string> = {};
-    for (const f of article?.fields ?? []) {
-      seed[f.field_name] = f.value ?? '';
-    }
-    setDrafts(seed);
-    setJustSaved(false);
-    setSaveError(null);
-    setEditing(true);
-  }, [article]);
-
   const cancelEdit = useCallback(() => {
     setEditing(false);
     setDrafts({});
@@ -674,25 +663,6 @@ export function ArticleDetailScreen() {
             <Text style={[typography.titleMedium, styles.topBarHeading]}>Fiche produit</Text>
           </View>
 
-          <Pressable
-            onPress={editing ? undefined : enterEdit}
-            disabled={editing}
-            hitSlop={4}
-            style={[styles.topBarEditButton, editing && styles.topBarEditButtonActive]}
-            android_ripple={{ color: colors.primaryContainer }}
-            accessibilityRole="button"
-            accessibilityLabel="Modifier la fiche"
-            accessibilityState={{ selected: editing, disabled: editing }}
-          >
-            <MaterialCommunityIcons
-              name={editing ? 'pencil-off-outline' : 'pencil-outline'}
-              size={17}
-              color={colors.primary}
-            />
-            <Text style={[typography.labelLarge, styles.topBarEditText]}>
-              {editing ? 'En cours' : 'Modifier'}
-            </Text>
-          </Pressable>
         </View>
       </View>
 
@@ -841,9 +811,6 @@ export function ArticleDetailScreen() {
                   <Text style={[typography.titleMedium, styles.fieldGroupTitle]}>
                     {group.title}
                   </Text>
-                  <Text style={[typography.labelSmall, styles.fieldGroupCount]}>
-                    {group.fields.length}
-                  </Text>
                 </View>
                 <View style={styles.fieldsCard}>
                   {group.fields.map((field, index) => (
@@ -977,26 +944,6 @@ const styles = StyleSheet.create({
   },
   topBarHeading: {
     color: colors.onSurface,
-  },
-  topBarEditButton: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.xs,
-    paddingHorizontal: spacing.md,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.outlineVariant,
-    backgroundColor: colors.surface,
-    overflow: 'hidden',
-  },
-  topBarEditButtonActive: {
-    backgroundColor: colors.primaryContainer,
-    borderColor: colors.primaryContainer,
-  },
-  topBarEditText: {
-    color: colors.primary,
   },
   contentCard: {
     flex: 1,
@@ -1268,11 +1215,6 @@ const styles = StyleSheet.create({
   fieldGroupTitle: {
     flex: 1,
     color: colors.onSurface,
-  },
-  fieldGroupCount: {
-    color: colors.onSurfaceVariant,
-    minWidth: 24,
-    textAlign: 'center',
   },
   fieldsCard: {
     backgroundColor: colors.surface,
