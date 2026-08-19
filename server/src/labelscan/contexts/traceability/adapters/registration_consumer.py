@@ -26,6 +26,7 @@ from labelscan.contexts.traceability.domain.consistency import (
 from labelscan.platform.db.audit_context import set_audit_context
 
 SYSTEM_ACTOR = "00000000-0000-0000-0000-000000000001"
+NOT_COMMUNICATED = "NC"
 
 
 def _to_date(s: str | None) -> date | None:
@@ -37,6 +38,12 @@ def _to_date(s: str | None) -> date | None:
         # malformed date string (ValueError) or non-string value (TypeError) —
         # treat as "no date" rather than crashing the consumer.
         return None
+
+
+def _to_production_method(value: str | None) -> str | None:
+    """Map the review-level ``NC`` marker to the nullable registry column."""
+
+    return None if value == NOT_COMMUNICATED else value
 
 
 class RegistrationConsumer:
@@ -92,7 +99,9 @@ class RegistrationConsumer:
         # automatic run or a partial contract. ``NC`` is a real, explicit value.
         if not field_rows or any(row["source"] != "human" for row in field_rows):
             return
-        if any(not isinstance(value, str) or not value.strip() for value in vals.values()):
+        if any(
+            not isinstance(value, str) or not value.strip() for value in vals.values()
+        ):
             return
         expected_fields = set(
             trade_profile(
@@ -300,7 +309,7 @@ class RegistrationConsumer:
                 "store": tenant["store_code"],
                 "sci": c.scientific_name,
                 "fao": c.fao_area,
-                "pm": c.production_method,
+                "pm": _to_production_method(c.production_method),
                 "ub": c.use_by,
                 "pkg": c.packaging_date,
                 "iid": ingestion_id,
@@ -377,7 +386,7 @@ class RegistrationConsumer:
                 "store": tenant["store_code"],
                 "sci": c.scientific_name,
                 "fao": c.fao_area,
-                "pm": c.production_method,
+                "pm": _to_production_method(c.production_method),
                 "ub": c.use_by,
                 "pkg": c.packaging_date,
                 "iid": ingestion_id,
