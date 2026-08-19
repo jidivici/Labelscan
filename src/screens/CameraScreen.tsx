@@ -59,7 +59,7 @@ import { enqueueScan } from '../services/scanQueue';
 import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
 import { computeFrameCrop } from '../services/frameCrop';
-import { physicalQuarterTurnForCapturedCrop } from '../services/captureOrientation';
+import { physicalRotationForLandscapeOutput } from '../services/captureOrientation';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
@@ -168,6 +168,8 @@ export function CameraScreen() {
         // UPRIGHT image matching the portrait preview. skipProcessing:true returned an
         // unrotated buffer on Android, which made computeFrameCrop crop the wrong region.
         skipProcessing: false,
+        // Back-camera captures must never inherit a mirrored preview transform.
+        mirror: false,
       });
     } catch (err) {
       console.error('Capture error:', err);
@@ -232,71 +234,79 @@ export function CameraScreen() {
             });
             throw new Error('The visible frame could not be mapped to the captured photo');
           }
-          const srcW = crop.width;
-          const srcH = crop.height;
-          // Rotate the cropped pixels themselves before the image enters the queue.
-          // The app stays in portrait; this only normalizes the saved JPEG so OCR,
-          // the review card and the manager all see the same upright photo.
-          // Decide from the actual crop and source buffer after EXIF normalization.
-          // A landscape sensor buffer in the portrait preview needs the same
-          // quarter-turn as that preview, even when the mapped crop is landscape.
-          // Bake that turn into the JPEG before it reaches OCR and the
-          // "À contrôler" screen. Display components then keep a 0° base.
-          const physicalRotationDegrees = physicalQuarterTurnForCapturedCrop(
-            srcW,
-            srcH,
-            normalizedImage.width,
-            normalizedImage.height,
-            screenWidth,
-            screenHeight,
-            previewQuarterTurn,
-          );
-          const outputWidth = physicalRotationDegrees ? srcH : srcW;
-          const outputHeight = physicalRotationDegrees ? srcW : srcH;
-          const resize =
-            outputWidth >= outputHeight
+          // Materialize the crop first. Start a fresh native manipulation context
+          // from those cropped pixels so orientation is decided from the actual
+          // post-crop geometry, never from the sensor or preview dimensions.
+          const cropContext = ImageManipulator.ImageManipulator.manipulate(normalizedImage);
+          cropContext.crop(crop);
+          const croppedImage = await cropContext.renderAsync();
+          try {
+            const physicalRotationDegrees = physicalRotationForLandscapeOutput(
+              croppedImage.width,
+              croppedImage.height,
+            );
+            const outputWidth = physicalRotationDegrees === 0
+              ? croppedImage.width
+              : croppedImage.height;
+            const outputHeight = physicalRotationDegrees === 0
+              ? croppedImage.height
+              : croppedImage.width;
+            const resize = outputWidth >= outputHeight
               ? { width: Math.min(outputWidth, 1600) }
               : { height: Math.min(outputHeight, 1600) };
 
-          const outputContext = ImageManipulator.ImageManipulator.manipulate(normalizedImage);
-          outputContext.crop(crop);
-          if (physicalRotationDegrees) outputContext.rotate(physicalRotationDegrees);
-          outputContext.resize(resize);
-          const outputImage = await outputContext.renderAsync();
-          let out: Awaited<ReturnType<typeof outputImage.saveAsync>>;
-          try {
-            out = await outputImage.saveAsync({
-              compress: 0.8,
-              format: ImageManipulator.SaveFormat.JPEG,
-            });
+            const rotationContext = ImageManipulator.ImageManipulator.manipulate(croppedImage);
+            if (physicalRotationDegrees !== 0) {
+              rotationContext.rotate(physicalRotationDegrees);
+            }
+            rotationContext.resize(resize);
+            const outputImage = await rotationContext.renderAsync();
+            let out: Awaited<ReturnType<typeof outputImage.saveAsync>>;
+            try {
+              if (outputImage.height > outputImage.width) {
+                throw new Error(
+                  `Post-crop photo is not landscape: ${outputImage.width}x${outputImage.height}`,
+                );
+              }
+              out = await outputImage.saveAsync({
+                compress: 0.8,
+                format: ImageManipulator.SaveFormat.JPEG,
+              });
+
+              logLatency('capture_geometry', {
+                source: `${capturedPhoto.width}x${capturedPhoto.height}`,
+                normalized: `${normalizedImage.width}x${normalizedImage.height}`,
+                crop: `${crop.originX},${crop.originY},${crop.width}x${crop.height}`,
+                cropped: `${croppedImage.width}x${croppedImage.height}`,
+                output: `${outputImage.width}x${outputImage.height}`,
+                orientation: orientationAtShutter,
+                preview_turn: previewQuarterTurn,
+                physical_rotation: String(physicalRotationDegrees),
+                mirrored: 'false',
+              });
+
+              // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
+              const scan = await enqueueScan({
+                id: scanId,
+                tempUri: out.uri,
+                barcodeRaw,
+                capturedAt,
+                tradeCode: businessProfile.code,
+                businessPortalId: businessPortalId ?? undefined,
+                photoBaseRotationDegrees: 0,
+              });
+              logLatency('capture', { framed: 'true' });
+              // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
+              // fell back to this exact uri (then it's the scan's only copy; keep it).
+              if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
+            } finally {
+              outputImage.release();
+              rotationContext.release();
+            }
           } finally {
-            outputImage.release();
-            outputContext.release();
+            croppedImage.release();
+            cropContext.release();
           }
-
-          logLatency('capture_geometry', {
-            source: `${capturedPhoto.width}x${capturedPhoto.height}`,
-            normalized: `${normalizedImage.width}x${normalizedImage.height}`,
-            crop: `${crop.originX},${crop.originY},${crop.width}x${crop.height}`,
-            orientation: orientationAtShutter,
-            preview_turn: previewQuarterTurn,
-            physical_rotation: String(physicalRotationDegrees),
-          });
-
-          // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
-          const scan = await enqueueScan({
-            id: scanId,
-            tempUri: out.uri,
-            barcodeRaw,
-            capturedAt,
-            tradeCode: businessProfile.code,
-            businessPortalId: businessPortalId ?? undefined,
-            photoBaseRotationDegrees: 0,
-          });
-          logLatency('capture', { framed: 'true' });
-          // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
-          // fell back to this exact uri (then it's the scan's only copy; keep it).
-          if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
         } finally {
           normalizedImage.release();
           normalizeContext.release();
@@ -400,6 +410,7 @@ export function CameraScreen() {
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
           facing="back"
+          mirror={false}
           // Keep the application UI portrait while letting the native iOS camera
           // use the phone's *physical* orientation for the captured pixels. This
           // is essential when the operator holds the phone landscape: the source
