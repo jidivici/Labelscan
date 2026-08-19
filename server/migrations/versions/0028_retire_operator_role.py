@@ -6,7 +6,6 @@ Revises: 0027_manager_portal
 
 from alembic import op
 
-
 revision = "0028_retire_operator_role"
 down_revision = "0027_manager_portal"
 branch_labels = None

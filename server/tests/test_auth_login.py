@@ -33,7 +33,7 @@ from labelscan.contexts.identity.application.sessions import (
 )
 from labelscan.contexts.identity.domain.password import hash_password
 from labelscan.contexts.identity.domain.user import (
-    OPERATOR_SCOPES,
+    MANAGER_SCOPES,
     AuthenticatedUser,
 )
 from labelscan.platform.db.audit_context import set_audit_context
@@ -199,15 +199,15 @@ def test_concurrent_refresh_detects_replay_and_revokes_winner(client, admin, eng
     assert service.family_is_active(winners[0].family_id, ACTOR_ID) is False
 
 
-def _mobile_operator(*, portal_count: int = 1, role: str = "operator") -> AuthenticatedUser:
+def _mobile_manager(*, portal_count: int = 1) -> AuthenticatedUser:
     store_id = str(uuid.uuid4())
     portal_ids = tuple(str(uuid.uuid4()) for _ in range(portal_count))
     return AuthenticatedUser(
         actor_id=str(uuid.uuid4()),
-        username=f"mobile-operator-{portal_count}",
-        display_name="Mobile Operator",
-        role=role,
-        scopes=OPERATOR_SCOPES,
+        username=f"mobile-manager-{portal_count}",
+        display_name="Mobile Manager",
+        role="manager",
+        scopes=MANAGER_SCOPES,
         store_code="PARIS-01",
         organization_id=str(uuid.uuid4()),
         organization_slug="labelscan",
@@ -238,29 +238,29 @@ class _MobileSessions:
         self.revoked_token = token
 
 
-def test_mobile_login_accepts_a_store_operator():
-    operator = _mobile_operator()
-    sessions = _MobileSessions(operator)
+def test_mobile_login_accepts_an_assigned_manager():
+    manager = _mobile_manager()
+    sessions = _MobileSessions(manager)
     app = create_app()
     app.dependency_overrides[get_login] = lambda: (
-        lambda username, password, organization_slug: operator
+        lambda username, password, organization_slug: manager
     )
     app.dependency_overrides[get_session_service] = lambda: sessions
     response = TestClient(app).post(
         "/v1/mobile/auth/login",
-        json={"username": operator.username, "password": "secret"},
+        json={"username": manager.username, "password": "secret"},
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["user"]["role"] == "operator"
+    assert body["user"]["role"] == "manager"
     assert body["user"]["store_code"] == "PARIS-01"
     assert body["refresh_token"] == "r" * 43
     assert body["refresh_expires_in"] == 604800
     assert sessions.created is True
 
-
-def test_mobile_login_accepts_an_assigned_manager():
-    manager = _mobile_operator(role="manager")
+@pytest.mark.parametrize("portal_count", [0, 2])
+def test_mobile_login_rejects_a_manager_without_exactly_one_portal(portal_count):
+    manager = _mobile_manager(portal_count=portal_count)
     sessions = _MobileSessions(manager)
     app = create_app()
     app.dependency_overrides[get_login] = lambda: (
@@ -273,33 +273,14 @@ def test_mobile_login_accepts_an_assigned_manager():
         json={"username": manager.username, "password": "secret"},
     )
 
-    assert response.status_code == 200
-    assert response.json()["user"]["role"] == "manager"
-
-
-@pytest.mark.parametrize("portal_count", [0, 2])
-def test_mobile_login_rejects_an_operator_without_exactly_one_portal(portal_count):
-    operator = _mobile_operator(portal_count=portal_count)
-    sessions = _MobileSessions(operator)
-    app = create_app()
-    app.dependency_overrides[get_login] = lambda: (
-        lambda username, password, organization_slug: operator
-    )
-    app.dependency_overrides[get_session_service] = lambda: sessions
-
-    response = TestClient(app).post(
-        "/v1/mobile/auth/login",
-        json={"username": operator.username, "password": "secret"},
-    )
-
     assert response.status_code == 403
     assert response.json()["error_code"] == "FORBIDDEN"
     assert sessions.created is False
 
 
-def test_mobile_refresh_revokes_an_operator_session_without_one_active_portal():
-    operator = _mobile_operator(portal_count=0)
-    sessions = _MobileSessions(operator)
+def test_mobile_refresh_revokes_a_manager_session_without_one_active_portal():
+    manager = _mobile_manager(portal_count=0)
+    sessions = _MobileSessions(manager)
     app = create_app()
     app.dependency_overrides[get_session_service] = lambda: sessions
 
@@ -313,13 +294,13 @@ def test_mobile_refresh_revokes_an_operator_session_without_one_active_portal():
     assert sessions.revoked_token == "n" * 43
 
 
-def test_browser_login_accepts_a_store_operator():
-    operator = AuthenticatedUser(
+def test_browser_login_accepts_a_store_manager():
+    manager = AuthenticatedUser(
         actor_id=str(uuid.uuid4()),
-        username="browser-operator",
-        display_name="Browser Operator",
-        role="operator",
-        scopes=OPERATOR_SCOPES,
+        username="browser-manager",
+        display_name="Browser Manager",
+        role="manager",
+        scopes=MANAGER_SCOPES,
         store_code="PARIS-01",
         organization_id=str(uuid.uuid4()),
         organization_slug="labelscan",
@@ -328,15 +309,15 @@ def test_browser_login_accepts_a_store_operator():
     )
     app = create_app()
     app.dependency_overrides[get_login] = lambda: (
-        lambda username, password, organization_slug: operator
+        lambda username, password, organization_slug: manager
     )
-    app.dependency_overrides[get_session_service] = lambda: _MobileSessions(operator)
+    app.dependency_overrides[get_session_service] = lambda: _MobileSessions(manager)
     response = TestClient(app).post(
         "/v1/auth/login",
-        json={"username": operator.username, "password": "secret"},
+        json={"username": manager.username, "password": "secret"},
     )
     assert response.status_code == 200
-    assert response.json()["user"]["role"] == "operator"
+    assert response.json()["user"]["role"] == "manager"
 
 
 def test_browser_refresh_token_cannot_be_used_on_mobile(client, admin):

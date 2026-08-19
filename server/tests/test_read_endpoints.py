@@ -29,6 +29,7 @@ from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.http.deps import get_engine
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import FakeLlm, FakeOcr, traceable_fields
+from tests._review import finalize_poissonnerie
 from tests.conftest import ACTOR_ID, bearer, jpeg_bytes
 
 RULES = RuleSet(
@@ -85,13 +86,13 @@ READ_OCR = (
 READ_FIELDS = traceable_fields(lot="READLOT", supplier="Read Supplier Co")
 
 
-def _full_worker(engine, raw_store):
+def _full_worker(engine, raw_store, *, lot: str):
     w = OutboxWorker(engine)
     ext = ExtractionConsumer(
         engine=engine,
         raw_store=raw_store,
-        ocr=FakeOcr(READ_OCR),
-        llm=FakeLlm(READ_FIELDS),
+        ocr=FakeOcr(READ_OCR.replace("READLOT", lot)),
+        llm=FakeLlm(traceable_fields(lot=lot, supplier="Read Supplier Co")),
         rule_set=RULES,
     )
     w.register(ext.event_type, ext.consumer_name, ext)
@@ -117,6 +118,20 @@ def _extraction_only_worker(engine, raw_store):
     return w
 
 
+def _publication_worker(engine):
+    worker = OutboxWorker(engine)
+    registration = RegistrationConsumer(engine=engine)
+    worker.register(
+        registration.review_event_type,
+        registration.consumer_name,
+        registration,
+    )
+    alerts = AlertingConsumer(engine=engine, today=lambda: date(2026, 6, 18))
+    for event_type in alerts.event_types:
+        worker.register(event_type, alerts.consumer_name, alerts)
+    return worker
+
+
 @pytest.fixture
 def seeded(client, engine, raw_store):
     """Create one ingestion, run extraction+traceability+haccp, then a 2nd
@@ -125,11 +140,25 @@ def seeded(client, engine, raw_store):
     _quiesce(engine)
     r = client.post(
         "/v1/ingestions",
-        files={"image": ("l.jpg", jpeg_bytes(b"read-endpoints-1"), "image/jpeg")},
-        headers={"Idempotency-Key": "rk", **AUTH},
+        files={
+            "image": (
+                "l.jpg",
+                jpeg_bytes(f"read-endpoints-{uuid.uuid4()}".encode()),
+                "image/jpeg",
+            )
+        },
+        headers={"Idempotency-Key": f"rk-{uuid.uuid4()}", **AUTH},
     )
     ingestion_id = r.json()["ingestion_id"]
-    _full_worker(engine, raw_store).run_once()
+    lot = f"READ-{uuid.uuid4().hex[:12].upper()}"
+    _full_worker(engine, raw_store, lot=lot).run_once()
+    finalize_poissonnerie(
+        engine,
+        ingestion_id,
+        lot=lot,
+        supplier="Read Supplier Co",
+    )
+    _publication_worker(engine).run_once()
 
     # second extraction run for the same ingestion (append-only; new attempt)
     with engine.begin() as c:
@@ -151,9 +180,10 @@ def test_get_ingestion_shows_all_runs_and_audit(client, seeded):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] in ("extracted", "needs_review", "raw_stored")
-    # append-only: BOTH extraction runs are returned, exactly one marked latest
-    assert len(body["extraction_runs"]) == 2
-    assert sorted(x["attempt_no"] for x in body["extraction_runs"]) == [1, 2]
+    # Append-only: automated extraction, human final review and re-extraction are
+    # all retained, with exactly one run marked latest.
+    assert len(body["extraction_runs"]) == 3
+    assert sorted(x["attempt_no"] for x in body["extraction_runs"]) == [1, 2, 3]
     assert sum(1 for x in body["extraction_runs"] if x["is_latest"]) == 1
     # raw image + ocr_json + llm_output stored
     kinds = {a["artifact_kind"] for a in body["raw_artifacts"]}

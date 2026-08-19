@@ -459,7 +459,7 @@ def test_catalog_detail_and_photo_reject_guessed_cross_tenant_ids(engine):
     app.dependency_overrides[get_raw_image_reader] = lambda: _TenantImageReader()
     headers = bearer(
         "catalog:read identity:admin",
-        role="admin",
+        role="super_admin",
         organization_id=tenant_a["organization"],
         organization_slug=tenant_a["slug"],
     )

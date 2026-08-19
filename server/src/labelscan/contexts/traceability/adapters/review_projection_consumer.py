@@ -27,6 +27,7 @@ class ReviewProjectionConsumer:
                 WHERE projection.ingestion_id = :ingestion_id
                   AND projection.organization_id = :organization_id
                   AND projection.business_portal_id IS NOT DISTINCT FROM :business_portal_id
+                  AND projection.extraction_run_id <> :run_id
                 """
             ),
             {

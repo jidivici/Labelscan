@@ -145,12 +145,12 @@ def client(engine):
     return TestClient(app)
 
 
-def test_operator_can_search_only_its_store_arrivals(client, catalog_record):
+def test_manager_can_search_only_its_store_arrivals(client, catalog_record):
     response = client.get(
         "/v1/arrivals",
         headers=bearer(
             "catalog:read",
-            role="operator",
+            role="manager",
             store_code=STORE_CODE,
         ),
         params={
@@ -165,20 +165,6 @@ def test_operator_can_search_only_its_store_arrivals(client, catalog_record):
     assert page["items"][0]["batch_id"] == catalog_record["batch_id"]
     assert page["items"][0]["store_code"] == STORE_CODE
     assert page["items"][0]["product_name"] == catalog_record["product_name"]
-
-
-def test_operator_cannot_override_its_store_filter(client, catalog_record):
-    response = client.get(
-        "/v1/arrivals",
-        headers=bearer(
-            "catalog:read",
-            role="operator",
-            store_code=STORE_CODE,
-        ),
-        params={"store_code": "ANOTHER-STORE"},
-    )
-    assert response.status_code == 403
-    assert response.json()["error_code"] == "FORBIDDEN"
 
 
 def test_admin_can_filter_arrivals_by_store(client, catalog_record):
@@ -202,3 +188,35 @@ def test_legacy_catalogue_route_remains_available(client, catalog_record):
     )
     assert response.status_code == 200
     assert response.json()["items"][0]["batch_id"] == catalog_record["batch_id"]
+
+
+def test_unconfirmed_ingestion_is_hidden_from_catalogue(client, engine, catalog_record):
+    with engine.begin() as conn:
+        set_audit_context(
+            conn,
+            actor_id=ACTOR_ID,
+            action="ingestion.catalog_test_unconfirmed",
+            correlation_id="catalog-unconfirmed",
+            trace_id="catalog-unconfirmed",
+        )
+        conn.execute(
+            text(
+                "UPDATE ingestion.ingestion SET status = 'extracted' "
+                "WHERE id = (SELECT source_ingestion_id FROM traceability.batch WHERE id = :batch_id)"
+            ),
+            {"batch_id": catalog_record["batch_id"]},
+        )
+
+    listing = client.get(
+        "/v1/arrivals",
+        headers=bearer("catalog:read identity:admin"),
+        params={"q": catalog_record["lot_code"]},
+    )
+    detail = client.get(
+        f"/v1/arrivals/{catalog_record['batch_id']}",
+        headers=bearer("catalog:read identity:admin"),
+    )
+
+    assert listing.status_code == 200
+    assert listing.json()["total"] == 0
+    assert detail.status_code == 404

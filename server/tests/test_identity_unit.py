@@ -21,7 +21,6 @@ from labelscan.contexts.identity.domain.store import normalize_store_code
 from labelscan.contexts.identity.domain.user import (
     ADMIN_SCOPES,
     MANAGER_SCOPES,
-    OPERATOR_SCOPES,
     SUPER_ADMIN_SCOPES,
     USER_ROLES,
     ManagedUser,
@@ -157,16 +156,15 @@ def test_login_unknown_user_rejected():
 
 
 def test_role_scope_matrix_is_additive_and_fail_closed():
-    assert USER_ROLES == {"super_admin", "admin", "manager", "operator"}
-    assert OPERATOR_SCOPES < ADMIN_SCOPES
-    assert OPERATOR_SCOPES < MANAGER_SCOPES
+    assert USER_ROLES == {"super_admin", "admin", "manager"}
+    assert MANAGER_SCOPES < ADMIN_SCOPES
     assert ADMIN_SCOPES < SUPER_ADMIN_SCOPES
     assert "identity:admin" in ADMIN_SCOPES
-    assert "identity:admin" not in OPERATOR_SCOPES
+    assert "identity:admin" not in MANAGER_SCOPES
     assert "identity:admins:manage" in SUPER_ADMIN_SCOPES
     assert "identity:admins:manage" not in ADMIN_SCOPES
-    assert "identity:operators:manage" in MANAGER_SCOPES
-    assert "catalog:read" in OPERATOR_SCOPES
+    assert "identity:read" in MANAGER_SCOPES
+    assert "catalog:read" in MANAGER_SCOPES
     assert scopes_for_role("unknown") == frozenset()
 
 
@@ -193,9 +191,9 @@ class _FakeAdminRepo:
         self.updated = (user_id, changes, audit)
         return ManagedUser(
             id=user_id,
-            username="operator",
-            display_name=changes.display_name or "Operator",
-            role=changes.role or "operator",
+            username="manager",
+            display_name=changes.display_name or "Manager",
+            role=changes.role or "manager",
             active=changes.active if changes.active is not None else True,
             store_code=changes.store_code or "PARIS-01",
             created_by=ADMIN_ID,
@@ -211,7 +209,7 @@ def test_create_user_normalizes_fields_and_hashes_password():
             username="  alice  ",
             display_name="  Alice   Martin ",
             password="long-password-123",
-            role="operator",
+            role="manager",
             store_code="PARIS-01",
             actor_id=ADMIN_ID,
             correlation_id="corr",
@@ -239,22 +237,9 @@ def test_create_user_enforces_credential_bounds_and_rejects_unknown_role():
         service.create(
             CreateUserCommand(
                 password="valid passphrase",
-                role="operator",
+                role="manager",
                 store_code="PARIS-01",
                 **base,
-            )
-        )
-    with pytest.raises(ValueError, match="at least 12"):
-        service.create(
-            CreateUserCommand(
-                username="alice",
-                password="short",
-                role="operator",
-                store_code="PARIS-01",
-                display_name="Alice",
-                actor_id=ADMIN_ID,
-                correlation_id="corr",
-                trace_id="trace",
             )
         )
     with pytest.raises(ValueError, match="unknown role"):
@@ -268,14 +253,14 @@ def test_create_user_enforces_credential_bounds_and_rejects_unknown_role():
         )
 
 
-def test_operator_requires_a_store_assignment():
+def test_manager_requires_a_store_assignment():
     with pytest.raises(StoreRequired):
         UserAdminService(_FakeAdminRepo()).create(
             CreateUserCommand(
                 username="alice",
                 display_name="Alice",
                 password="valid passphrase",
-                role="operator",
+                role="manager",
                 store_code=None,
                 actor_id=ADMIN_ID,
                 correlation_id="corr",

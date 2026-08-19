@@ -2,7 +2,7 @@
 
 Wires all consumers onto the outbox relay:
   ingestion.raw_stored   -> ExtractionConsumer (OCR -> LLM -> domain gate -> persist)
-  extraction.completed   -> RegistrationConsumer (traceability)
+  review.finalized       -> RegistrationConsumer (traceability catalogue publication)
   batch.registered/flagged -> AlertingConsumer (HACCP)
 
 The app layer is the only place producers, the relay, and consumers are wired

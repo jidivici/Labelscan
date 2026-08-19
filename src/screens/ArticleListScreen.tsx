@@ -41,6 +41,7 @@ import { useCatalogArticles } from '../services/catalogApi';
 import { exportAsJSON, exportAsCSV } from '../services/export';
 import { useArticleSearch } from '../hooks/useArticleSearch';
 import { useScanQueue } from '../hooks/useScanQueue';
+import { sortPendingScansNewestFirst } from '../services/pendingScanOrder';
 import { discardScan, retryScan, type PendingScan } from '../services/scanQueue';
 import {
   filledCountFromInterim,
@@ -93,12 +94,15 @@ export function ArticleListScreen() {
   const { scans: pendingScans, results: scanResults, interim: scanInterim } = useScanQueue();
   const visiblePendingScans = useMemo(
     () =>
-      pendingScans.filter(
-        (scan) => !scan.businessPortalId || scan.businessPortalId === businessPortalId,
+      sortPendingScansNewestFirst(
+        pendingScans.filter(
+          (scan) => !scan.businessPortalId || scan.businessPortalId === businessPortalId,
+        ),
       ),
     [businessPortalId, pendingScans],
   );
   const [listHeaderHeight, setListHeaderHeight] = useState(0);
+  const [pendingSectionCollapsed, setPendingSectionCollapsed] = useState(false);
   // At most one in-progress scan may expose its destructive action. Starting a
   // swipe on another scan changes ownership; the previous card observes the change
   // and animates back to its resting position.
@@ -132,6 +136,10 @@ export function ArticleListScreen() {
   const handlePendingSwipeClose = useCallback((id: string) => {
     setOpenPendingSwipeId((current) => (current === id ? null : current));
   }, []);
+  const togglePendingSection = useCallback(() => {
+    setOpenPendingSwipeId(null);
+    setPendingSectionCollapsed((collapsed) => !collapsed);
+  }, []);
 
   // List header: "En cours" scans (day-independent — active work is always visible),
   // then the discreet label of the day currently scoping the articles below. Always
@@ -140,11 +148,24 @@ export function ArticleListScreen() {
     return (
       <View onLayout={handleListHeaderLayout}>
         {visiblePendingScans.length > 0 && (
-          <Text style={[typography.titleLarge, styles.pendingTitle]}>
-            {`En cours (${visiblePendingScans.length})`}
-          </Text>
+          <Pressable
+            onPress={togglePendingSection}
+            style={styles.pendingHeader}
+            accessibilityRole="button"
+            accessibilityLabel={`${pendingSectionCollapsed ? 'Afficher' : 'Masquer'} les arrivages à contrôler`}
+            accessibilityState={{ expanded: !pendingSectionCollapsed }}
+          >
+            <Text style={[typography.titleLarge, styles.pendingTitle]}>
+              {`En cours (${visiblePendingScans.length})`}
+            </Text>
+            <MaterialCommunityIcons
+              name={pendingSectionCollapsed ? 'chevron-down' : 'chevron-up'}
+              size={24}
+              color={colors.onSurfaceVariant}
+            />
+          </Pressable>
         )}
-        {visiblePendingScans.map((scan) => {
+        {!pendingSectionCollapsed && visiblePendingScans.map((scan) => {
           // /17 score + name-known probe: prefer the FINAL run when ready, else the
           // Tier-3 interim preview (while extracting); submitting scans show 0/17.
           // The scan's persisted review draft (edits) OVERLAYS both, so the gauge
@@ -218,6 +239,8 @@ export function ArticleListScreen() {
     openPendingSwipeId,
     handlePendingSwipeStart,
     handlePendingSwipeClose,
+    pendingSectionCollapsed,
+    togglePendingSection,
     tradeCode,
   ]);
 
@@ -684,11 +707,17 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     paddingTop: spacing.md,
   },
-  pendingTitle: {
-    color: colors.onSurface,
+  pendingHeader: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginHorizontal: spacing.lg,
     marginTop: spacing.xs,
     marginBottom: spacing.md,
+  },
+  pendingTitle: {
+    color: colors.onSurface,
   },
   todayButton: {
     flexDirection: 'row',

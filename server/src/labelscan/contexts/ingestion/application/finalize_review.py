@@ -14,6 +14,7 @@ from labelscan.contexts.ingestion.application.ports import (
 from labelscan.platform.http.access import AccessContext
 
 FINAL_REVIEW_FIELDS: tuple[str, ...] = trade_profile("poissonnerie").fields
+NOT_COMMUNICATED = "NC"
 
 assert set(FINAL_REVIEW_FIELDS).issubset(FIELD_NAMES)
 
@@ -37,6 +38,14 @@ class InvalidReviewFields(Exception):
         self.missing = missing
         self.extra = extra
         super().__init__("invalid final review field set")
+
+
+class IncompleteReviewFields(Exception):
+    """The operator attempted to validate one or more empty values."""
+
+    def __init__(self, fields: set[str]) -> None:
+        self.fields = fields
+        super().__init__("final review contains empty values")
 
 
 class ReviewIdempotencyConflict(Exception):
@@ -81,10 +90,16 @@ class FinalizeReview:
                 missing=expected - submitted,
                 extra=submitted - expected,
             )
-        normalized = {
-            name: (value.strip() if isinstance(value, str) and value.strip() else None)
-            for name, value in command.fields.items()
-        }
+        normalized: dict[str, str] = {}
+        incomplete: set[str] = set()
+        for name, value in command.fields.items():
+            stripped = value.strip() if isinstance(value, str) else ""
+            if not stripped:
+                incomplete.add(name)
+                continue
+            normalized[name] = NOT_COMMUNICATED if stripped.upper() == NOT_COMMUNICATED else stripped
+        if incomplete:
+            raise IncompleteReviewFields(incomplete)
         result = self._repository.finalize(
             ingestion_id=command.ingestion_id,
             organization_id=command.organization_id,
