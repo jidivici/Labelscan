@@ -140,8 +140,14 @@ def seeded(client, engine, raw_store):
     _quiesce(engine)
     r = client.post(
         "/v1/ingestions",
-        files={"image": ("l.jpg", jpeg_bytes(b"read-endpoints-1"), "image/jpeg")},
-        headers={"Idempotency-Key": "rk", **AUTH},
+        files={
+            "image": (
+                "l.jpg",
+                jpeg_bytes(f"read-endpoints-{uuid.uuid4()}".encode()),
+                "image/jpeg",
+            )
+        },
+        headers={"Idempotency-Key": f"rk-{uuid.uuid4()}", **AUTH},
     )
     ingestion_id = r.json()["ingestion_id"]
     _full_worker(engine, raw_store).run_once()
@@ -173,9 +179,10 @@ def test_get_ingestion_shows_all_runs_and_audit(client, seeded):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] in ("extracted", "needs_review", "raw_stored")
-    # append-only: BOTH extraction runs are returned, exactly one marked latest
-    assert len(body["extraction_runs"]) == 2
-    assert sorted(x["attempt_no"] for x in body["extraction_runs"]) == [1, 2]
+    # Append-only: automated extraction, human final review and re-extraction are
+    # all retained, with exactly one run marked latest.
+    assert len(body["extraction_runs"]) == 3
+    assert sorted(x["attempt_no"] for x in body["extraction_runs"]) == [1, 2, 3]
     assert sum(1 for x in body["extraction_runs"] if x["is_latest"]) == 1
     # raw image + ocr_json + llm_output stored
     kinds = {a["artifact_kind"] for a in body["raw_artifacts"]}

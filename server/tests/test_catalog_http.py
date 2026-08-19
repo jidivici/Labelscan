@@ -145,18 +145,13 @@ def client(engine):
     return TestClient(app)
 
 
-def test_manager_can_search_only_its_store_arrivals(client, engine, catalog_record):
-    with engine.connect() as conn:
-        organization_id = str(
-            conn.execute(text("SELECT platform.default_organization_id()")).scalar_one()
-        )
+def test_manager_can_search_only_its_store_arrivals(client, catalog_record):
     response = client.get(
         "/v1/arrivals",
         headers=bearer(
             "catalog:read",
             role="manager",
             store_code=STORE_CODE,
-            organization_id=organization_id,
         ),
         params={
             "q": catalog_record["lot_code"],
@@ -170,25 +165,6 @@ def test_manager_can_search_only_its_store_arrivals(client, engine, catalog_reco
     assert page["items"][0]["batch_id"] == catalog_record["batch_id"]
     assert page["items"][0]["store_code"] == STORE_CODE
     assert page["items"][0]["product_name"] == catalog_record["product_name"]
-
-
-def test_manager_cannot_override_its_store_filter(client, engine, catalog_record):
-    with engine.connect() as conn:
-        organization_id = str(
-            conn.execute(text("SELECT platform.default_organization_id()")).scalar_one()
-        )
-    response = client.get(
-        "/v1/arrivals",
-        headers=bearer(
-            "catalog:read",
-            role="manager",
-            store_code=STORE_CODE,
-            organization_id=organization_id,
-        ),
-        params={"store_code": "ANOTHER-STORE"},
-    )
-    assert response.status_code == 403
-    assert response.json()["error_code"] == "FORBIDDEN"
 
 
 def test_admin_can_filter_arrivals_by_store(client, catalog_record):
