@@ -27,10 +27,7 @@ function paginationItems(currentPage: number, totalPages: number): Array<number 
 function ArrivalPagination({ page, total, onChange }: { page: number; total: number; onChange: (page: number) => void }) {
   const pageCount = Math.max(1, Math.ceil(total / ARRIVAL_PAGE_SIZE));
   if (total <= ARRIVAL_PAGE_SIZE) return null;
-  const first = ((page - 1) * ARRIVAL_PAGE_SIZE) + 1;
-  const last = Math.min(page * ARRIVAL_PAGE_SIZE, total);
   return <nav className="pagination hb-pagination" aria-label="Pagination">
-    <span className="pagination-summary">{first}–{last} sur {total}</span>
     <span className="pagination-controls">
       <button type="button" className="pagination-button pagination-arrow" disabled={page <= 1} onClick={() => onChange(page - 1)} aria-label="Page précédente">‹</button>
       {paginationItems(page, pageCount).map((item, index) => item === 'ellipsis'
