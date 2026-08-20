@@ -7,7 +7,7 @@ readonly COMPOSE_FILE="${APP_ROOT}/config/compose.yml"
 readonly REPOSITORY_COMPOSE="deploy/compose/single-vps.yml"
 readonly BACKUP_ROOT="${APP_ROOT}/backups"
 readonly SECRETS_ROOT="${APP_ROOT}/secrets"
-readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v3"
+readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v4"
 readonly DEMO_CREDENTIALS_MARKER="${APP_ROOT}/.demo-credentials-secured"
 readonly JWT_ROTATION_MARKER="${APP_ROOT}/.jwt-secret-v2"
 readonly LOCK_FILE="/var/lock/labelscan-deploy.lock"
@@ -159,6 +159,8 @@ prepare_database_roles() {
     "ALTER ROLE labelscan_db_admin WITH LOGIN SUPERUSER CREATEDB CREATEROLE INHERIT NOREPLICATION BYPASSRLS PASSWORD '${admin_password}';" \
     'REVOKE labelscan_db_admin FROM labelscan_app;' \
     "DO \$bootstrap\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'labelscan_db_admin_retired_v2') THEN EXECUTE 'REVOKE labelscan_db_admin_retired_v2 FROM labelscan_app'; END IF; END \$bootstrap\$;" \
+    "SELECT format('REVOKE %I FROM labelscan_app;', granted_role.rolname) FROM pg_auth_members membership JOIN pg_roles granted_role ON granted_role.oid = membership.roleid JOIN pg_roles member_role ON member_role.oid = membership.member WHERE member_role.rolname = 'labelscan_app';" \
+    '\gexec' \
     'ALTER DATABASE labelscan OWNER TO labelscan_db_admin;' \
     "SELECT format('ALTER TABLE %I.%I OWNER TO labelscan_db_admin;', namespace.nspname, object.relname) FROM pg_class object JOIN pg_namespace namespace ON namespace.oid = object.relnamespace JOIN pg_roles owner ON owner.oid = object.relowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2') AND object.relkind IN ('r', 'p');" \
     '\gexec' \

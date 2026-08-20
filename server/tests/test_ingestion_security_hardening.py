@@ -127,10 +127,11 @@ def test_vps_bootstrap_separates_runtime_from_database_owner() -> None:
         Path(__file__).resolve().parents[2] / "deploy" / "hostinger" / "deploy.sh"
     ).read_text(encoding="utf-8")
 
-    assert 'DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v3"' in deploy_script
+    assert 'DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v4"' in deploy_script
     assert "SELECT CASE WHEN oid = 10 THEN 1 ELSE 0 END" in deploy_script
     assert "ALTER ROLE labelscan_app RENAME TO labelscan_db_admin;" in deploy_script
     assert "REVOKE labelscan_db_admin FROM labelscan_app;" in deploy_script
+    assert "FROM pg_auth_members membership" in deploy_script
     assert "psql -U labelscan_db_admin -d labelscan" in deploy_script
     assert 'up -d --no-deps db' in deploy_script
 
