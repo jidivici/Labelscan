@@ -257,7 +257,7 @@ def test_deleted_manager_is_hidden_but_keeps_identity_and_username_is_reusable(
     assert recreated.json()["id"] != deleted_id
 
 
-def test_manager_can_use_a_simple_password_and_login_on_mobile(iam_v2):
+def test_manager_password_requires_at_least_twelve_characters(iam_v2):
     client, ids, organization_id, prefix = iam_v2
     response = client.post(
         "/v1/managers",
@@ -271,13 +271,8 @@ def test_manager_can_use_a_simple_password_and_login_on_mobile(iam_v2):
             "business_portal_ids": [ids["portal"]],
         },
     )
-    assert response.status_code == 201
-    login = client.post(
-        "/v1/mobile/auth/login",
-        json={"username": response.json()["username"], "password": "x"},
-    )
-    assert login.status_code == 200
-    assert login.json()["user"]["role"] == "manager"
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
 
 
 def test_old_activation_routes_are_absent(iam_v2):
@@ -317,14 +312,17 @@ def test_admin_and_manager_change_own_password_with_current_password(iam_v2):
         headers=manager_headers,
         json={
             "current_password": "manager-password-123",
-            "new_password": "manager2",
+            "new_password": "manager2-secure",
         },
     )
     assert manager_changed.status_code == 200
     assert (
         client.post(
             "/v1/mobile/auth/login",
-            json={"username": manager["username"], "password": "manager2"},
+            json={
+                "username": manager["username"],
+                "password": "manager2-secure",
+            },
         ).status_code
         == 200
     )

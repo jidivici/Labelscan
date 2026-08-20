@@ -29,17 +29,7 @@ ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
     "STORE_IN_USE": (409, "Store still has active users", False),
     "STORE_NOT_FOUND": (400, "Store code does not exist", False),
     "STORE_INACTIVE": (409, "Store is disabled", False),
-    "STORE_REQUIRED": (400, "Operator store assignment is required", False),
-    "LAST_ACTIVE_ADMIN": (
-        409,
-        "At least one active administrator must remain",
-        False,
-    ),
-    "SELF_ACCESS_CHANGE_NOT_ALLOWED": (
-        409,
-        "Administrators cannot revoke their own access",
-        False,
-    ),
+    "STORE_REQUIRED": (400, "Account store assignment is required", False),
     "IDEMPOTENCY_KEY_CONFLICT": (
         409,
         "Idempotency-Key reused with a different payload",

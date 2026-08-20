@@ -1,5 +1,7 @@
 # LabelScan Security Audit V3 — MVP hardening refresh
 
+> Archivé le 20 août 2026 : photographie du 3 août, remplacée par les preuves de sécurité courantes.
+
 **Date:** 3 August 2026  
 **Branch:** `mvp/security`  
 **Scope:** API, PostgreSQL migrations, Expo SDK 54 mobile client, React/Vite

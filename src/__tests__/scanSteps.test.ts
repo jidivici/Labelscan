@@ -28,6 +28,13 @@ describe('scanStepFromStatus', () => {
     expect(view.openable).toBe(true);
   });
 
+  it('recapture_required: clearly terminal for analysis but opens the recapture guidance', () => {
+    const view = scanStepFromStatus('recapture_required', true);
+    expect(view.steps).toEqual(['done', 'error', 'pending']);
+    expect(view.activeLabel).toBe('Photo à reprendre');
+    expect(view.openable).toBe(true);
+  });
+
   it('submit_error: step 1 errored, never openable', () => {
     const view = scanStepFromStatus('submit_error', false);
     expect(view.steps).toEqual(['error', 'pending', 'pending']);
@@ -47,5 +54,8 @@ describe('scanStepFromStatus', () => {
     expect(scanStepFromStatus('ready', false)).toEqual(scanStepFromStatus('ready', true));
     expect(scanStepFromStatus('submit_error', true)).toEqual(scanStepFromStatus('submit_error', false));
     expect(scanStepFromStatus('extract_error', false)).toEqual(scanStepFromStatus('extract_error', true));
+    expect(scanStepFromStatus('recapture_required', false)).toEqual(
+      scanStepFromStatus('recapture_required', true),
+    );
   });
 });

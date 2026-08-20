@@ -12,11 +12,10 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
-import os
 import threading
 
 from fastapi import APIRouter, Cookie, Depends, Path, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from labelscan.contexts.identity.application.login import InvalidCredentials, Login
 from labelscan.contexts.identity.application.sessions import (
@@ -30,7 +29,7 @@ from labelscan.contexts.identity.domain.user import (
     SUPER_ADMIN_ROLE,
     AuthenticatedUser,
 )
-from labelscan.platform.config import is_production, public_origin
+from labelscan.platform.config import is_production, is_trusted_proxy, public_origin
 from labelscan.platform.http import jwt as jwt_codec
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.rate_limit import LimitExceeded, rate_limits
@@ -39,12 +38,16 @@ from labelscan.platform.observability import get_logger
 router = APIRouter()
 
 
-class LoginRequest(BaseModel):
+class _StrictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class LoginRequest(_StrictRequest):
     username: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=128)
 
 
-class RefreshRequest(BaseModel):
+class RefreshRequest(_StrictRequest):
     refresh_token: str = Field(min_length=32, max_length=256)
 
 
@@ -82,9 +85,7 @@ _SESSIONS_LOCK = threading.Lock()
 _REFRESH_COOKIE = "labelscan_refresh"
 _REFRESH_COOKIE_PATH = "/v1/auth"
 _log = get_logger("http.security")
-_BROWSER_ROLES = frozenset(
-    {SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE}
-)
+_BROWSER_ROLES = frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE, MANAGER_ROLE})
 
 
 def get_login() -> Login:
@@ -125,18 +126,24 @@ def _account_key(organization_slug: str, username: str) -> str:
 
 def _client_ip(request: Request) -> str:
     peer = request.client.host if request.client else "unknown"
-    trusted = {
-        address.strip()
-        for address in (os.environ.get("LABELSCAN_TRUSTED_PROXIES") or "").split(",")
-        if address.strip()
-    }
-    if peer not in trusted:
+    if not is_trusted_proxy(peer):
         return peer
-    forwarded = (request.headers.get("X-Forwarded-For") or "").split(",", 1)[0].strip()
-    try:
-        return str(ipaddress.ip_address(forwarded))
-    except ValueError:
-        return peer
+    forwarded_chain = [
+        item.strip()
+        for value in request.headers.getlist("X-Forwarded-For")
+        for item in value.split(",")
+        if item.strip()
+    ]
+    # Walk from the nearest hop backwards.  This prevents a client-controlled
+    # left-most X-Forwarded-For value from selecting its own rate-limit bucket.
+    for forwarded in reversed(forwarded_chain):
+        try:
+            normalized = str(ipaddress.ip_address(forwarded))
+        except ValueError:
+            continue
+        if not is_trusted_proxy(normalized):
+            return normalized
+    return peer
 
 
 def _rate_limit_error(exc: LimitExceeded) -> ApiError:
@@ -145,6 +152,21 @@ def _rate_limit_error(exc: LimitExceeded) -> ApiError:
         "authentication temporarily rate limited",
         headers={"Retry-After": str(exc.retry_after)},
     )
+
+
+def _check_refresh_rate(request: Request) -> None:
+    try:
+        rate_limits.check_refresh(_client_ip(request))
+    except LimitExceeded as exc:
+        _log.warning(
+            "rate_limited",
+            extra={
+                "rate_limit_scope": exc.scope,
+                "retry_after": exc.retry_after,
+                "path": request.url.path,
+            },
+        )
+        raise _rate_limit_error(exc)
 
 
 def _require_browser_origin(request: Request) -> None:
@@ -368,8 +390,10 @@ def mobile_login(
 @router.post("/v1/mobile/auth/refresh", response_model=MobileLoginResponse)
 def mobile_refresh(
     body: RefreshRequest,
+    request: Request,
     sessions: SessionService = Depends(get_session_service),
 ) -> MobileLoginResponse:
+    _check_refresh_rate(request)
     try:
         session = sessions.rotate(body.refresh_token, "mobile")
     except InvalidRefreshToken:
@@ -383,8 +407,10 @@ def mobile_refresh(
 @router.post("/v1/mobile/auth/logout", status_code=status.HTTP_204_NO_CONTENT)
 def mobile_logout(
     body: RefreshRequest,
+    request: Request,
     sessions: SessionService = Depends(get_session_service),
 ) -> Response:
+    _check_refresh_rate(request)
     sessions.revoke(body.refresh_token)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -397,6 +423,7 @@ def browser_refresh(
     sessions: SessionService = Depends(get_session_service),
 ) -> LoginResponse:
     _require_browser_origin(request)
+    _check_refresh_rate(request)
     try:
         session = sessions.rotate(refresh_token or "", "browser")
     except InvalidRefreshToken:
@@ -418,6 +445,7 @@ def browser_logout(
     sessions: SessionService = Depends(get_session_service),
 ) -> Response:
     _require_browser_origin(request)
+    _check_refresh_rate(request)
     sessions.revoke(refresh_token or "")
     _clear_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT

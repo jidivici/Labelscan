@@ -46,9 +46,7 @@ class RateLimits:
             self._holds_by_actor.clear()
             self._holds_total = 0
 
-    def _window(
-        self, scope: str, key: str, *, limit: int, window_seconds: int
-    ) -> None:
+    def _window(self, scope: str, key: str, *, limit: int, window_seconds: int) -> None:
         now = time.monotonic()
         with self._lock:
             events = self._events[(scope, key)]
@@ -78,7 +76,9 @@ class RateLimits:
         with self._lock:
             blocked_until = self._blocked_until.get(account_key, 0)
             if blocked_until > now:
-                raise LimitExceeded(max(1, int(blocked_until - now) + 1), "login_account")
+                raise LimitExceeded(
+                    max(1, int(blocked_until - now) + 1), "login_account"
+                )
         self._check_window(
             "login_ip",
             client_ip,
@@ -106,7 +106,9 @@ class RateLimits:
             "ingestion_burst",
             actor_id,
             limit=_positive_int("LABELSCAN_INGESTION_BURST_LIMIT", 20),
-            window_seconds=_positive_int("LABELSCAN_INGESTION_BURST_WINDOW_SECONDS", 600),
+            window_seconds=_positive_int(
+                "LABELSCAN_INGESTION_BURST_WINDOW_SECONDS", 600
+            ),
         )
         self._window(
             "ingestion_sustained",
@@ -123,6 +125,16 @@ class RateLimits:
             actor_id,
             limit=_positive_int("LABELSCAN_MUTATION_LIMIT", 600),
             window_seconds=_positive_int("LABELSCAN_MUTATION_WINDOW_SECONDS", 3600),
+        )
+
+    def check_refresh(self, client_ip: str) -> None:
+        """Bound refresh/logout DB work even when the presented token is invalid."""
+
+        self._window(
+            "auth_refresh",
+            client_ip,
+            limit=_positive_int("LABELSCAN_REFRESH_RATE_LIMIT", 30),
+            window_seconds=_positive_int("LABELSCAN_REFRESH_RATE_WINDOW_SECONDS", 60),
         )
 
     def acquire_hold(self, actor_id: str) -> None:

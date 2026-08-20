@@ -1,5 +1,7 @@
 # LabelScan — Script de présentation (10 minutes)
 
+> Archivé le 20 août 2026 : script antérieur au portail multi-métiers actuel.
+
 **Public :** non-technique ou mixte (jury, direction, client).
 **Durée :** 10 minutes · 9 diapos.
 **Objet :** présenter l'application de bout en bout en expliquant tout le jargon.

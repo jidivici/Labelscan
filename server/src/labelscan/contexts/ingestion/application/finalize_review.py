@@ -11,6 +11,10 @@ from labelscan.contexts.ingestion.application.ports import (
     FinalizedReview,
     ReviewRepository,
 )
+from labelscan.contexts.ingestion.domain.input_validation import (
+    validate_human_field_value,
+    validate_note,
+)
 from labelscan.platform.http.access import AccessContext
 
 FINAL_REVIEW_FIELDS: tuple[str, ...] = trade_profile("poissonnerie").fields
@@ -93,18 +97,18 @@ class FinalizeReview:
         normalized: dict[str, str] = {}
         incomplete: set[str] = set()
         for name, value in command.fields.items():
-            stripped = value.strip() if isinstance(value, str) else ""
-            if not stripped:
+            normalized_value = validate_human_field_value(name, value)
+            if normalized_value is None:
                 incomplete.add(name)
                 continue
-            normalized[name] = NOT_COMMUNICATED if stripped.upper() == NOT_COMMUNICATED else stripped
+            normalized[name] = normalized_value
         if incomplete:
             raise IncompleteReviewFields(incomplete)
         result = self._repository.finalize(
             ingestion_id=command.ingestion_id,
             organization_id=command.organization_id,
             fields=normalized,
-            note=command.note,
+            note=validate_note(command.note),
             photo_rotation_degrees=command.photo_rotation_degrees,
             photo_base_rotation_degrees=command.photo_base_rotation_degrees,
             idempotency_key=command.idempotency_key,

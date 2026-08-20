@@ -35,14 +35,28 @@ class _Login:
 
 
 class _Sessions:
+    def __init__(self):
+        self.user = None
+
     def create(self, user, client_type="browser"):
+        self.user = user
         return RefreshSession(str(uuid.uuid4()), "r" * 43, 604800, user, client_type)
+
+    def rotate(self, token, expected_client_type="browser"):
+        assert self.user is not None
+        return RefreshSession(
+            str(uuid.uuid4()), "n" * 43, 604800, self.user, expected_client_type
+        )
+
+    def revoke(self, token):
+        return None
 
 
 def _client() -> TestClient:
     app = create_app()
+    sessions = _Sessions()
     app.dependency_overrides[get_login] = lambda: _Login()
-    app.dependency_overrides[get_session_service] = lambda: _Sessions()
+    app.dependency_overrides[get_session_service] = lambda: sessions
     return TestClient(app)
 
 
@@ -98,6 +112,43 @@ def test_forwarded_ip_is_ignored_for_untrusted_peer(monkeypatch):
     limited = _login(client, "another-account", "wrong", "192.0.2.55")
     assert limited.status_code == 429
     assert limited.json()["error_code"] == "RATE_LIMITED"
+
+
+def test_forwarded_chain_uses_nearest_untrusted_address(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_TRUSTED_PROXIES", "testclient")
+    monkeypatch.setenv("LABELSCAN_LOGIN_RATE_LIMIT", "1")
+    client = _client()
+    first = _login(
+        client,
+        "first-account",
+        "wrong",
+        "192.0.2.10, 198.51.100.77",
+    )
+    assert first.status_code == 401
+
+    # Changing the attacker-controlled left-most value cannot evade the bucket
+    # selected from the nearest untrusted hop on the right.
+    limited = _login(
+        client,
+        "second-account",
+        "wrong",
+        "203.0.113.99, 198.51.100.77",
+    )
+    assert limited.status_code == 429
+    assert limited.json()["error_code"] == "RATE_LIMITED"
+
+
+def test_refresh_exchange_is_rate_limited_before_repository_work(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_REFRESH_RATE_LIMIT", "2")
+    client = _client()
+    assert _login(client, "alice", "correct horse battery").status_code == 200
+    assert client.post("/v1/auth/refresh").status_code == 200
+    assert client.post("/v1/auth/refresh").status_code == 200
+
+    limited = client.post("/v1/auth/refresh")
+    assert limited.status_code == 429
+    assert limited.json()["error_code"] == "RATE_LIMITED"
+    assert int(limited.headers["Retry-After"]) >= 1
 
 
 def test_long_poll_concurrency_limits_and_release(monkeypatch):

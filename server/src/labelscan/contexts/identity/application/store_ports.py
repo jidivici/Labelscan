@@ -24,10 +24,6 @@ class StoreInactive(Exception):
     """The store exists but cannot receive new assignments."""
 
 
-class StoreRequired(Exception):
-    """An operator account has no store assignment."""
-
-
 @dataclass(frozen=True)
 class StoreAuditContext:
     actor_id: str
@@ -52,10 +48,7 @@ class StoreChanges:
 
 
 class StoreRepository(Protocol):
-    def create_store(
-        self, store: NewStore, audit: StoreAuditContext
-    ) -> Store:
-        ...
+    def create_store(self, store: NewStore, audit: StoreAuditContext) -> Store: ...
 
     def list_stores(
         self,
@@ -65,13 +58,11 @@ class StoreRepository(Protocol):
         query: str | None,
         actor_id: str | None = None,
         include_all: bool = False,
-    ) -> list[Store]:
-        ...
+    ) -> list[Store]: ...
 
     def update_store(
         self,
         code: str,
         changes: StoreChanges,
         audit: StoreAuditContext,
-    ) -> Store:
-        ...
+    ) -> Store: ...

@@ -1,24 +1,19 @@
 /**
  * Storage Service — backend-extraction articles (facade).
  *
- * Public API unchanged (getAllArticles / getArticleById / saveBackendArticle /
- * deleteArticle) so the screens don't move. Record persistence is delegated to an
+ * Record persistence is delegated to an
  * ArticleStore PORT (audit §7.2): the default is the per-key AsyncStorage adapter — no
  * 6 MB blob ceiling, O(1) writes. To run on expo-sqlite in production, implement the port
  * and call setArticleStore(new SqliteArticleStore()) at app init; nothing here changes.
  *
  * The server is the source of truth for confirmed arrivals. This store is retained only
- * for pending scans and as an offline fallback for legacy local records; confirmed
+ * for pending scans and as a read-only offline fallback for legacy local records; confirmed
  * arrivals are always requested from the catalogue API first.
  */
 
-import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
-import { v4 as uuidv4 } from 'uuid';
-
 import * as FileSystem from 'expo-file-system/legacy';
 
-import { Article, ArticleField } from '../types/Article';
-import type { ExtractionRunResponse } from '../types/api';
+import { Article } from '../types/Article';
 import type { ArticleStore } from './articleStore';
 import { AsyncStorageArticleStore } from './articleStoreAsyncStorage';
 import { queryClient } from './queryClient';
@@ -32,11 +27,6 @@ const PENDING_DIR = `${FileSystem.documentDirectory}pending/`;
 // The active persistence engine. Default = per-key AsyncStorage (§7.2). SWAP POINT for a
 // future SqliteArticleStore (expo-sqlite, indexed + FTS5): inject it once at app init.
 let store: ArticleStore = new AsyncStorageArticleStore();
-
-/** Replace the storage engine (e.g. inject SqliteArticleStore in prod, a fake in tests). */
-export function setArticleStore(next: ArticleStore): void {
-  store = next;
-}
 
 // ─── Ensure photos dir exists ────────────────────────────────────────────────
 
@@ -140,95 +130,4 @@ export async function getArticleById(id: string): Promise<Article | null> {
   const { getCatalogArticle } = await import('./catalogApi');
   const serverArticle = await getCatalogArticle(id);
   return serverArticle ?? store.getById(id);
-}
-
-// ─── Legacy local-record helpers ────────────────────────────────────────────────
-//
-// Kept for one-version migration compatibility. New confirmed arrivals must use the
-// finalize-review API and are not written through these functions.
-
-export interface SaveBackendArticleInput {
-  ingestion_id: string;
-  extraction_run_id: string | null;
-  captured_at: string;
-  tempPhotoUri?: string; // cache uri to move into permanent storage
-  barcode_raw?: string | null;
-  ingestion_status: string;
-  fields: ArticleField[];
-  saved_by?: string | null; // signed-in user who saved this record
-  raw_extraction_run?: ExtractionRunResponse | null;
-}
-
-export async function saveBackendArticle(input: SaveBackendArticleInput): Promise<Article> {
-  const id = uuidv4();
-
-  // Persist the captured photo into permanent storage (shared persistPhotoInto —
-  // copy + verify; a failure saves the article without photo rather than aborting).
-  let photoUri: string | null = null;
-  if (input.tempPhotoUri) {
-    photoUri = await persistPhotoInto(PHOTOS_DIR, id, input.tempPhotoUri);
-  }
-
-  const saved: Article = {
-    id,
-    source: 'backend_extraction',
-    ingestion_id: input.ingestion_id,
-    extraction_run_id: input.extraction_run_id,
-    captured_at: input.captured_at,
-    photo_uri: photoUri,
-    barcode_raw: input.barcode_raw ?? null,
-    ingestion_status: input.ingestion_status,
-    fields: input.fields,
-    saved_at: new Date().toISOString(),
-    saved_by: input.saved_by ?? null,
-    raw_extraction_run: input.raw_extraction_run ?? null,
-  };
-
-  // O(1): writes only this article's keys (raw run kept off the hot path by the adapter).
-  await store.put(saved);
-  return saved;
-}
-
-// ─── Update an existing article (in-place human correction from the detail screen) ──
-
-/**
- * Apply human edits to an already-saved article: replace its fields and RE-RECORD the
- * save (fresh `saved_at`, and `saved_by` = the editor) so the record reflects who last
- * touched it. Same id ⇒ store.put overwrites the existing record in place (O(1)); the
- * authoritative backend override is pushed separately (submitFieldOverrides). Returns the
- * updated article, or null if it no longer exists.
- */
-export async function updateBackendArticle(
-  id: string,
-  patch: { fields: ArticleField[]; saved_by?: string | null },
-): Promise<Article | null> {
-  const existing = await store.getById(id);
-  if (!existing) return null;
-  const updated: Article = {
-    ...existing,
-    fields: patch.fields,
-    saved_at: new Date().toISOString(),
-    saved_by: patch.saved_by !== undefined ? patch.saved_by : existing.saved_by,
-  };
-  await store.put(updated);
-  return updated;
-}
-
-// ─── Delete an article ────────────────────────────────────────────────────────
-
-export async function deleteArticle(id: string): Promise<void> {
-  const article = await store.getById(id);
-
-  if (article?.photo_uri) {
-    try {
-      const fileInfo = await FileSystem.getInfoAsync(article.photo_uri);
-      if (fileInfo.exists) {
-        await FileSystem.deleteAsync(article.photo_uri, { idempotent: true });
-      }
-    } catch (err) {
-      console.warn('Photo delete failed:', err);
-    }
-  }
-
-  await store.remove(id);
 }

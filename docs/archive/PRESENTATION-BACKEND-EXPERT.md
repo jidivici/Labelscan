@@ -1,5 +1,7 @@
 # LabelScan — Script de présentation **backend** (jury d'experts)
 
+> Archivé le 20 août 2026 : script ponctuel, non maintenu comme documentation technique.
+
 **Public :** jury d'experts (ingénieurs, architectes, évaluateurs techniques).
 **Durée :** 13–15 minutes · 12 diapos.
 **Objet :** défendre l'**architecture backend** — ses garanties dures et ses arbitrages.

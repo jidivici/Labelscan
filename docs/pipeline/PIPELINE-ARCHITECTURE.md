@@ -8,8 +8,7 @@ RegistrationConsumer + AlertingConsumer handle downstream events).
 **System:** HACCP-oriented seafood traceability for large-scale retail fishmongery.
 
 > **This document builds on, and does not contradict, the locked design. Read first:**
-> [`../architecture/ARCHITECTURE.md`](../architecture/ARCHITECTURE.md) (Ingestion context §2.1,
-> events §6, aggregates §7, dependency law §5),
+> [`../ENTERPRISE-ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md),
 > [`../architecture/adr/0002-hexagonal-ports-adapters-ocr-llm.md`](../architecture/adr/0002-hexagonal-ports-adapters-ocr-llm.md),
 > [`0003`](../architecture/adr/0003-raw-before-normalized-immutable-store.md),
 > [`0004`](../architecture/adr/0004-immutable-audit-append-only-vs-event-sourcing.md),

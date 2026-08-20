@@ -1,11 +1,11 @@
 import type { Arrival, ProfessionCode } from '../types';
 
-export interface PortalSelectOption {
+interface PortalSelectOption {
   value: string;
   label: string;
 }
 
-export interface PortalFieldFilterDefinition {
+interface PortalFieldFilterDefinition {
   field: string;
   label: string;
   type: 'text' | 'select';
@@ -13,7 +13,7 @@ export interface PortalFieldFilterDefinition {
   options?: readonly PortalSelectOption[];
 }
 
-export interface PortalDetailField {
+interface PortalDetailField {
   key: string;
   label: string;
   format?: 'text' | 'date' | 'temperature' | 'production_method';
@@ -32,7 +32,7 @@ export interface PortalSecondaryColumn {
   format?: 'text' | 'date';
 }
 
-export interface PortalLabels {
+interface PortalLabels {
   pageTitle: string;
   pageDescription: string;
   searchPlaceholder: string;

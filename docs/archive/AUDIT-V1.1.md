@@ -1,5 +1,7 @@
 # Audit qualité — LabelScan v1.1
 
+> Archivé le 20 août 2026 : audit ponctuel antérieur au modèle multi-portails et au déploiement VPS.
+
 **Date :** 6 juillet 2026.
 **Périmètre :** tout le dépôt — mobile (`src/`, 9 250 lignes TS/TSX), backend (`server/`,
 92 fichiers Python), base de données, docs, config.

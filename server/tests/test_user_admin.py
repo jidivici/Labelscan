@@ -1,4 +1,4 @@
-"""HTTP/DB proofs for the back-office user administration API."""
+"""HTTP/DB proofs for store administration and CLI identity bootstrap."""
 
 from __future__ import annotations
 
@@ -10,9 +10,6 @@ from sqlalchemy import text
 
 from labelscan.app.http_app import create_app
 from labelscan.contexts.identity.adapters.cli import upsert_admin
-from labelscan.contexts.identity.adapters.http.admin_router import (
-    get_user_admin_service,
-)
 from labelscan.contexts.identity.adapters.http.router import get_login
 from labelscan.contexts.identity.adapters.http.store_admin_router import (
     get_store_admin_service,
@@ -23,7 +20,6 @@ from labelscan.contexts.identity.adapters.sql_store_repository import (
 from labelscan.contexts.identity.adapters.sql_user_repository import SqlUserRepository
 from labelscan.contexts.identity.application.login import Login
 from labelscan.contexts.identity.application.manage_stores import StoreAdminService
-from labelscan.contexts.identity.application.manage_users import UserAdminService
 from labelscan.contexts.identity.domain.password import hash_password
 from labelscan.platform.db.audit_context import set_audit_context
 from tests.conftest import bearer
@@ -152,7 +148,6 @@ def client(engine, seeded_admin):
     repo = SqlUserRepository(engine)
     store_repo = SqlStoreRepository(engine)
     app = create_app()
-    app.dependency_overrides[get_user_admin_service] = lambda: UserAdminService(repo)
     app.dependency_overrides[get_store_admin_service] = lambda: StoreAdminService(
         store_repo
     )
@@ -166,47 +161,6 @@ def _admin_headers(actor_id: str = ADMIN_ID):
         actor_id=actor_id,
         principal=ADMIN_USERNAME,
     )
-
-
-def _create(client, suffix: str = "operator", role: str = "operator"):
-    return client.post(
-        "/v1/users",
-        headers=_admin_headers(),
-        json={
-            "username": f"{PREFIX}{suffix}",
-            "display_name": f"Test {suffix}",
-            "password": "operator-password-123",
-            "role": role,
-            "store_code": STORE_CODE,
-        },
-    )
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_admin_can_create_list_and_filter_users(client):
-    created = _create(client)
-    assert created.status_code == 201
-    body = created.json()
-    assert body["username"] == f"{PREFIX}operator"
-    assert body["role"] == "operator"
-    assert body["store_code"] == STORE_CODE
-    assert body["active"] is True
-    assert "password" not in body and "password_hash" not in body
-
-    listed = client.get(
-        "/v1/users",
-        headers=_admin_headers(),
-        params={
-            "role": "operator",
-            "active": "true",
-            "store_code": STORE_CODE,
-            "q": PREFIX,
-        },
-    )
-    assert listed.status_code == 200
-    page = listed.json()
-    assert page["total"] == 1
-    assert [item["id"] for item in page["items"]] == [body["id"]]
 
 
 def test_non_admin_cannot_manage_users(client):
@@ -223,46 +177,6 @@ def test_non_admin_cannot_manage_users(client):
 def test_generic_user_listing_is_disabled_for_admin(client):
     response = client.get("/v1/users", headers=_admin_headers())
     assert response.status_code == 404
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_duplicate_username_returns_stable_conflict(client):
-    assert _create(client, "duplicate").status_code == 201
-    response = _create(client, "duplicate")
-    assert response.status_code == 409
-    assert response.json()["error_code"] == "USER_ALREADY_EXISTS"
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_username_and_password_policy_is_enforced(client):
-    username = f"{PREFIX}{'x' * 600}"
-    response = client.post(
-        "/v1/users",
-        headers=_admin_headers(),
-        json={
-            "username": username,
-            "display_name": "Long credentials",
-            "password": "x",
-            "role": "operator",
-            "store_code": STORE_CODE,
-        },
-    )
-    assert response.status_code == 400
-    assert response.json()["error_code"] == "VALIDATION_ERROR"
-
-    placeholder = client.post(
-        "/v1/users",
-        headers=_admin_headers(),
-        json={
-            "username": f"{PREFIX}placeholder",
-            "display_name": "Placeholder credentials",
-            "password": "change-me-to-a-strong-password",
-            "role": "operator",
-            "store_code": STORE_CODE,
-        },
-    )
-    assert placeholder.status_code == 400
-    assert placeholder.json()["error_code"] == "VALIDATION_ERROR"
 
 
 def test_admin_can_create_list_and_rename_stores(client):
@@ -424,201 +338,6 @@ def test_store_with_active_manager_portal_assignment_cannot_be_disabled(client, 
             ).scalar_one()
             is True
         )
-
-
-@pytest.mark.skip(reason="legacy fixture provisions users through removed generic API")
-def test_store_with_active_users_cannot_be_disabled(client):
-    assert _create(client, "store-user").status_code == 201
-    response = client.patch(
-        f"/v1/stores/{STORE_CODE}",
-        headers=_admin_headers(),
-        json={"active": False},
-    )
-    assert response.status_code == 409
-    assert response.json()["error_code"] == "STORE_IN_USE"
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_delete_user_is_a_recoverable_soft_delete(client):
-    user_id = _create(client, "deleted").json()["id"]
-    deleted = client.delete(
-        f"/v1/users/{user_id}",
-        headers=_admin_headers(),
-    )
-    assert deleted.status_code == 204
-
-    listed = client.get(
-        "/v1/users",
-        headers=_admin_headers(),
-        params={"active": "false", "q": f"{PREFIX}deleted"},
-    )
-    assert listed.status_code == 200
-    assert listed.json()["items"][0]["id"] == user_id
-
-
-@pytest.mark.skip(reason="admin credential mutation is forbidden by IAM v2")
-def test_admin_can_change_role_deactivate_and_reset_password(client):
-    user_id = _create(client, "mutable").json()["id"]
-    response = client.patch(
-        f"/v1/users/{user_id}",
-        headers=_admin_headers(),
-        json={
-            "display_name": "Operator Mutable",
-            "role": "operator",
-            "active": False,
-            "password": "replacement-password-123",
-        },
-    )
-    assert response.status_code == 200
-    assert response.json()["display_name"] == "Operator Mutable"
-    assert response.json()["role"] == "operator"
-    assert response.json()["active"] is False
-
-    # A deactivated account cannot use even its newly reset credentials.
-    login = client.post(
-        "/v1/auth/login",
-        json={
-            "username": f"{PREFIX}mutable",
-            "password": "replacement-password-123",
-        },
-    )
-    assert login.status_code == 401
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_deactivation_immediately_revokes_an_existing_session(client):
-    created = _create(client, "revoked").json()
-    login = client.post(
-        "/v1/mobile/auth/login",
-        json={
-            "username": f"{PREFIX}revoked",
-            "password": "operator-password-123",
-        },
-    )
-    assert login.status_code == 200
-    access = login.json()["access_token"]
-
-    changed = client.patch(
-        f"/v1/users/{created['id']}",
-        headers=_admin_headers(),
-        json={"active": False},
-    )
-    assert changed.status_code == 200
-
-    rejected = client.get(
-        f"/v1/ingestions/{uuid.uuid4()}",
-        headers={"Authorization": f"Bearer {access}"},
-    )
-    assert rejected.status_code == 401
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_create_and_update_are_audited_with_admin_actor(client, engine):
-    created = _create(client, "audited").json()
-    client.patch(
-        f"/v1/users/{created['id']}",
-        headers=_admin_headers(),
-        json={"display_name": "Audited User"},
-    )
-    with engine.connect() as conn:
-        rows = (
-            conn.execute(
-                text(
-                    "SELECT actor_id::text AS actor_id, action "
-                    "FROM audit.audit_log "
-                    "WHERE subject_schema = 'identity' "
-                    "AND subject_table = 'app_user' AND subject_id = :id "
-                    "ORDER BY occurred_at"
-                ),
-                {"id": created["id"]},
-            )
-            .mappings()
-            .all()
-        )
-    assert [row["action"] for row in rows] == [
-        "identity.user_created",
-        "identity.user_updated",
-    ]
-    assert {row["actor_id"] for row in rows} == {ADMIN_ID}
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_admin_cannot_revoke_own_access(client):
-    response = client.patch(
-        f"/v1/users/{ADMIN_ID}",
-        headers=_admin_headers(),
-        json={"active": False},
-    )
-    assert response.status_code == 409
-    assert response.json()["error_code"] == "SELF_ACCESS_CHANGE_NOT_ALLOWED"
-
-
-@pytest.mark.skip(reason="admin deletion is now super-admin-only through /v1/admins")
-def test_last_active_admin_cannot_be_removed_by_another_principal(client, engine):
-    with engine.begin() as conn:
-        set_audit_context(
-            conn,
-            actor_id=ADMIN_ID,
-            action="identity.test_admin_isolated",
-            correlation_id="user-admin-test",
-            trace_id="user-admin-test",
-        )
-        other_admin_ids = (
-            conn.execute(
-                text(
-                    "UPDATE identity.app_user SET active = false "
-                    "WHERE role = 'admin' AND active = true AND id <> :id "
-                    "RETURNING id::text"
-                ),
-                {"id": ADMIN_ID},
-            )
-            .scalars()
-            .all()
-        )
-    try:
-        response = client.patch(
-            f"/v1/users/{ADMIN_ID}",
-            headers=_admin_headers(actor_id=str(uuid.uuid4())),
-            json={"role": "operator", "store_code": STORE_CODE},
-        )
-    finally:
-        if other_admin_ids:
-            with engine.begin() as conn:
-                set_audit_context(
-                    conn,
-                    actor_id=ADMIN_ID,
-                    action="identity.test_admin_restored",
-                    correlation_id="user-admin-test",
-                    trace_id="user-admin-test",
-                )
-                conn.execute(
-                    text(
-                        "UPDATE identity.app_user SET active = true "
-                        "WHERE id::text = ANY(:ids)"
-                    ),
-                    {"ids": other_admin_ids},
-                )
-    assert response.status_code == 409
-    assert response.json()["error_code"] == "LAST_ACTIVE_ADMIN"
-
-
-@pytest.mark.skip(reason="legacy generic user mutation replaced by IAM v2 APIs")
-def test_unknown_and_malformed_user_ids_are_safe_errors(client):
-    missing = client.patch(
-        f"/v1/users/{uuid.uuid4()}",
-        headers=_admin_headers(),
-        json={"display_name": "Nobody"},
-    )
-    assert missing.status_code == 404
-    assert missing.json()["error_code"] == "NOT_FOUND"
-
-    malformed = client.patch(
-        "/v1/users/not-a-uuid",
-        headers=_admin_headers(),
-        json={"display_name": "Nobody"},
-    )
-    assert malformed.status_code == 400
-    assert malformed.json()["error_code"] == "VALIDATION_ERROR"
 
 
 def test_cli_bootstrap_remains_idempotent_and_audited(client, engine):

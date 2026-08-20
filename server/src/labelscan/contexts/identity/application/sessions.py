@@ -11,6 +11,7 @@ from typing import Protocol
 from labelscan.contexts.identity.domain.user import AuthenticatedUser
 
 _DEFAULT_REFRESH_TTL_SECONDS = 7 * 24 * 3600
+_MAX_REFRESH_TTL_SECONDS = 30 * 24 * 3600
 
 
 class InvalidRefreshToken(Exception):
@@ -58,6 +59,10 @@ def refresh_ttl_seconds() -> int:
         raise RuntimeError("LABELSCAN_REFRESH_TTL_SECONDS must be an integer") from exc
     if value <= 0:
         raise RuntimeError("LABELSCAN_REFRESH_TTL_SECONDS must be positive")
+    if value > _MAX_REFRESH_TTL_SECONDS:
+        raise RuntimeError(
+            "LABELSCAN_REFRESH_TTL_SECONDS must not exceed 2592000 seconds"
+        )
     return value
 
 

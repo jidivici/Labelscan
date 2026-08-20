@@ -232,7 +232,8 @@ the ingestion until a terminal status or a bounded 30 s / 20-attempt budget.
 **Auth (identity context):** browser login is
 `POST /v1/o/{organization_slug}/auth/login` (`/v1/auth/login` remains the default
 organization alias). It accepts only `super_admin`, `admin`, and `manager`.
-`POST /v1/mobile/auth/login` accepts only `operator`. Both issue a short-lived
+`POST /v1/mobile/auth/login` accepts only an active `manager` assigned to
+exactly one active portal and store. Both issue a short-lived
 **HS256 JWT** carrying the actor, organization, scopes, role, store ids, portal
 ids, primary portal, trade code, client type, and server session family id.
 Every scoped endpoint depends on `require_scope(scope)` →
@@ -247,17 +248,18 @@ mobile refresh is an explicit token for secure device storage. The persisted
 vice versa. Role, portal, password, credential-reset, account, and portal-active
 changes revoke affected sessions.
 
-The role-specific IAM API replaces all generic user reads and mutations: a super-admin
-manages admins and retains every admin power; an admin manages stores, professions,
-managers and store portals; a manager manages operators inside assigned portals.
+The role-specific IAM API replaces all generic user reads and mutations: a
+super-admin manages admins and retains every admin power; an admin manages its
+stores, professions, managers and store portals. Managers have no
+identity-administration capability.
 Accounts are created active with a direct password. Users change their own password
 only after supplying the current password. Runtime deletion is always a reversible
 soft state transition.
 
 `GET /v1/arrivals` belongs to the traceability context. It projects immutable
-registered batches into a searchable arrivals feed. Admin and super-admin are
-organization-wide; managers and operators are restricted to the active portal
-ids and derived stores signed into the token. Organization, store, portal,
+registered batches into a searchable arrivals feed. Super-admin is
+organization-wide; admins are restricted to portals of stores they own and
+managers to their active portal and derived store. Organization, store, portal,
 profession/profile version, and capture actor are snapshotted on ingestion and
 copied into the immutable traceability chain, preserving historical ownership
 across later reassignment.
@@ -292,8 +294,10 @@ isolated from business routes.
   - `0009` adds DLQ + exponential backoff to `platform.outbox` (`attempts`, `next_retry_at`,
     `last_error`, `status` columns).
   - `0014` adds identity RBAC metadata and audited user administration;
-  - `0015` temporarily reduces the role model to `admin` and `operator`;
-  - `0016` adds the audited store directory and mandatory operator-to-store association.
+  - `0015` historically reduced the role model to `admin` and `operator`;
+  - `0016` historically added the audited store directory and mandatory
+    operator-to-store association. That value remains readable for migration
+    compatibility but is no longer assignable.
   - `0017` snapshots the submitting store on ingestions and immutable batches for arrivals.
   - `0024` adds rotating, revocable refresh-session families.
   - `0025` adds the four IAM roles, the three professions, business portals,
@@ -322,8 +326,8 @@ Conventions for every endpoint below:
 
 | Method | Path | Purpose | Auth scope | Idempotent? |
 |--------|------|---------|-----------|-------------|
-| POST | `/v1/o/{organization_slug}/auth/login` | Browser login for operator/manager/admin/super-admin; rotating cookie session. | none | No |
-| POST | `/v1/mobile/auth/login` | Mobile login for operator only; explicit refresh token. | none | No |
+| POST | `/v1/o/{organization_slug}/auth/login` | Browser login for manager/admin/super-admin; rotating cookie session. | none | No |
+| POST | `/v1/mobile/auth/login` | Mobile login for a manager with exactly one active portal; explicit refresh token. | none | No |
 | POST | `/v1/auth/refresh`, `/v1/mobile/auth/refresh` | Rotate a same-client-type refresh session. | refresh credential | Rotation-safe |
 | GET | `/v1/me` | Current user, scopes, authorized stores, and detailed portals. | authenticated | Yes (safe) |
 | POST | `/v1/me/password` | Change own password and revoke own sessions. | authenticated | No |
@@ -333,9 +337,6 @@ Conventions for every endpoint below:
 | GET, POST | `/v1/managers` | Admin/super-admin lists or creates managers. | `identity:managers:manage` | GET only |
 | PATCH | `/v1/managers/{user_id}` | Toggle manager activity. | `identity:managers:manage` | State-idempotent |
 | PATCH | `/v1/managers/{user_id}/portals` | Replace active assignments without deleting history. | `identity:managers:manage` | State-idempotent |
-| GET, POST | `/v1/portals/{portal_id}/operators` | Manager lists or invites portal-scoped operators. | `identity:operators:manage` | GET only |
-| PATCH | `/v1/portals/{portal_id}/operators/{user_id}` | Manager reassigns or toggles an in-scope operator. | `identity:operators:manage` | State-idempotent |
-| POST | `/v1/operators/{user_id}/credential-reset` | Manager directly sets a new operator password and revokes sessions. | `identity:operators:manage` | No |
 | POST | `/v1/stores` | Create a uniquely coded store. | `identity:admin` | No |
 | GET | `/v1/stores` | List/filter the store directory. | `identity:admin` | Yes (safe) |
 | PATCH | `/v1/stores/{code}` | Rename, activate, or safely disable a store. | `identity:admin` | State-idempotent |
@@ -421,13 +422,11 @@ Codes are **append-only and never renumbered/repurposed** (same discipline as th
 | `NOT_FOUND` | 404 | Resource is absent or outside the caller's data perimeter (IDOR-safe). | No |
 | `METHOD_NOT_ALLOWED` | 405 | e.g. attempting to write the audit log. | No |
 | `STORE_NOT_FOUND` | 400 | Referenced store code does not exist. | No |
-| `STORE_REQUIRED` | 400 | An operator has no store assignment. | No |
+| `STORE_REQUIRED` | 400 | The account has no attributable store assignment. | No |
 | `USER_ALREADY_EXISTS` | 409 | Username is already assigned. | No |
 | `STORE_ALREADY_EXISTS` | 409 | Store code is already assigned. | No |
 | `STORE_INACTIVE` | 409 | Disabled store cannot receive an assignment. | No |
 | `STORE_IN_USE` | 409 | Store still has active users or active portal assignments. | No |
-| `LAST_ACTIVE_ADMIN` | 409 | Mutation would remove the last active administrator. | No |
-| `SELF_ACCESS_CHANGE_NOT_ALLOWED` | 409 | Administrator tried to revoke their own access. | No |
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | Key reused with different payload. | No |
 | `RESOURCE_CONFLICT` | 409 | Generic state conflict. | No |
 | `ALERT_INVALID_TRANSITION` | 409 | Alert lifecycle transition not allowed. | No |
@@ -458,20 +457,19 @@ Codes are **append-only and never renumbered/repurposed** (same discipline as th
 | **Token format** | HS256 JWT (symmetric, secret ≥32 bytes) | RS256 JWT (asymmetric, JWKS rotation) |
 | **Signing secret** | `LABELSCAN_JWT_SECRET` env var | IdP JWKS endpoint |
 | **Session** | Short-lived access JWT plus opaque rotating refresh family; replay revokes the family | IdP-backed refresh/session policy |
-| **Roles** | `super_admin`, `admin`, `manager`, `operator` | Enterprise IdP group mapping |
+| **Roles** | `super_admin`, `admin`, `manager` | Enterprise IdP group mapping |
 | **Browser login** | Organization route; manager/admin/super-admin only; refresh in strict cookie | OIDC login at IdP |
-| **Mobile login** | Operator only; refresh returned for SecureStore | Managed-device policy where required |
+| **Mobile login** | Single-portal manager only; refresh returned for SecureStore | Managed-device policy where required |
 | **Header auth** | Off by default (`LABELSCAN_ALLOW_HEADER_AUTH=0`) | Removed |
 
-All four roles receive only their domain capabilities. Data visibility is a
+All three roles receive only their domain capabilities. Data visibility is a
 separate access context:
 
 | Role | Data perimeter | IAM capability delta |
 |---|---|---|
 | `super_admin` | Every store/portal in one organization | `identity:admins:manage`, `identity:managers:manage`, `identity:portals:manage`, `identity:read` |
-| `admin` | Every store/portal in one organization | `identity:managers:manage`, `identity:portals:manage`, `identity:read` |
-| `manager` | Assigned portals and their derived stores | `identity:operators:manage`, `identity:read` |
-| `operator` | Its single assigned portal and derived store | No identity-administration capability |
+| `admin` | Portals of stores it owns | `identity:managers:manage`, `identity:portals:manage`, `identity:read` |
+| `manager` | Its single assigned portal and derived store | `identity:read` |
 
 Every data query is constrained by `organization_id`; non-organization-wide
 roles add `business_portal_id` (or store fallback for attributable legacy rows).
@@ -482,10 +480,14 @@ the action/role or explicitly requests a portal outside its assignments.
 
 ### 10.2 Optional future IdP roles
 
+The database still accepts the historical `operator` value so immutable history
+and old migrations remain interpretable. Production JWT validation rejects it,
+and no current route can assign it or issue it a new browser/mobile session.
+
 The following names are design inputs for a future enterprise IdP mapping, not
 current application roles:
 
-| Role | Intended operator | Scopes granted |
+| Role | Intended persona | Scopes granted |
 |------|-------------------|----------------|
 | `scanner-device` | Kiosk/handheld capture device | `ingestion:write` only |
 | `fishmonger` | Counter staff | `ingestion:write`, `ingestion:read`, `extraction:review`, `temperature:write`, `haccp:read`, `traceability:read` |
@@ -620,11 +622,9 @@ biggest observability gap. The design targets:
 
 ### 15.1 Introducing the backend behind the existing app (strangler)
 
-The existing client already produces `{ image, barcodeValue?, capturedAt }`. The
-`POST /v1/ingestions` contract accepts that same payload. The mobile app now has a
-**backend-first** path (default, `EXPO_PUBLIC_BACKEND_FIRST=true`) that uploads the
-full image and polls for extraction results, alongside a **legacy** on-device OCR
-path (opt-in). See `src/config.ts`.
+The mobile client submits the cropped label image to `POST /v1/ingestions`, then
+polls the extraction result. OCR and LLM processing are server-only; there is no
+client-side provider key or alternate on-device OCR path.
 
 ### 15.2 Zero-downtime schema evolution (expand-and-contract)
 

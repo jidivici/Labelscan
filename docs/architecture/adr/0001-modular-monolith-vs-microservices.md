@@ -5,7 +5,7 @@ Accepted & Implemented
 
 ## Context
 LabelScan must become a multi-user, audit-ready HACCP traceability backend (today it is a
-single-device Expo app — see `AUDIT.md` A2). The team is small, the bounded contexts are newly
+single-device Expo app — see the [initial audit](../../archive/AUDIT.md), A2). The team is small, the bounded contexts are newly
 identified (§2 of ARCHITECTURE.md) and still likely to shift, and the strongest requirements are
 **strong consistency** for the ingestion+audit path (raw stored before normalization, immutable
 audit). The brief explicitly says: prefer a modular monolith and avoid premature microservices.

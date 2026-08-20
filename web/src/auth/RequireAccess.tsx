@@ -39,6 +39,6 @@ export function RequireProfession({ children }: { children: ReactNode }) {
   return children;
 }
 
-export function LoadingScreen() {
+function LoadingScreen() {
   return <main className="centered-page" aria-live="polite"><div className="loader" /><p>Chargement du portail…</p></main>;
 }

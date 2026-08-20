@@ -4,7 +4,7 @@
 Accepted & Implemented
 
 ## Context
-There is no audit log today (AUDIT.md D5) and history is destructively mutable (D4). The brief
+There is no audit log today ([initial audit](../../archive/AUDIT.md), D5) and history is destructively mutable (D4). The brief
 requires **all business-critical changes to be auditable** and **historical traceability data to
 be immutable** (#4), with `correlation_id`/`trace_id` everywhere (#8). Two common ways to satisfy
 this: a dedicated append-only audit table, or full **event sourcing** (the event log *is* the

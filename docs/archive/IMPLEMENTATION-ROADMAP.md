@@ -1,5 +1,7 @@
 # LabelScan — Plan d'implémentation (état au 3 août 2026)
 
+> Archivé le 20 août 2026 : plan ponctuel largement livré, non utilisable comme backlog courant.
+
 **Objectif :** passer de l'état actuel (cœur métier complet, testé, mono-site, mono-compte)
 à un produit déployable chez un grand compte, en répondant aux exigences de l'application :
 **traçabilité HACCP nominative, intégrité auditable, latence perçue minimale, résilience

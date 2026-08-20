@@ -15,7 +15,10 @@ import secrets
 
 _ALGORITHM = "pbkdf2_sha256"
 _DEFAULT_ITERATIONS = 600_000  # OWASP-recommended floor for PBKDF2-HMAC-SHA256
+_MIN_ACCEPTED_ITERATIONS = 100_000
+_MAX_ACCEPTED_ITERATIONS = 2_000_000
 _SALT_BYTES = 16
+_DIGEST_BYTES = 32
 _DEFAULT_MIN_PASSWORD_LENGTH = 12
 _MAX_PASSWORD_LENGTH = 128
 _FORBIDDEN_PASSWORDS = {
@@ -75,9 +78,13 @@ def verify_password(password: str, encoded: str) -> bool:
         iterations = int(iterations_s)
         salt = _b64d(salt_s)
         expected = _b64d(hash_s)
-    except (ValueError, AttributeError):
+        if not _MIN_ACCEPTED_ITERATIONS <= iterations <= _MAX_ACCEPTED_ITERATIONS:
+            return False
+        if len(salt) < _SALT_BYTES or len(expected) != _DIGEST_BYTES:
+            return False
+        candidate = hashlib.pbkdf2_hmac(
+            "sha256", password.encode("utf-8"), salt, iterations
+        )
+    except (ValueError, AttributeError, TypeError):
         return False
-    candidate = hashlib.pbkdf2_hmac(
-        "sha256", password.encode("utf-8"), salt, iterations
-    )
     return hmac.compare_digest(candidate, expected)

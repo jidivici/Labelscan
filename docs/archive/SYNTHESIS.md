@@ -1,5 +1,7 @@
 # LabelScan — Architecture Synthesis
 
+> Archivé le 20 août 2026 : synthèse de conception partiellement implémentée, supplantée par les références thématiques.
+
 **Status:** Partially implemented (Phases 0–4 shipped; Phase 5 in progress). This document
 remains the coherent reference for the full design; implementation deltas are noted inline.
 **Date:** 2026-06-18 (updated from 2026-06-14 consolidation)

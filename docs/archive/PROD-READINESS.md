@@ -1,5 +1,7 @@
 # LabelScan — Synthèse prod-readiness : ce qui manque pour vendre à un grand groupe
 
+> Archivé le 20 août 2026 : état pré-déploiement remplacé par les contrôles de sécurité vivants.
+
 **Date :** 3 août 2026 (security refresh V3)
 **Public :** décision produit/technique interne (préparation d'un dossier commercial grand compte)
 **Hypothèse de vente :** un groupe agroalimentaire / GMS multi-sites (criées, ateliers de marée,

@@ -15,6 +15,8 @@ trust model. ``Principal`` and ``require_scope`` keep their exact shape.
 
 from __future__ import annotations
 
+import re
+import uuid
 from dataclasses import dataclass
 
 from fastapi import Request
@@ -22,6 +24,9 @@ from fastapi import Request
 from labelscan.platform.config import env_flag, is_production
 from labelscan.platform.http import jwt as jwt_codec
 from labelscan.platform.http.errors import ApiError
+
+_PRODUCTION_ROLES = frozenset({"super_admin", "admin", "manager"})
+_ORGANIZATION_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 @dataclass(frozen=True)
@@ -56,13 +61,14 @@ def _principal_from_bearer(token: str) -> Principal:
         raise ApiError("UNAUTHENTICATED", "invalid or expired token")
     actor_id = claims.get("actor_id")
     if not actor_id:
-        raise ApiError("UNAUTHENTICATED", "token is missing the actor_id claim")
+        raise ApiError("UNAUTHENTICATED", "invalid or expired token")
     principal = claims.get("principal") or actor_id
     raw_scopes = claims.get("scopes") or []
-    if isinstance(raw_scopes, str):
-        scopes = frozenset(raw_scopes.split())
-    else:
-        scopes = frozenset(str(s) for s in raw_scopes)
+    if not isinstance(raw_scopes, list) or any(
+        not isinstance(scope, str) or not scope for scope in raw_scopes
+    ):
+        raise ApiError("UNAUTHENTICATED", "invalid or expired token")
+    scopes = frozenset(raw_scopes)
     raw_store_code = claims.get("store_code")
     raw_organization_id = claims.get("organization_id")
     raw_organization_slug = claims.get("organization_slug")
@@ -73,19 +79,38 @@ def _principal_from_bearer(token: str) -> Principal:
     raw_store_ids = claims.get("store_ids") or []
     raw_client_type = str(claims.get("client_type") or "browser")
     if not isinstance(raw_portal_ids, list) or not isinstance(raw_store_ids, list):
-        raise ApiError("UNAUTHENTICATED", "token has invalid access claims")
+        raise ApiError("UNAUTHENTICATED", "invalid or expired token")
     if raw_client_type not in {"browser", "mobile"}:
-        raise ApiError("UNAUTHENTICATED", "token has invalid client claim")
-    if is_production() and (not raw_organization_id or not raw_organization_slug):
-        raise ApiError("UNAUTHENTICATED", "token is missing the tenant claim")
+        raise ApiError("UNAUTHENTICATED", "invalid or expired token")
     session_id = claims.get("sid")
+    if is_production():
+        role = claims.get("role")
+        if (
+            not raw_organization_id
+            or not raw_organization_slug
+            or role not in _PRODUCTION_ROLES
+            or not session_id
+        ):
+            raise ApiError("UNAUTHENTICATED", "invalid or expired token")
+        try:
+            uuid.UUID(str(actor_id))
+            uuid.UUID(str(raw_organization_id))
+            uuid.UUID(str(session_id))
+            for value in (*raw_portal_ids, *raw_store_ids):
+                uuid.UUID(str(value))
+            if raw_store_id:
+                uuid.UUID(str(raw_store_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ApiError("UNAUTHENTICATED", "invalid or expired token")
+        if not _ORGANIZATION_SLUG.fullmatch(str(raw_organization_slug)):
+            raise ApiError("UNAUTHENTICATED", "invalid or expired token")
     if session_id:
         from labelscan.platform.http.session_validation import session_is_active
 
         if not session_is_active(str(session_id), str(actor_id)):
-            raise ApiError("UNAUTHENTICATED", "session is revoked or expired")
+            raise ApiError("UNAUTHENTICATED", "invalid or expired token")
     elif is_production():
-        raise ApiError("UNAUTHENTICATED", "token is missing the session claim")
+        raise ApiError("UNAUTHENTICATED", "invalid or expired token")
     return Principal(
         actor_id=str(actor_id),
         principal=str(principal),

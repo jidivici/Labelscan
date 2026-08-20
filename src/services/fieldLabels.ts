@@ -7,7 +7,7 @@
 
 import { displayDate, isDateField } from './inputMasks';
 
-export const FIELD_LABELS_FR: Record<string, string> = {
+const FIELD_LABELS_FR: Record<string, string> = {
   commercial_designation: 'Dénomination commerciale',
   scientific_name: 'Nom scientifique',
   producer_name: 'Producteur',
@@ -58,23 +58,9 @@ export function fieldLabelFr(fieldName: string): string {
   return FIELD_LABELS_FR[fieldName] ?? fieldName;
 }
 
-export const VALIDATION_STATUS_FR: Record<string, string> = {
-  present: 'présent',
-  missing: 'manquant',
-  ambiguous: 'ambigu',
-  normalized: 'normalisé',
-  unnormalizable: 'non normalisable',
-  invalid: 'invalide',
-};
-
-/** French rendering of a validation_status (falls back to the raw value). */
-export function validationStatusFr(status: string): string {
-  return VALIDATION_STATUS_FR[status] ?? status;
-}
-
 /** Ingestion lifecycle status → short professional French (no technical code shown).
  * Covers the full 12-state machine so no raw status code ever reaches the operator. */
-export const INGESTION_STATUS_FR: Record<string, string> = {
+const INGESTION_STATUS_FR: Record<string, string> = {
   raw_stored: 'Reçu',
   ocr_running: 'Lecture en cours',
   ocr_done: 'Analyse en cours',
@@ -94,7 +80,7 @@ export function ingestionStatusFr(status: string): string {
 }
 
 /** Controlled production-method value → French (for display AND omni-search). */
-export const PRODUCTION_METHOD_FR: Record<string, string> = {
+const PRODUCTION_METHOD_FR: Record<string, string> = {
   wild_caught: 'Pêche sauvage',
   farmed: 'Élevage',
 };

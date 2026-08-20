@@ -1,5 +1,7 @@
 # Revue de latence + livraison — session 21 juin 2026
 
+> Archivé le 20 août 2026 : mesures et recommandations liées à une version antérieure du pipeline.
+
 > ⚠️ **MàJ 21 juin (soir) — mesures client en main (§0).** Les durées *par étape* du §2 restent
 > des **estimations** (Vision/Haiku), mais le **bout-en-bout est désormais mesuré** (instrumentation
 > §6 livrée, `4d426a3`). Verdict : la réalité est **2–3× pire** que l'estimation. Le split

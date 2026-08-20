@@ -45,7 +45,7 @@ import {
 import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { useIsFocused, useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { StackNavigationProp } from '@react-navigation/stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -63,6 +63,7 @@ import { physicalRotationForLandscapeOutput } from '../services/captureOrientati
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
+import { RECAPTURE_GUIDANCE } from '../services/extractionUsability';
 
 // Label-placement frame — both the VISUAL GUIDE and the crop region. The full
 // photo is captured, then cropped to this rectangle before submit (see
@@ -76,12 +77,15 @@ const BOTTOM_CONTROLS_H = 88;
 const CAPTION_RESERVE = 36;
 
 type NavProp = StackNavigationProp<RootStackParamList, 'Camera'>;
+type RouteType = RouteProp<RootStackParamList, 'Camera'>;
 
 export function CameraScreen() {
   const { businessPortalId, businessProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation<NavProp>();
+  const route = useRoute<RouteType>();
+  const isRecapture = route.params?.recapture === true;
   const bottomTrayHeight = insets.bottom + BOTTOM_CONTROLS_H;
   const frameLeft = screenWidth * 0.03;
   const frameWidth = screenWidth - frameLeft * 2;
@@ -443,6 +447,18 @@ export function CameraScreen() {
         frameHeight={frameHeight}
       />
 
+      {isRecapture ? (
+        <View
+          style={[styles.recaptureHint, { top: frameTop + spacing.md }]}
+          accessibilityRole="alert"
+        >
+          <MaterialCommunityIcons name="camera-retake-outline" size={18} color={colors.onPrimary} />
+          <Text style={[typography.labelMedium, styles.recaptureHintText]}>
+            {RECAPTURE_GUIDANCE}
+          </Text>
+        </View>
+      ) : null}
+
       {/* Floating controls only: no opaque header obscuring the preview. */}
       <View
         style={[
@@ -505,6 +521,24 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+  },
+  recaptureHint: {
+    position: 'absolute',
+    left: spacing.xl,
+    right: spacing.xl,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: 12,
+    backgroundColor: 'rgba(0,0,0,0.72)',
+  },
+  recaptureHintText: {
+    color: colors.onPrimary,
+    flexShrink: 1,
+    textAlign: 'center',
   },
   topControlButton: {
     width: 44,

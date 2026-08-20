@@ -42,13 +42,6 @@ export async function getToken(): Promise<string | null> {
   return cachedToken;
 }
 
-export async function setToken(token: string): Promise<void> {
-  cachedToken = token;
-  await SecureStore.setItemAsync(TOKEN_KEY, token, {
-    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
-  });
-}
-
 export async function getRefreshToken(): Promise<string | null> {
   if (cachedRefreshToken !== undefined) return cachedRefreshToken;
   try {
@@ -117,15 +110,6 @@ export async function setOperatorContext(context: OperatorContext): Promise<void
   emitOperatorContextChanged(normalized);
 }
 
-export async function clearToken(): Promise<void> {
-  cachedToken = null;
-  try {
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
-  } catch {
-    // Best-effort: the in-memory cache is already cleared.
-  }
-}
-
 export async function clearSessionTokens(): Promise<void> {
   cachedToken = null;
   cachedRefreshToken = null;
@@ -139,16 +123,6 @@ export async function clearSessionTokens(): Promise<void> {
 }
 
 // ── Username (the signed-in user, for stamping saved articles) ───────────────────
-
-export async function getUsername(): Promise<string | null> {
-  if (cachedUsername !== undefined) return cachedUsername;
-  try {
-    cachedUsername = (await SecureStore.getItemAsync(USERNAME_KEY)) ?? null;
-  } catch {
-    cachedUsername = null;
-  }
-  return cachedUsername;
-}
 
 export async function setUsername(username: string): Promise<void> {
   cachedUsername = username;

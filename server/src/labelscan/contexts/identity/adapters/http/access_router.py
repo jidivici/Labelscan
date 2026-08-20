@@ -6,7 +6,7 @@ import threading
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from labelscan.contexts.identity.application.access_management import (
     AccessDenied,
@@ -127,39 +127,34 @@ class MeResponse(BaseModel):
         )
 
 
-class CreateIdentityRequest(BaseModel):
+class _StrictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class CreateIdentityRequest(_StrictRequest):
     username: str = Field(min_length=1, max_length=254)
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
-    password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
 
 
 class CreateManagerRequest(CreateIdentityRequest):
     business_portal_ids: list[UUID] = Field(min_length=1, max_length=1)
 
 
-class ManagerAssignmentsRequest(BaseModel):
+class ManagerAssignmentsRequest(_StrictRequest):
     business_portal_ids: list[UUID] = Field(min_length=1, max_length=1)
 
 
-class ActiveRequest(BaseModel):
+class ActiveRequest(_StrictRequest):
     active: bool
 
 
-class OperatorUpdateRequest(BaseModel):
-    business_portal_id: UUID | None = None
-    active: bool | None = None
-
-
-class ChangePasswordRequest(BaseModel):
+class ChangePasswordRequest(_StrictRequest):
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=12, max_length=128)
 
 
-class ResetCredentialRequest(BaseModel):
-    new_password: str = Field(min_length=1, max_length=128)
-
-
-class SetPortalActiveRequest(BaseModel):
+class SetPortalActiveRequest(_StrictRequest):
     portal_id: UUID = Field(
         description="Portal belonging to the store identified by the URL."
     )
@@ -181,13 +176,17 @@ def _audit(request: Request, principal: Principal) -> IdentityAudit:
 
 def _map_error(exc: Exception) -> None:
     if isinstance(exc, AccessDenied):
-        raise ApiError("FORBIDDEN", "cette opération dépasse vos droits ou votre périmètre")
+        raise ApiError(
+            "FORBIDDEN", "cette opération dépasse vos droits ou votre périmètre"
+        )
     if isinstance(exc, IdentityNotFound):
         raise ApiError("NOT_FOUND", "compte ou portail introuvable")
     if isinstance(exc, IdentityAlreadyExists):
         raise ApiError("USER_ALREADY_EXISTS", "cet identifiant est déjà utilisé")
     if isinstance(exc, InvalidCurrentPassword):
-        raise ApiError("INVALID_CURRENT_PASSWORD", "le mot de passe actuel est incorrect")
+        raise ApiError(
+            "INVALID_CURRENT_PASSWORD", "le mot de passe actuel est incorrect"
+        )
     if isinstance(exc, ValueError):
         raise ApiError("VALIDATION_ERROR", str(exc))
     raise exc
@@ -199,8 +198,8 @@ def _map_error(exc: Exception) -> None:
     summary="Get the current user and complete access context",
     description=(
         "Returns role-derived capabilities plus authorized stores and detailed business "
-        "portals. Administrators see the whole organization; managers and operators are "
-        "limited to their active portal assignments."
+        "portals. Super-administrators see the organization, administrators see their "
+        "owned store portals, and managers are limited to their active assignment."
     ),
 )
 def get_me(
@@ -214,14 +213,15 @@ def get_me(
         _map_error(exc)
         raise
 
+
 @router.get(
     "/v1/stores/{store_id}/portals",
     response_model=list[PortalResponse],
     summary="List the business portals visible for a store",
     description=(
-        "Administrators see every portal of an organization-owned store. Managers and "
-        "operators see only active portals assigned to them; an unassigned or foreign "
-        "store is reported as not found."
+        "Super-administrators see every portal of an organization-owned store. "
+        "Administrators see portals of stores they own; managers see only their active "
+        "assignment. An invisible or foreign store is reported as not found."
     ),
 )
 def list_store_portals(

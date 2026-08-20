@@ -8,7 +8,8 @@ Durability contract:
 
 A crash at any point loses nothing: the bytes are content-addressed and durable
 before the DB write, the DB write is atomic, and the 202 is returned only after
-commit. Re-submitting identical content is idempotent (no duplicate record).
+commit. HTTP retries are idempotent on their request key and that key is bound to
+the content hash; internal callers without a key retain content-hash deduplication.
 
 No business logic, no extraction here (PG-2 scope).
 """
@@ -22,6 +23,11 @@ from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
     IngestionWriteRepository,
     RawStore,
+)
+from labelscan.contexts.ingestion.domain.input_validation import (
+    validate_barcode_raw,
+    validate_client_captured_at,
+    validate_idempotency_key,
 )
 from labelscan.contexts.ingestion.domain.status import IngestionStatus
 
@@ -37,6 +43,7 @@ class SubmitIngestionCommand:
     correlation_id: str
     trace_id: str
     principal: str  # idempotency scope (e.g. device id); usually == actor_id
+    idempotency_key: str | None = None
     barcode_raw: str | None = None
     client_captured_at: str | None = None
     store_code: str | None = None
@@ -56,6 +63,11 @@ class IngestionAccepted:
 
 
 _ACCEPTED_TYPES = {"image/jpeg", "image/png", "image/webp", "image/heic"}
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
+class IngestionIdempotencyConflict(Exception):
+    """A request key was reused with different image content."""
 
 
 class SubmitIngestion:
@@ -69,8 +81,13 @@ class SubmitIngestion:
         # Boundary guards (not business logic): reject obviously invalid input early.
         if not cmd.image_bytes:
             raise ValueError("empty payload: no image bytes")
+        if len(cmd.image_bytes) > _MAX_IMAGE_BYTES:
+            raise ValueError("image exceeds the configured size limit")
         if cmd.content_type not in _ACCEPTED_TYPES:
             raise ValueError(f"unsupported media type: {cmd.content_type}")
+        barcode_raw = validate_barcode_raw(cmd.barcode_raw)
+        client_captured_at = validate_client_captured_at(cmd.client_captured_at)
+        idempotency_key = validate_idempotency_key(cmd.idempotency_key, required=False)
 
         checksum = hashlib.sha256(cmd.image_bytes).hexdigest()
 
@@ -85,8 +102,8 @@ class SubmitIngestion:
         result = self._repository.persist(
             content_sha256=checksum,
             storage_ref=storage_ref,
-            barcode_raw=cmd.barcode_raw,
-            client_captured_at=cmd.client_captured_at,
+            barcode_raw=barcode_raw,
+            client_captured_at=client_captured_at,
             store_code=cmd.store_code,
             organization_id=cmd.organization_id,
             store_id=cmd.store_id,
@@ -95,6 +112,7 @@ class SubmitIngestion:
             trade_profile_version=cmd.trade_profile_version,
             captured_by_user_id=cmd.actor_id,
             principal=cmd.principal,
+            idempotency_key=idempotency_key,
             route=_ROUTE,
             audit=AuditContext(
                 actor_id=cmd.actor_id,

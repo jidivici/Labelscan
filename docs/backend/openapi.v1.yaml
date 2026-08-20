@@ -187,8 +187,8 @@ paths:
     get:
       summary: Get the current user and complete access context
       description: Returns role-derived capabilities plus authorized stores and detailed business portals.
-        Administrators see the whole organization; managers and operators are limited to their active
-        portal assignments.
+        Super-administrators see the organization, administrators see their owned store portals, and managers
+        are limited to their active assignment.
       operationId: get_me_v1_me_get
       responses:
         '200':
@@ -202,8 +202,9 @@ paths:
   /v1/stores/{store_id}/portals:
     get:
       summary: List the business portals visible for a store
-      description: Administrators see every portal of an organization-owned store. Managers and operators
-        see only active portals assigned to them; an unassigned or foreign store is reported as not found.
+      description: Super-administrators see every portal of an organization-owned store. Administrators
+        see portals of stores they own; managers see only their active assignment. An invisible or foreign
+        store is reported as not found.
       operationId: list_store_portals_v1_stores__store_id__portals_get
       parameters:
       - name: store_id
@@ -551,7 +552,7 @@ paths:
   /v1/stores/current:
     get:
       summary: Get Current Store
-      description: Expose an operator's assigned store name without its internal code.
+      description: Expose a manager's assigned store name without its internal code.
       operationId: get_current_store_v1_stores_current_get
       responses:
         '200':
@@ -1356,6 +1357,7 @@ components:
         active:
           type: boolean
           title: Active
+      additionalProperties: false
       type: object
       required:
       - active
@@ -1905,8 +1907,9 @@ components:
         new_password:
           type: string
           maxLength: 128
-          minLength: 1
+          minLength: 12
           title: New Password
+      additionalProperties: false
       type: object
       required:
       - current_password
@@ -1946,8 +1949,9 @@ components:
         password:
           type: string
           maxLength: 128
-          minLength: 1
+          minLength: 12
           title: Password
+      additionalProperties: false
       type: object
       required:
       - username
@@ -1970,7 +1974,7 @@ components:
         password:
           type: string
           maxLength: 128
-          minLength: 1
+          minLength: 12
           title: Password
         business_portal_ids:
           items:
@@ -1980,6 +1984,7 @@ components:
           maxItems: 1
           minItems: 1
           title: Business Portal Ids
+      additionalProperties: false
       type: object
       required:
       - username
@@ -2024,7 +2029,7 @@ components:
       required:
       - name
       title: CurrentStoreResponse
-      description: The only store information an operator needs in the portal.
+      description: The store information a scoped manager needs in the portal.
     CurrentUserResponse:
       properties:
         id:
@@ -2239,6 +2244,7 @@ components:
           type: integer
           title: Photo Base Rotation Degrees
           default: -90
+      additionalProperties: false
       type: object
       required:
       - fields
@@ -2354,6 +2360,15 @@ components:
             type: array
           - type: 'null'
           title: Interim Fields
+        recapture_required:
+          type: boolean
+          title: Recapture Required
+          default: false
+        recapture_reason:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Recapture Reason
         audit:
           items:
             $ref: '#/components/schemas/AuditEntry'
@@ -2406,6 +2421,7 @@ components:
           maxLength: 128
           minLength: 1
           title: Password
+      additionalProperties: false
       type: object
       required:
       - username
@@ -2441,6 +2457,7 @@ components:
           maxItems: 1
           minItems: 1
           title: Business Portal Ids
+      additionalProperties: false
       type: object
       required:
       - business_portal_ids
@@ -2570,6 +2587,7 @@ components:
           type: boolean
           title: Force Gs1
           default: false
+      additionalProperties: false
       type: object
       title: OverrideFieldRequest
     PortalResponse:
@@ -2676,6 +2694,7 @@ components:
           maxLength: 256
           minLength: 32
           title: Refresh Token
+      additionalProperties: false
       type: object
       required:
       - refresh_token
@@ -2728,6 +2747,7 @@ components:
           type: boolean
           title: Active
           description: Desired soft-activation state. Repeating the same PUT is a no-op.
+      additionalProperties: false
       type: object
       required:
       - portal_id

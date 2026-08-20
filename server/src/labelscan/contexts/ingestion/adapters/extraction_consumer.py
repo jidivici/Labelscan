@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import time
 from typing import Protocol
 
@@ -92,28 +93,105 @@ class _ProviderExhausted(Exception):
 # run, so they propagate out of the retry loop instead of being swallowed.
 _NON_RETRYABLE = (TypeError, AttributeError, NameError, ImportError)
 
+_MAX_OCR_TEXT_CHARS = 100_000
+_MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024
+_MAX_MACHINE_VALUE_CHARS = 512
+_MAX_EVIDENCE_ITEMS = 16
+_MAX_EVIDENCE_CHARS = 2_048
+_MAX_WARNING_ITEMS = 16
+_MAX_WARNING_CHARS = 512
+_VALIDATION_STATUSES = frozenset(
+    {"present", "missing", "ambiguous", "normalized", "unnormalizable", "invalid"}
+)
+
+
+def _validate_ocr_result(result: OcrResult) -> OcrResult:
+    if not isinstance(result.full_text, str):
+        raise ValueError("OCR full_text must be a string")
+    if len(result.full_text) > _MAX_OCR_TEXT_CHARS:
+        raise ValueError("OCR text exceeds the configured limit")
+    if len(result.raw_json) > _MAX_PROVIDER_JSON_BYTES:
+        raise ValueError("OCR provider output exceeds the configured limit")
+    if (
+        not math.isfinite(result.mean_confidence)
+        or not 0.0 <= result.mean_confidence <= 1.0
+    ):
+        raise ValueError("OCR confidence must be finite and within [0,1]")
+    if (
+        not isinstance(result.page, int)
+        or isinstance(result.page, bool)
+        or not 1 <= result.page <= 100
+    ):
+        raise ValueError("OCR page must be an integer within [1,100]")
+    return result
+
+
+def _validate_llm_result(result: LlmResult) -> LlmResult:
+    if len(result.raw_json) > _MAX_PROVIDER_JSON_BYTES:
+        raise ValueError("LLM provider output exceeds the configured limit")
+    if len(result.fields) > 64:
+        raise ValueError("LLM returned too many fields")
+    seen: set[str] = set()
+    for field in result.fields:
+        if not isinstance(field.name, str) or not field.name or len(field.name) > 64:
+            raise ValueError("LLM field name is invalid")
+        if field.name in seen:
+            raise ValueError("LLM returned duplicate field names")
+        seen.add(field.name)
+        if field.value is not None and (
+            not isinstance(field.value, str)
+            or len(field.value) > _MAX_MACHINE_VALUE_CHARS
+        ):
+            raise ValueError(f"LLM value for '{field.name}' is invalid")
+        if (
+            not isinstance(field.llm_confidence, (int, float))
+            or isinstance(field.llm_confidence, bool)
+            or not math.isfinite(float(field.llm_confidence))
+            or not 0.0 <= float(field.llm_confidence) <= 1.0
+        ):
+            raise ValueError(f"LLM confidence for '{field.name}' is invalid")
+        if field.validation_status not in _VALIDATION_STATUSES:
+            raise ValueError(f"LLM validation status for '{field.name}' is invalid")
+        if len(field.evidence) > _MAX_EVIDENCE_ITEMS or any(
+            not isinstance(item, str) or len(item) > _MAX_EVIDENCE_CHARS
+            for item in field.evidence
+        ):
+            raise ValueError(f"LLM evidence for '{field.name}' is invalid")
+        if len(field.warnings) > _MAX_WARNING_ITEMS or any(
+            not isinstance(item, str) or len(item) > _MAX_WARNING_CHARS
+            for item in field.warnings
+        ):
+            raise ValueError(f"LLM warnings for '{field.name}' are invalid")
+    return result
+
 
 def _sha(b: bytes) -> str:
     return hashlib.sha256(b).hexdigest()
 
 
 def _ocr_to_json(o: OcrResult) -> bytes:
+    _validate_ocr_result(o)
     return json.dumps(
         {"full_text": o.full_text, "mean_confidence": o.mean_confidence, "page": o.page}
     ).encode()
 
 
 def _ocr_from_json(b: bytes) -> OcrResult:
+    if len(b) > _MAX_PROVIDER_JSON_BYTES:
+        raise ValueError("stored OCR output exceeds the configured limit")
     d = json.loads(b)
-    return OcrResult(
-        raw_json=b,
-        full_text=d["full_text"],
-        mean_confidence=d["mean_confidence"],
-        page=d["page"],
+    return _validate_ocr_result(
+        OcrResult(
+            raw_json=b,
+            full_text=d["full_text"],
+            mean_confidence=d["mean_confidence"],
+            page=d["page"],
+        )
     )
 
 
 def _llm_to_json(r: LlmResult) -> bytes:
+    _validate_llm_result(r)
     return json.dumps(
         {
             "extractor_version": r.extractor_version,
@@ -135,6 +213,8 @@ def _llm_to_json(r: LlmResult) -> bytes:
 
 
 def _llm_from_json(b: bytes) -> LlmResult:
+    if len(b) > _MAX_PROVIDER_JSON_BYTES:
+        raise ValueError("stored LLM output exceeds the configured limit")
     d = json.loads(b)
     fields = tuple(
         LlmField(
@@ -147,12 +227,14 @@ def _llm_from_json(b: bytes) -> LlmResult:
         )
         for f in d["fields"]
     )
-    return LlmResult(
-        raw_json=b,
-        fields=fields,
-        extractor_version=d["extractor_version"],
-        model=d["model"],
-        prompt_version=d["prompt_version"],
+    return _validate_llm_result(
+        LlmResult(
+            raw_json=b,
+            fields=fields,
+            extractor_version=d["extractor_version"],
+            model=d["model"],
+            prompt_version=d["prompt_version"],
+        )
     )
 
 
@@ -499,10 +581,18 @@ class ExtractionConsumer:
 
     def _rule_set_for(self, profile: TradeProfile) -> RuleSet:
         if profile.code == "poissonnerie":
-            return self._rule_set
+            return RuleSet(
+                version=self._rule_set.version,
+                required_fields=self._rule_set.required_fields,
+                # Historical immutable v1 artifacts may still replay these two
+                # pre-split names. New provider contracts cannot emit them.
+                allowed_fields=frozenset(profile.fields)
+                | frozenset({"product_name", "supplier_name"}),
+            )
         return RuleSet(
             version=f"trade-profile:{profile.code}:v{profile.version}",
             required_fields=frozenset(profile.required_fields),
+            allowed_fields=frozenset(profile.fields),
         )
 
     def _gate(
@@ -593,6 +683,10 @@ class ExtractionConsumer:
     ) -> tuple[OcrResult, str]:
         with self._engine.begin() as c:
             set_tenant_context(c, organization_id)
+            c.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"ocr:{organization_id}:{ingestion_id}"},
+            )
             existing = (
                 c.execute(
                     text(
@@ -670,6 +764,10 @@ class ExtractionConsumer:
             where_model = "model = :model"
         with self._engine.begin() as c:
             set_tenant_context(c, organization_id)
+            c.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+                {"key": f"llm:{organization_id}:{ingestion_id}:{model}"},
+            )
             existing = (
                 c.execute(
                     text(

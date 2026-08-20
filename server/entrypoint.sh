@@ -22,6 +22,10 @@ case "$role" in
     echo "==> Installing demonstration data"
     exec python /app/scripts/seed_demo.py
     ;;
+  secure-demo-credentials)
+    echo "==> Securing demonstration account credentials"
+    exec python /app/scripts/secure_demo_credentials.py
+    ;;
   *)
     echo "unsupported process role: $role" >&2
     exit 64

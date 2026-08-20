@@ -29,6 +29,7 @@ import { waitForIngestionResult } from './ingestionResult';
 import { enqueueCapture, executeCreateIngestionOp, type SubmitOutcome } from './ingestionSubmit';
 import { getOperation } from './outbox';
 import { deletePendingPhoto, persistPendingPhoto, sweepPendingPhotos } from './storage';
+import { hasExploitableExtraction } from './extractionUsability';
 import type { ExtractionRunResponse, IngestionStatusResponse } from '../types/api';
 import type { TradeCode } from './businessProfiles';
 
@@ -52,12 +53,14 @@ const TOTAL_POLL_BUDGET_MS = 5 * 60_000;
  *  'submitting'   → step 1 (Photo envoyée) running
  *  'extracting'   → step 2 (Extraction) running
  *  'ready'        → step 3 (À valider) — the card opens the Review screen
+ *  'recapture_required' → terminal image mismatch/empty extraction — never confirmable
  *  'submit_error' / 'extract_error' → error card (Réessayer / Supprimer)
  */
 export type PendingScanStatus =
   | 'submitting'
   | 'extracting'
   | 'ready'
+  | 'recapture_required'
   | 'submit_error'
   | 'extract_error';
 
@@ -100,7 +103,7 @@ export interface ScanResult {
 
 export interface ScanQueueSnapshot {
   scans: readonly PendingScan[];
-  /** By scan id. Present only for status 'ready' (and cleared on complete/discard). */
+  /** By scan id. Present for a completed extraction, including recapture decisions. */
   results: Readonly<Record<string, ScanResult>>;
   /** Tier 3 wave-2 preview values by scan id, while status is 'extracting'. */
   interim: Readonly<Record<string, Record<string, string>>>;
@@ -245,11 +248,22 @@ async function runPoll(id: string, ingestionId: string, controller: AbortControl
       results[id] = { ingestion: result.ingestion, run: result.run };
       delete interim[id];
       pollStartedAt.delete(id);
-      updateScan(id, { status: 'ready', ocrDone: true, errorCode: undefined });
+      updateScan(id, {
+        status:
+          result.run == null
+            ? 'extract_error'
+            : hasExploitableExtraction(result.run.fields, findScan(id)?.tradeCode)
+              ? 'ready'
+              : 'recapture_required',
+        ocrDone: true,
+        errorCode: result.run ? undefined : 'FIELDS_UNAVAILABLE',
+      });
       break;
     case 'failed':
       pollStartedAt.delete(id);
-      updateScan(id, { status: 'extract_error', errorCode: result.status });
+      // These are terminal server states. Re-polling the same ingestion cannot repair
+      // its immutable source image; guide the operator to a fresh capture instead.
+      updateScan(id, { status: 'recapture_required', errorCode: result.status });
       break;
     case 'error':
       pollStartedAt.delete(id);
@@ -465,7 +479,10 @@ export async function reconcileScanQueue(): Promise<void> {
           });
         }
         // pending / in_flight: the outbox drain owns it — leave step 1 running.
-      } else if (scan.status === 'extracting' || (scan.status === 'ready' && !results[scan.id])) {
+      } else if (
+        scan.status === 'extracting' ||
+        ((scan.status === 'ready' || scan.status === 'recapture_required') && !results[scan.id])
+      ) {
         schedulePoll(scan.id);
       }
     }

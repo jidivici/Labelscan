@@ -1,5 +1,7 @@
 # LabelScan — Revue technique de passation
 
+> Archivé le 20 août 2026 : revue ponctuelle contenant des constats désormais corrigés.
+
 **Format :** lecture/présentation ~1 h 30, pensée pour un passage de relais. Un nouveau
 développeur doit pouvoir, après cette revue, situer n'importe quel fichier du dépôt et
 comprendre *pourquoi* il est là.

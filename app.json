@@ -6,7 +6,6 @@
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "icon": "./assets/labelscan-logo.png",
-    "userInterfaceStyle": "light",
     "ios": {
       "supportsTablet": false,
       "infoPlist": {
@@ -37,7 +36,8 @@
           "recordAudioAndroid": false
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-build-properties"
     ],
     "extra": {
       "eas": {

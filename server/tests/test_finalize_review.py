@@ -348,6 +348,7 @@ def test_atomic_review_requires_exact_contract(atomic_client, engine):
     )
     assert response.status_code == 400
     assert response.json()["error_code"] == "VALIDATION_ERROR"
+    assert "gtin" in response.json()["detail"]
 
 
 def test_atomic_review_rejects_empty_values(atomic_client, engine):
@@ -361,3 +362,39 @@ def test_atomic_review_rejects_empty_values(atomic_client, engine):
     assert response.status_code == 400
     assert response.json()["error_code"] == "VALIDATION_ERROR"
     assert "gtin" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("expiry_date", "2026-02-30"),
+        ("production_method", "unknown"),
+        ("commercial_designation", "visible\u202etxt.exe"),
+    ],
+)
+def test_atomic_review_rejects_malformed_field_values(
+    atomic_client, engine, field_name, value
+):
+    fields = _fields()
+    fields[field_name] = value
+    response = atomic_client.post(
+        f"/v1/ingestions/{uuid.uuid4()}/reviews",
+        json={"fields": fields},
+        headers=_review_headers(engine, f"review-{uuid.uuid4().hex}"),
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_atomic_review_rejects_mass_assignment_properties(atomic_client, engine):
+    response = atomic_client.post(
+        f"/v1/ingestions/{uuid.uuid4()}/reviews",
+        json={
+            "fields": _fields(),
+            "organization_id": str(uuid.uuid4()),
+            "status": "confirmed",
+        },
+        headers=_review_headers(engine, f"review-{uuid.uuid4().hex}"),
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"

@@ -23,3 +23,23 @@ Deploy in this order:
 The database URL secret must use `sslmode=verify-full`. Runtime containers use a
 read-only root filesystem, explicit UID/GID 10001, no Linux capabilities, no new
 privileges, bounded PIDs/CPU/memory, and writable `noexec` tmpfs only at `/tmp`.
+
+## Hostinger single-VPS profile
+
+`compose/single-vps.yml` is the hardened contract for the existing Hostinger VPS.
+PostgreSQL and the raw-image volume remain on the private Docker network and are never
+published. This profile is accepted only with
+`LABELSCAN_DEPLOYMENT_TOPOLOGY=single-vps`; runtime validation then requires the
+database hostname `db` and the exact mounted image path `/app/data/raw`.
+
+The Hostinger deployment script backs up both PostgreSQL and the raw-image volume before
+installing this contract. Demo seed data and images are preserved during normal updates;
+they are replaced only when the separately guarded `--reset-demo` option is used.
+
+Before the first hardened release, the script separates the historical PostgreSQL role:
+`labelscan_db_admin` retains ownership/migration rights while `labelscan_app` becomes a
+non-owner runtime login without superuser or RLS-bypass privileges. Their passwords and
+URLs are distinct root-only files. Legacy provider keys are split into worker-only secret
+files, the JWT signing key is rotated once, and known demo-account passwords are replaced
+once without reseeding or deleting the demo images/arrivals. Rotation details are in
+`docs/security/SECRET-ROTATION.md`.

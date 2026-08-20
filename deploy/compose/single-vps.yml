@@ -1,0 +1,182 @@
+name: labelscan-single-vps
+
+x-production-environment: &production-environment
+  LABELSCAN_ENV: production
+  LABELSCAN_DEPLOYMENT_TOPOLOGY: single-vps
+  LABELSCAN_OBJECT_STORE: filesystem
+  LABELSCAN_RAW_STORE_DIR: /app/data/raw
+  LABELSCAN_PUBLIC_ORIGIN: https://label-scan.fr
+  LABELSCAN_ALLOWED_HOSTS: label-scan.fr
+  LABELSCAN_TRUSTED_PROXIES: 172.16.0.0/12
+  LABELSCAN_JWT_ISSUER: https://label-scan.fr
+  LABELSCAN_JWT_AUDIENCE: labelscan-clients
+  LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
+  LABELSCAN_ALLOW_HEADER_AUTH: "0"
+  LABELSCAN_OCR_PROVIDER: google
+
+x-app: &app
+  image: labelscan-local:current
+  init: true
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m
+  networks: [private]
+  security_opt:
+    - no-new-privileges:true
+  cap_drop: [ALL]
+  pids_limit: 256
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: labelscan
+      POSTGRES_USER: labelscan_db_admin
+      POSTGRES_PASSWORD_FILE: /run/secrets/db_admin_password
+    secrets: [db_admin_password]
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks: [private]
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labelscan_db_admin -d labelscan"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  migrate:
+    <<: *app
+    build:
+      context: /opt/labelscan/source
+      dockerfile: server/Dockerfile
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_admin_url
+    secrets: [database_admin_url]
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["export DATABASE_URL=$$(cat /run/secrets/database_admin_url); exec alembic upgrade head"]
+    networks: [private]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  demo:
+    <<: *app
+    environment:
+      <<: *production-environment
+      DATABASE_URL_FILE: /run/secrets/database_url
+      LABELSCAN_DEMO_CREDENTIALS_FILE: /run/secrets/demo_credentials
+    secrets: [database_url, demo_credentials]
+    command: ["demo"]
+    volumes:
+      - raw_data:/app/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    profiles: [demo-reset]
+    restart: "no"
+
+  secure_demo_credentials:
+    <<: *app
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_admin_url
+      LABELSCAN_DEMO_CREDENTIALS_FILE: /run/secrets/demo_credentials
+    secrets: [database_admin_url, demo_credentials]
+    command: ["secure-demo-credentials"]
+    networks: [private]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    profiles: [operations]
+    restart: "no"
+
+  api:
+    <<: *app
+    environment:
+      <<: *production-environment
+      DATABASE_URL_FILE: /run/secrets/database_url
+      LABELSCAN_JWT_SECRET_FILE: /run/secrets/jwt_secret
+    secrets: [database_url, jwt_secret]
+    command: ["api"]
+    volumes:
+      - raw_data:/app/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health/live')"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    mem_limit: 512m
+    cpus: 1.0
+
+  worker:
+    <<: *app
+    environment:
+      <<: *production-environment
+      DATABASE_URL_FILE: /run/secrets/database_url
+      LABELSCAN_GOOGLE_VISION_API_KEY_FILE: /run/secrets/google_vision_api_key
+      ANTHROPIC_API_KEY_FILE: /run/secrets/anthropic_api_key
+    secrets: [database_url, google_vision_api_key, anthropic_api_key]
+    command: ["worker"]
+    volumes:
+      - raw_data:/app/data/raw
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-m", "labelscan.app.worker_runtime", "--health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    mem_limit: 1g
+    cpus: 1.5
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - /opt/labelscan/config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [private]
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      api:
+        condition: service_healthy
+
+networks:
+  private:
+
+volumes:
+  postgres_data:
+  raw_data:
+  caddy_data:
+  caddy_config:
+
+secrets:
+  db_admin_password:
+    file: /opt/labelscan/secrets/db_admin_password
+  database_admin_url:
+    file: /opt/labelscan/secrets/database_admin_url
+  database_url:
+    file: /opt/labelscan/secrets/database_url
+  jwt_secret:
+    file: /opt/labelscan/secrets/jwt_secret
+  google_vision_api_key:
+    file: /opt/labelscan/secrets/google_vision_api_key
+  anthropic_api_key:
+    file: /opt/labelscan/secrets/anthropic_api_key
+  demo_credentials:
+    file: /opt/labelscan/secrets/demo_credentials.json

@@ -1,18 +1,3 @@
-// Agent 1 — Design Spec: Typography Scale (Inter font)
-import {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-} from '@expo-google-fonts/inter';
-
-export const fonts = {
-  Inter_400Regular,
-  Inter_500Medium,
-  Inter_600SemiBold,
-  Inter_700Bold,
-};
-
 export const typography = {
   // Headlines are SemiBold/Bold with slightly negative tracking — Inter reads
   // tighter and more "product" at large sizes (the Linear/Vercel signature).
@@ -91,5 +76,3 @@ export const typography = {
     letterSpacing: 0.5,
   },
 } as const;
-
-export type TypographyToken = keyof typeof typography;

@@ -15,6 +15,7 @@ It calls NO external provider and does NOT touch the outbox directly.
 from __future__ import annotations
 
 import threading
+from uuid import UUID
 
 import sqlalchemy.exc
 from fastapi import (
@@ -29,7 +30,7 @@ from fastapi import (
     UploadFile,
     status,
 )
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from labelscan.business_profiles import trade_profile
 from labelscan.contexts.ingestion.adapters.http.schemas import IngestionAcceptedResponse
@@ -50,6 +51,7 @@ from labelscan.contexts.ingestion.application.finalize_review import (
     ReviewNotFound,
 )
 from labelscan.contexts.ingestion.application.override_field import (
+    FieldIdempotencyConflict,
     FieldNotEditable,
     IngestionNotFound,
     OverrideField,
@@ -58,8 +60,14 @@ from labelscan.contexts.ingestion.application.override_field import (
 )
 from labelscan.contexts.ingestion.application.ports import ConfirmNotAllowed
 from labelscan.contexts.ingestion.application.submit_ingestion import (
+    IngestionIdempotencyConflict,
     SubmitIngestion,
     SubmitIngestionCommand,
+)
+from labelscan.contexts.ingestion.domain.input_validation import (
+    validate_barcode_raw,
+    validate_client_captured_at,
+    validate_idempotency_key,
 )
 from labelscan.platform.http.access import access_context_for_principal
 from labelscan.platform.http.errors import ApiError
@@ -81,13 +89,17 @@ _USE_CASE_LOCK = threading.Lock()
 
 
 def _bounded_idempotency_key(value: str | None, *, required: bool) -> str | None:
-    if required and not value:
-        raise ApiError("VALIDATION_ERROR", "Idempotency-Key header is required")
-    if value is not None and len(value) > 128:
-        raise ApiError(
-            "VALIDATION_ERROR", "Idempotency-Key must be at most 128 characters"
-        )
-    return value
+    try:
+        return validate_idempotency_key(value, required=required)
+    except ValueError as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc))
+
+
+def _canonical_uuid(value: str, *, label: str) -> str:
+    try:
+        return str(UUID(value))
+    except (ValueError, AttributeError) as exc:
+        raise ApiError("VALIDATION_ERROR", f"{label} must be a UUID") from exc
 
 
 def get_submit_ingestion() -> SubmitIngestion:
@@ -126,8 +138,11 @@ def submit_ingestion(
     use_case: SubmitIngestion = Depends(get_submit_ingestion),
 ) -> IngestionAcceptedResponse:
     idempotency_key = _bounded_idempotency_key(idempotency_key, required=True)
-    if barcode_raw is not None and len(barcode_raw) > 128:
-        raise ApiError("VALIDATION_ERROR", "barcode_raw must be at most 128 characters")
+    try:
+        barcode_raw = validate_barcode_raw(barcode_raw)
+        client_captured_at = validate_client_captured_at(client_captured_at)
+    except ValueError as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc))
 
     media_type = (image.content_type or "").split(";")[0].strip()
     if media_type not in _ACCEPTED_MEDIA:
@@ -167,6 +182,7 @@ def submit_ingestion(
         correlation_id=request.state.correlation_id,  # audit context: correlation
         trace_id=request.state.trace_id,  # audit context: trace
         principal=principal.principal,  # idempotency scope
+        idempotency_key=idempotency_key,
         barcode_raw=barcode_raw,
         client_captured_at=client_captured_at,
         store_code=principal.store_code,
@@ -179,6 +195,11 @@ def submit_ingestion(
 
     try:
         result = use_case(command)
+    except IngestionIdempotencyConflict:
+        raise ApiError(
+            "IDEMPOTENCY_KEY_CONFLICT",
+            "Idempotency-Key was already used for a different ingestion payload",
+        )
     except ValueError as exc:  # defence in depth: the use case re-validates
         raise ApiError("VALIDATION_ERROR", str(exc))
     except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError, OSError):
@@ -224,6 +245,8 @@ def get_override_field() -> OverrideField:
 
 
 class OverrideFieldRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     value: str | None = Field(None, max_length=512)
     note: str | None = Field(None, max_length=2000)
     # Explicit acknowledgement required to override a GS1-owned (barcode-derived)
@@ -256,6 +279,7 @@ def override_field(
     principal: Principal = Depends(require_scope("extraction:review")),
     use_case: OverrideField = Depends(get_override_field),
 ) -> OverriddenFieldResponse:
+    ingestion_id = _canonical_uuid(ingestion_id, label="ingestion_id")
     idempotency_key = _bounded_idempotency_key(idempotency_key, required=False)
     command = OverrideFieldCommand(
         ingestion_id=ingestion_id,
@@ -286,6 +310,13 @@ def override_field(
             "NOT_FOUND",
             f"no extraction run to override for ingestion {ingestion_id}",
         )
+    except FieldIdempotencyConflict:
+        raise ApiError(
+            "IDEMPOTENCY_KEY_CONFLICT",
+            "Idempotency-Key was already used for a different field override",
+        )
+    except ValueError as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc))
     except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError, OSError):
         raise ApiError("DEPENDENCY_UNAVAILABLE", "storage unavailable; retry")
 
@@ -341,6 +372,7 @@ def confirm_ingestion(
     principal: Principal = Depends(require_scope("extraction:review")),
     use_case: ConfirmIngestion = Depends(get_confirm_ingestion),
 ) -> ConfirmIngestionResponse:
+    ingestion_id = _canonical_uuid(ingestion_id, label="ingestion_id")
     command = ConfirmIngestionCommand(
         ingestion_id=ingestion_id,
         actor_id=principal.actor_id,  # audit: who reviewed
@@ -393,6 +425,8 @@ def get_finalize_review() -> FinalizeReview:
 
 
 class FinalizeReviewRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     fields: dict[str, str | None]
     note: str | None = Field(None, max_length=2000)
     photo_rotation_degrees: int = Field(0)
@@ -430,6 +464,7 @@ def finalize_review(
     principal: Principal = Depends(require_scope("extraction:review")),
     use_case: FinalizeReview = Depends(get_finalize_review),
 ) -> FinalizeReviewResponse:
+    ingestion_id = _canonical_uuid(ingestion_id, label="ingestion_id")
     idempotency_key = _bounded_idempotency_key(idempotency_key, required=True)
     if not principal.organization_id:
         raise ApiError("UNAUTHENTICATED", "organization context is missing")
@@ -473,6 +508,8 @@ def finalize_review(
             "IDEMPOTENCY_KEY_CONFLICT",
             "Idempotency-Key was already used for a different final review",
         )
+    except ValueError as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc))
     except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError, OSError):
         raise ApiError("DEPENDENCY_UNAVAILABLE", "storage unavailable; retry")
 

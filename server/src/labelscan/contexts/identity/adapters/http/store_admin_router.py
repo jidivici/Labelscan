@@ -74,7 +74,7 @@ class UpdateStoreRequest(BaseModel):
 
 
 class CurrentStoreResponse(BaseModel):
-    """The only store information an operator needs in the portal."""
+    """The store information a scoped manager needs in the portal."""
 
     name: str
 
@@ -150,7 +150,7 @@ def get_current_store(
     principal: Principal = Depends(require_scope("catalog:read")),
     service: StoreAdminService = Depends(get_store_admin_service),
 ) -> CurrentStoreResponse:
-    """Expose an operator's assigned store name without its internal code."""
+    """Expose a manager's assigned store name without its internal code."""
     if not principal.store_code:
         raise ApiError("STORE_REQUIRED")
 

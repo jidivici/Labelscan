@@ -1,5 +1,7 @@
 # LabelScan — Target Architecture
 
+> Archivé le 20 août 2026 : cible historique, remplacée par `ENTERPRISE-ARCHITECTURE.md` et les ADR.
+
 **Status:** Historical target/design record. The current runtime and production trust
 boundaries are documented in
 [`../security/SECURITY-ARCHITECTURE.md`](../security/SECURITY-ARCHITECTURE.md).

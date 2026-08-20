@@ -6,7 +6,7 @@ Accepted & Implemented
 ## Context
 Constraint #2 requires **every extracted field to carry a confidence score**, and constraint #1
 forbids hallucinating data or inventing missing fields. Today no confidence is kept at all
-(AUDIT.md D2) and there are no structured fields (D1). We must decide *where* confidence and
+([initial audit](../../archive/AUDIT.md), D2) and there are no structured fields (D1). We must decide *where* confidence and
 provenance live in the model and how "unknown" is represented.
 
 ## Decision

@@ -1,8 +1,8 @@
 # Guide développeur — LabelScan
 
 **Public :** développeur rejoignant le projet. **Prérequis de lecture :** `README.md`
-(racine) puis [`TECH-REVIEW.md`](TECH-REVIEW.md) pour le pourquoi des choix.
-**Date :** 6 juillet 2026 (v1.1).
+(racine), puis [`ENTERPRISE-ARCHITECTURE.md`](ENTERPRISE-ARCHITECTURE.md) et les ADR.
+**Révisé :** 20 août 2026.
 
 ---
 
@@ -37,10 +37,8 @@ Toute contribution est jugée contre ces règles (elles sont outillées, pas dé
    utilisent `React.memo` + `getItemLayout` — toute hauteur de header de liste doit être
    **mesurée** via `onLayout`, jamais devinée).
 4. **Vérification** : `npm run typecheck` puis `npm test` (les deux doivent être verts) ;
-   ajouter le point UI à la **checklist device** en fin de `CLAUDE.md` si le rendu réel
-   n'a pas été vu sur appareil.
-5. **Documenter** : section dans `docs/mobile/MOBILE-APP.md` (référence vivante) + entrée
-   datée dans `CLAUDE.md` (journal).
+   documenter toute vérification manuelle qui reste à faire sur appareil.
+5. **Documenter** : section dans `docs/mobile/MOBILE-APP.md` lorsque le contrat vivant change.
 
 ### Côté backend
 
@@ -88,33 +86,32 @@ Toute contribution est jugée contre ces règles (elles sont outillées, pas dé
   arrivages : accueil scopé par journée`). Le corps explique le pourquoi + les preuves
   (tests verts, vérifications).
 - **Avant tout push** : `npm run typecheck` + `npm test` + (si le backend a bougé)
-  `run_local_proofs.sh`. Aucune CI n'existe encore (voir audit v1.1, quick win) — la
-  discipline locale EST la CI.
+  `run_local_proofs.sh`.
 - **Interdits** : committer un `.env` (git-ignorés, historique vérifié sain) ; toute clé
   dans le code ou dans `EXPO_PUBLIC_*` (inliné dans le bundle, extractible).
 
 ## 6. Déploiement
 
-**Aujourd'hui (pilote local)** : `docker compose up` — Postgres + API (uvicorn :8000) +
-2 workers d'extraction. Secrets via `server/.env` monté. App mobile en dev client Expo
-(`npx expo run:ios|android`), base URL = IP LAN du serveur.
+**Local** : `docker compose up` — Postgres + API (uvicorn :8000) + 2 workers d'extraction.
+Secrets via `server/.env`. App mobile en dev client Expo, base URL = IP LAN du serveur.
 
 **Procédure de mise à jour** : migrations d'abord (`alembic upgrade head` — append-only,
 donc toujours additives et rétrocompatibles), puis rebuild/restart des services
 (`docker compose build && docker compose up -d`). Le client mobile tolère un serveur plus
 vieux (anti-spin du long-poll) — déployer le serveur avant l'app.
 
-**Cible (industrialisation, P5/roadmap)** : PG managé + backups, stockage objet pour le
-raw store, gestionnaire de secrets, CI/CD, TLS géré en frontal. Voir
-[`PROD-READINESS.md`](PROD-READINESS.md) et [`IMPLEMENTATION-ROADMAP.md`](IMPLEMENTATION-ROADMAP.md).
+**Production** : VPS Hostinger, TLS Caddy, services Docker privés et script
+`deploy/hostinger/deploy.sh`. Le script sauvegarde PostgreSQL, applique les migrations,
+recrée API/workers et vérifie `/v1/health/ready`. Ne jamais utiliser `--reset-demo`
+pour une mise à jour normale.
 
 ## 7. Où chercher quoi
 
 | Question | Document |
 |---|---|
-| Pourquoi ce choix technique ? | [`TECH-REVIEW.md`](TECH-REVIEW.md), [`architecture/adr/`](architecture/adr/) |
+| Pourquoi ce choix technique ? | [`ENTERPRISE-ARCHITECTURE.md`](ENTERPRISE-ARCHITECTURE.md), [`architecture/adr/`](architecture/adr/) |
 | Quel endpoint, quel payload ? | [`backend/API-CONTRACTS.md`](backend/API-CONTRACTS.md), `openapi.v1.yaml` |
 | Quel champ, quelle validation ? | [`extraction/PROMPT-CONTRACT.md`](extraction/PROMPT-CONTRACT.md), `src/types/api.ts` |
 | Comment marche l'écran X ? | [`mobile/MOBILE-APP.md`](mobile/MOBILE-APP.md) |
 | Le schéma de la base ? | [`database/DATABASE.md`](database/DATABASE.md) + `server/migrations/` (source de vérité) |
-| Ce qui reste à faire ? | [`AUDIT-V1.1.md`](AUDIT-V1.1.md), fin de `CLAUDE.md` |
+| Sécurité production ? | [`security/SECURITY-ARCHITECTURE.md`](security/SECURITY-ARCHITECTURE.md), [`security/PRE-PENTEST-CHECKLIST.md`](security/PRE-PENTEST-CHECKLIST.md) |

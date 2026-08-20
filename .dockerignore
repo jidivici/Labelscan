@@ -4,6 +4,7 @@ web/node_modules
 web/dist
 server/.venv
 server/.env
+server/demo/credentials.local.json
 server/.pytest_cache
 server/.ruff_cache
 **/__pycache__

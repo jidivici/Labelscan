@@ -153,6 +153,11 @@ class IngestionView(BaseModel):
     # Wave-2 preview (status ocr_done): present only BEFORE the first run, so a
     # completed/failed extraction can never show a stale preview as definitive.
     interim_fields: list[InterimFieldView] | None = None
+    # Explicit machine-readable recovery signal: when extraction produced no usable
+    # value, clients must ask for another photo rather than presenting an empty form
+    # as a successful scan.
+    recapture_required: bool = False
+    recapture_reason: str | None = None
     audit: list[AuditEntry]
 
 
@@ -170,6 +175,19 @@ class ExtractionRunView(BaseModel):
     created_at: str
     fields: list[FieldView]
     audit: list[AuditEntry]
+
+
+def _requires_recapture(status: str, fields: list[FieldView] | None) -> bool:
+    """True only for a completed review path that yielded zero usable values."""
+    if fields is None or status not in {"needs_review", "ocr_skipped_garbage"}:
+        return False
+    return not any(
+        field.value is not None
+        and str(field.value).strip()
+        and str(field.value).strip().upper() != "NC"
+        and field.validation_status not in {"missing", "invalid", "unnormalizable"}
+        for field in fields
+    )
 
 
 @router.get("/v1/ingestions/{ingestion_id}", response_model=IngestionView)
@@ -324,6 +342,7 @@ def get_ingestion(
             latest_fields = [FieldView(**f) for f in field_rows]
 
     max_attempt = max((r["attempt_no"] for r in runs), default=None)
+    recapture_required = _requires_recapture(row["status"], latest_fields)
     return IngestionView(
         ingestion_id=row["id"],
         status=row["status"],
@@ -340,6 +359,8 @@ def get_ingestion(
         ],
         latest_fields=latest_fields,
         interim_fields=interim_fields,
+        recapture_required=recapture_required,
+        recapture_reason="no_field_extracted" if recapture_required else None,
         audit=audit,
     )
 

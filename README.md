@@ -50,11 +50,11 @@ Mobile (Expo RN)                        Backend (FastAPI + PostgreSQL)
 └─────────────────────────┘             └──────────────────────────────────────┘
 ```
 
-Références détaillées : [`docs/ENTERPRISE-ARCHITECTURE.md`](docs/ENTERPRISE-ARCHITECTURE.md),
-[`docs/architecture/ARCHITECTURE.md`](docs/architecture/ARCHITECTURE.md)
-(+ ADR), [`docs/mobile/MOBILE-APP.md`](docs/mobile/MOBILE-APP.md),
+Références détaillées : [`docs/README.md`](docs/README.md),
+[`docs/ENTERPRISE-ARCHITECTURE.md`](docs/ENTERPRISE-ARCHITECTURE.md),
+[`docs/architecture/adr/`](docs/architecture/adr/), [`docs/mobile/MOBILE-APP.md`](docs/mobile/MOBILE-APP.md),
 [`docs/backend/API-CONTRACTS.md`](docs/backend/API-CONTRACTS.md),
-[`docs/TECH-REVIEW.md`](docs/TECH-REVIEW.md) (revue de passation).
+et [`docs/security/SECURITY-ARCHITECTURE.md`](docs/security/SECURITY-ARCHITECTURE.md).
 
 ## Prérequis
 
@@ -68,6 +68,8 @@ Références détaillées : [`docs/ENTERPRISE-ARCHITECTURE.md`](docs/ENTERPRISE-
 ```bash
 # Backend (depuis la racine)
 cp .env.example .env            # renseigner EXPO_PUBLIC_API_BASE_URL (IP LAN)
+cp server/demo/credentials.example.json server/demo/credentials.local.json
+# remplacer les six valeurs du fichier local par des phrases de passe uniques
 docker compose up               # db + api :8000 + 2 workers
 
 # Mobile
@@ -82,28 +84,24 @@ automatiquement une démonstration idempotente :
 normalisées pour être lues dans le bon sens.
 Les anciennes projections issues des tests ne sont pas affichées.
 
-| Rôle | Identifiant | Mot de passe | Périmètre |
-|---|---|---|---|
-| Super-administrateur | `super_admin` | `Super_admin1!` | Toute l'organisation |
-| Administrateur | `admin` | `Admin1!` | Équipe et magasins |
-| Manager | `manager_p_f` | `Manager_p_f1!` | Poissonnerie · Fréjus |
-| Manager | `manager_p_n` | `Manager_p_n1!` | Poissonnerie · Nice |
-| Manager | `manager_p_c` | `Manager_p_c1!` | Poissonnerie · Cannes |
-| Manager | `manager_p_m` | `Manager_p_m1!` | Poissonnerie · Marseille |
+Les six identifiants sont `super_admin`, `admin`, `manager_p_f`, `manager_p_n`,
+`manager_p_c` et `manager_p_m`. Leurs mots de passe ne sont pas publiés : ils viennent
+uniquement du fichier local ignoré `server/demo/credentials.local.json`.
 
 Convention manager : `p` = poissonnerie ; `f`, `n`, `c` et `m` = Fréjus,
 Nice, Cannes et Marseille.
 
-Ces identifiants sont réservés à la démonstration locale et ne doivent jamais
-être utilisés en production.
+En production, les éventuels comptes de démonstration reçoivent des secrets uniques
+root-only et toutes leurs anciennes sessions sont révoquées, sans resemer ni supprimer
+les images et arrivages existants.
 
-Connexion mobile : compte opérateur créé par l’administrateur dans le portail ;
+Connexion mobile : compte manager créé par l’administrateur dans le portail ;
 l’app obtient un JWT via `POST /v1/mobile/auth/login`. Un compte administrateur
 est volontairement refusé sur l’application mobile.
 
 Portail web utilisateurs, magasins et arrivages :
 [http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
-Les administrateurs gèrent les comptes et magasins ; les opérateurs
+Les administrateurs gèrent les comptes et magasins ; les managers
 accèdent aux arrivages enregistrés pour leur magasin, avec recherche et filtres
 par date. Ces arrivages sont persistés dans PostgreSQL et partagés entre les
 comptes autorisés du magasin.
@@ -117,8 +115,8 @@ docker compose exec server python -m labelscan.contexts.identity.adapters.cli
 
 Ouvrir ensuite `/backoffice/o/labelscan/`, saisir `LABELSCAN_ADMIN_USERNAME` et
 `LABELSCAN_ADMIN_PASSWORD`, créer d'abord les établissements avec
-**Magasins**, puis utiliser **Nouvel utilisateur** pour créer les autres comptes
-administrateur ou opérateur.
+**Magasins**, puis utiliser les écrans de gestion des accès pour créer les autres
+comptes administrateur ou manager.
 
 ## Variables d'environnement
 
@@ -141,8 +139,10 @@ Les `.env` sont git-ignorés et vérifiés absents de tout l'historique.
 | Commande | Effet |
 |---|---|
 | `npm run typecheck` | TypeScript strict, 0 erreur attendu |
-| `npm test` | Jest (23 suites, 214 tests) |
-| `bash server/scripts/run_local_proofs.sh` | PostgreSQL éphémère, migrations, 5 contrats d’architecture et 284 tests backend |
+| `npm test` | Suite Jest mobile |
+| `npm run check:android8` | Vérifie le plancher API 26 et les garde-fous réseau de la release Android |
+| `npm run security:production -- https://label-scan.fr` | Refuse une cible publique qui n'applique pas les garde-fous de production |
+| `bash server/scripts/run_local_proofs.sh` | PostgreSQL éphémère, migrations, contrats d’architecture et tests backend |
 | `docker compose up` | Stack locale (db + api + 2 workers) |
 | `npx expo run:ios` / `run:android` | Build dev client |
 
@@ -150,22 +150,21 @@ Les `.env` sont git-ignorés et vérifiés absents de tout l'historique.
 
 | Document | Contenu |
 |---|---|
-| [`docs/TECH-REVIEW.md`](docs/TECH-REVIEW.md) | **Revue technique de passation** (~1 h 30) : tout le projet, chaque choix justifié |
-| [`docs/AUDIT-V1.1.md`](docs/AUDIT-V1.1.md) | Audit qualité v1.1 : forces, faiblesses, priorités, roadmap |
+| [`docs/README.md`](docs/README.md) | Index des références vivantes et règle d’archivage |
 | [`docs/DEVELOPER-GUIDE.md`](docs/DEVELOPER-GUIDE.md) | Guide développeur : ajouter une fonctionnalité, conventions, git, déploiement |
 | [`docs/mobile/MOBILE-APP.md`](docs/mobile/MOBILE-APP.md) | Référence vivante du front mobile |
 | [`docs/backend/API-CONTRACTS.md`](docs/backend/API-CONTRACTS.md) + [`openapi.v1.yaml`](docs/backend/openapi.v1.yaml) | Contrats HTTP (problem+json, idempotence) |
 | [`docs/database/DATABASE.md`](docs/database/DATABASE.md) | Schéma PostgreSQL, append-only, triggers |
 | [`docs/ai-pipeline/AI-PIPELINE.md`](docs/ai-pipeline/AI-PIPELINE.md) + [`docs/extraction/PROMPT-CONTRACT.md`](docs/extraction/PROMPT-CONTRACT.md) | Pipeline OCR + LLM, gate anti-fabrication |
-| [`docs/architecture/adr/`](docs/architecture/adr/) | Décisions d'architecture (7 ADR) |
-| [`docs/PROD-READINESS.md`](docs/PROD-READINESS.md) / [`docs/IMPLEMENTATION-ROADMAP.md`](docs/IMPLEMENTATION-ROADMAP.md) | Chemin vers la prod / plan maître |
-| `CLAUDE.md` | Journal de chantier et backlog vivants |
+| [`docs/architecture/adr/`](docs/architecture/adr/) | Décisions d'architecture |
+| [`docs/security/`](docs/security/) | Architecture, modèle de menace et validation production |
+| [`docs/archive/`](docs/archive/) | Audits, plans et présentations historiques |
 
 ## État & limites connues
 
-- Suites mobile et backend vertes (214 Jest / 284 pytest), build React validé.
-- Comptes nominatifs, RBAC `operator`/`admin`, organisations, magasins, RLS et
+- Suites mobile, portail et backend vertes ; builds React et Android validés.
+- Comptes nominatifs, RBAC `super_admin`/`admin`/`manager`, organisations, magasins, RLS et
   stockage S3 compatible sont implémentés. SSO/OIDC reste hors de ce chantier.
 - Le téléphone conserve une file hors ligne et un cache ; PostgreSQL et le
   stockage objet restent les sources de vérité.
-- Voir l'audit v1.1 pour la liste priorisée complète.
+- Les limites de production sont suivies dans `docs/security/` et les contrôles automatisés.

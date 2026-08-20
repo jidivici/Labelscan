@@ -1,5 +1,7 @@
 # Audit de sécurité — LabelScan V2 (préparation pentest externe)
 
+> Archivé le 20 août 2026 : photographie historique, remplacée par l'architecture de sécurité vivante.
+
 > **Superseded:** this point-in-time assessment is retained for traceability. The
 > current finding disposition and release gates are in `SECURITY-AUDIT-V3.md`.
 

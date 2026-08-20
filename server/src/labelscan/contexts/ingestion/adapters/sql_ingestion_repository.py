@@ -3,13 +3,14 @@
 One transaction does everything, in this order:
   - set the transaction-local audit context (else the audit trigger rejects the
     inserts — there is NO path to write without audit context);
-  - claim idempotency atomically on the content scope hash (INSERT ... ON CONFLICT
+  - claim idempotency atomically on the caller request-key scope (INSERT ... ON CONFLICT
     DO NOTHING), generating the ingestion id up front so the claim already carries
     the response — a duplicate returns the existing id and writes nothing;
   - insert ingestion then raw_artifact (FK order), both audited by the trigger.
 
-Idempotency is keyed on the CONTENT hash (scope = principal + route + sha256), so
-re-submitting identical bytes never creates a second record.
+HTTP idempotency is keyed on principal + portal/store + route + Idempotency-Key and
+binds that key to the content SHA-256. Reusing it for different bytes is a conflict.
+Framework-free callers without a key retain deterministic content-hash deduplication.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ from labelscan.contexts.ingestion.application.ports import (
     IngestionWriteRepository,
     PersistResult,
 )
+from labelscan.contexts.ingestion.application.submit_ingestion import (
+    IngestionIdempotencyConflict,
+)
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.tenant_context import set_tenant_context
 
@@ -37,7 +41,8 @@ _CLAIM = text(
     "RETURNING response_body_ref"
 )
 _FIND_EXISTING = text(
-    "SELECT response_body_ref FROM platform.idempotency_key WHERE scope_hash = :sh"
+    "SELECT response_body_ref, request_fingerprint "
+    "FROM platform.idempotency_key WHERE scope_hash = :sh"
 )
 _INSERT_INGESTION = text(
     "INSERT INTO ingestion.ingestion "
@@ -72,13 +77,15 @@ class SqlIngestionRepository(IngestionWriteRepository):
     def _scope_hash(
         principal: str,
         route: str,
-        content_sha256: str,
+        request_identity: str,
+        organization_id: str | None,
         store_code: str | None,
         business_portal_id: str | None,
     ) -> str:
         return hashlib.sha256(
-            f"{principal}:{business_portal_id or store_code or '-'}:{route}:"
-            f"{content_sha256}".encode()
+            f"{organization_id or '-'}:{principal}:"
+            f"{business_portal_id or store_code or '-'}:{route}:"
+            f"{request_identity}".encode()
         ).hexdigest()
 
     def persist(
@@ -96,12 +103,19 @@ class SqlIngestionRepository(IngestionWriteRepository):
         trade_profile_version: str = "1",
         captured_by_user_id: str | None = None,
         principal: str,
+        idempotency_key: str | None = None,
         route: str,
         audit: AuditContext,
         action: str,
     ) -> PersistResult:
+        request_identity = idempotency_key or content_sha256
         scope_hash = self._scope_hash(
-            principal, route, content_sha256, store_code, business_portal_id
+            principal,
+            route,
+            request_identity,
+            organization_id,
+            store_code,
+            business_portal_id,
         )
         ingestion_id = str(uuid.uuid4())
 
@@ -146,9 +160,16 @@ class SqlIngestionRepository(IngestionWriteRepository):
             ).scalar_one_or_none()
 
             if claimed is None:
-                # Duplicate content within the dedup window -> return the existing id, write nothing.
-                existing = conn.execute(_FIND_EXISTING, {"sh": scope_hash}).scalar_one()
-                return PersistResult(ingestion_id=str(existing), created=False)
+                # Same request key + same fingerprint is a replay.  Reusing a key for
+                # different bytes is an integrity conflict, never an alias to old data.
+                existing = (
+                    conn.execute(_FIND_EXISTING, {"sh": scope_hash}).mappings().one()
+                )
+                if existing["request_fingerprint"] != content_sha256:
+                    raise IngestionIdempotencyConflict()
+                return PersistResult(
+                    ingestion_id=str(existing["response_body_ref"]), created=False
+                )
 
             params = {
                 "iid": ingestion_id,

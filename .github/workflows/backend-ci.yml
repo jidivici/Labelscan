@@ -85,3 +85,7 @@ jobs:
           LABELSCAN_S3_REGION: eu-west-3
           LABELSCAN_S3_KMS_KEY_ID: test-config-key
         run: docker compose -f deploy/compose/production.yml config --quiet
+      - name: Validate Hostinger single-VPS contract
+        env:
+          LABELSCAN_VERSION: ci-test-sha
+        run: docker compose -f deploy/compose/single-vps.yml config --quiet
