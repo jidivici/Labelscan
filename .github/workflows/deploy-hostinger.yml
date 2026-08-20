@@ -1,6 +1,9 @@
 name: deploy-hostinger
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       reset_demo:
@@ -18,6 +21,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, '[deploy production]')
     name: Deploy private VPS
     runs-on: [self-hosted, linux, x64, labelscan-production]
     environment:
