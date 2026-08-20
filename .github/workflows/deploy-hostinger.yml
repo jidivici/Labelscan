@@ -61,10 +61,11 @@ jobs:
           RESET_DEMO: ${{ inputs.reset_demo }}
         run: |
           set -Eeuo pipefail
+          test -x "$GITHUB_WORKSPACE/deploy/hostinger/deploy.sh"
           if [[ -z "$RESET_DEMO" ]]; then
-            sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA"
+            sudo --non-interactive "$GITHUB_WORKSPACE/deploy/hostinger/deploy.sh" "$GITHUB_WORKSPACE" "$GITHUB_SHA"
           elif [[ "$RESET_DEMO" == "RESET_DEMO" ]]; then
-            sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA" --reset-demo
+            sudo --non-interactive "$GITHUB_WORKSPACE/deploy/hostinger/deploy.sh" "$GITHUB_WORKSPACE" "$GITHUB_SHA" --reset-demo
           else
             echo "reset_demo must be empty or exactly RESET_DEMO" >&2
             exit 1
