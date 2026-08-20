@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
 from sqlalchemy import text
@@ -119,6 +120,19 @@ def test_zero_extracted_fields_requires_photo_recapture() -> None:
     ) is True
     assert _requires_recapture("needs_review", [_field_view("Cabillaud")]) is False
     assert _requires_recapture("extraction_failed", []) is False
+
+
+def test_vps_bootstrap_separates_runtime_from_database_owner() -> None:
+    deploy_script = (
+        Path(__file__).resolve().parents[2] / "deploy" / "hostinger" / "deploy.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v3"' in deploy_script
+    assert "SELECT CASE WHEN oid = 10 THEN 1 ELSE 0 END" in deploy_script
+    assert "ALTER ROLE labelscan_app RENAME TO labelscan_db_admin;" in deploy_script
+    assert "REVOKE labelscan_db_admin FROM labelscan_app;" in deploy_script
+    assert "psql -U labelscan_db_admin -d labelscan" in deploy_script
+    assert 'up -d --no-deps db' in deploy_script
 
 
 def test_runtime_role_is_neither_elevated_nor_application_owner(engine) -> None:

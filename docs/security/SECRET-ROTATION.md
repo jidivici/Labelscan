@@ -44,6 +44,11 @@ La production utilise deux rôles séparés :
 - `labelscan_app` : login runtime non propriétaire, sans superuser, `BYPASSRLS`, création
   de rôle/base ni réplication; il porte seulement les grants applicatifs.
 
+Sur un ancien cluster initialisé directement avec `labelscan_app`, le déploiement sécurisé
+renomme une fois ce compte bootstrap interne en `labelscan_db_admin`, puis recrée
+`labelscan_app` comme runtime limité. Ce mécanisme est indépendant du rôle applicatif
+`super_admin`, qui reste disponible dans le portail.
+
 Les fichiers sont :
 
 - `/opt/labelscan/secrets/db_admin_password`;
