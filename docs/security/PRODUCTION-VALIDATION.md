@@ -27,12 +27,13 @@ un passage intégral de `npm run security:production`.
   hôtes autorisés et secret JWT robuste. La topologie managée exige S3/KMS et PostgreSQL
   TLS `verify-full`; la topologie Hostinger mono-VPS exige à la place le service privé
   `db` et le volume brut monté exactement dans `/app/data/raw`.
-- La suite backend locale passe : **225 réussis, 0 échec**. Les **183** tests
-  ignorés exigent PostgreSQL 16 (sauf un appel fournisseur Anthropic volontairement
-  non facturé en test local); ils restent une porte bloquante de la CI.
+- La suite backend complète sur PostgreSQL 16 vierge passe après migration
+  montée/descente/remontée : **407 réussis, 0 échec, 1 ignoré**. Le seul test ignoré
+  effectuerait volontairement un appel Anthropic facturé.
 - Le lint de sécurité Ruff passe et les **5 contrats d'architecture** sont respectés.
-- Les preuves PostgreSQL (isolation des locataires, `SECURITY DEFINER`, audit et
-  immutabilité) restent à rejouer avec une base PostgreSQL 16 migrée.
+- Les preuves PostgreSQL locales couvrent l'isolation des locataires,
+  `SECURITY DEFINER`, RLS, audit, immutabilité, concurrence et idempotence. La CI
+  distante doit encore reproduire ce résultat avant fusion.
 - L'audit Python en ligne ne trouve **aucune vulnérabilité connue** dans le graphe
   backend verrouillé.
 

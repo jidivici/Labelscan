@@ -297,9 +297,20 @@ def test_override_rejects_malformed_or_spoofed_field_values(
     client, engine, ingestion_id, field_name, value
 ):
     before = len(_runs(engine, ingestion_id))
+    body = {"value": value}
+    if field_name in {
+        "expiry_date",
+        "batch_number",
+        "weight",
+        "gtin",
+        "packaging_date",
+    }:
+        # Reach value validation while explicitly acknowledging the separate GS1
+        # ownership gate. Without this flag the expected rejection is correctly 409.
+        body["force_gs1"] = True
     response = client.patch(
         f"/v1/ingestions/{ingestion_id}/fields/{field_name}",
-        json={"value": value},
+        json=body,
         headers={"Idempotency-Key": f"invalid-{field_name}", **REVIEW},
     )
     assert response.status_code == 400
