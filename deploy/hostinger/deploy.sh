@@ -7,7 +7,7 @@ readonly COMPOSE_FILE="${APP_ROOT}/config/compose.yml"
 readonly REPOSITORY_COMPOSE="deploy/compose/single-vps.yml"
 readonly BACKUP_ROOT="${APP_ROOT}/backups"
 readonly SECRETS_ROOT="${APP_ROOT}/secrets"
-readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v2"
+readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v3"
 readonly DEMO_CREDENTIALS_MARKER="${APP_ROOT}/.demo-credentials-secured"
 readonly JWT_ROTATION_MARKER="${APP_ROOT}/.jwt-secret-v2"
 readonly LOCK_FILE="/var/lock/labelscan-deploy.lock"
@@ -102,7 +102,7 @@ rotate_jwt_once() {
 }
 
 prepare_database_roles() {
-  local required admin_password runtime_password sql_file admin_exists bootstrap_user
+  local required admin_password runtime_password sql_file admin_exists bootstrap_user bootstrap_is_runtime swap_user
   if [[ -f "$DB_ROLE_MARKER" ]]; then
     for required in db_admin_password db_runtime_password database_admin_url database_url; do
       [[ -s "${SECRETS_ROOT}/${required}" ]] || die "database role marker exists but ${required} is missing"
@@ -112,26 +112,77 @@ prepare_database_roles() {
 
   admin_password="$(openssl rand -hex 48)"
   runtime_password="$(openssl rand -hex 48)"
+
+  admin_exists="$(docker compose -f "$COMPOSE_FILE" exec -T db sh -c \
+    'psql -U "$POSTGRES_USER" -d labelscan -Atc "SELECT count(*) FROM pg_roles WHERE rolname = '\''labelscan_db_admin'\''"')"
+  bootstrap_is_runtime="$(docker compose -f "$COMPOSE_FILE" exec -T db sh -c \
+    'psql -U "$POSTGRES_USER" -d labelscan -Atc "SELECT CASE WHEN oid = 10 THEN 1 ELSE 0 END FROM pg_roles WHERE rolname = '\''labelscan_app'\''"')"
+
+  if [[ "$bootstrap_is_runtime" == "1" ]]; then
+    if [[ "$admin_exists" == "1" ]]; then
+      docker compose -f "$COMPOSE_FILE" exec -T db \
+        psql -U labelscan_app -d labelscan -v ON_ERROR_STOP=1 \
+        -c 'REVOKE labelscan_db_admin FROM labelscan_app;' \
+        -c 'ALTER ROLE labelscan_db_admin RENAME TO labelscan_db_admin_retired_v2;'
+      swap_user=labelscan_db_admin_retired_v2
+    else
+      docker compose -f "$COMPOSE_FILE" exec -T db \
+        psql -U labelscan_app -d labelscan -v ON_ERROR_STOP=1 \
+        -c 'CREATE ROLE labelscan_db_admin_swap LOGIN SUPERUSER CREATEDB CREATEROLE NOINHERIT NOREPLICATION BYPASSRLS;'
+      swap_user=labelscan_db_admin_swap
+    fi
+    docker compose -f "$COMPOSE_FILE" exec -T db \
+      psql -U "$swap_user" -d labelscan -v ON_ERROR_STOP=1 \
+      -c 'ALTER ROLE labelscan_app RENAME TO labelscan_db_admin;'
+    if [[ "$swap_user" == "labelscan_db_admin_retired_v2" ]]; then
+      docker compose -f "$COMPOSE_FILE" exec -T db \
+        psql -U labelscan_db_admin -d labelscan -v ON_ERROR_STOP=1 \
+        -c 'ALTER ROLE labelscan_db_admin_retired_v2 WITH NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;'
+    else
+      docker compose -f "$COMPOSE_FILE" exec -T db \
+        psql -U labelscan_db_admin -d labelscan -v ON_ERROR_STOP=1 \
+        -c 'DROP ROLE labelscan_db_admin_swap;'
+    fi
+    bootstrap_user=labelscan_db_admin
+  elif [[ "$admin_exists" == "1" ]]; then
+    bootstrap_user=labelscan_db_admin
+  else
+    bootstrap_user="$(docker compose -f "$COMPOSE_FILE" exec -T db sh -c 'printf %s "$POSTGRES_USER"')"
+  fi
+
   sql_file="$(mktemp "${BACKUP_ROOT}/.database-bootstrap.XXXXXX.sql")"
   chmod 600 "$sql_file"
   printf '%s\n' \
     'BEGIN;' \
     "DO \$bootstrap\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'labelscan_db_admin') THEN CREATE ROLE labelscan_db_admin LOGIN SUPERUSER CREATEDB CREATEROLE INHERIT NOREPLICATION BYPASSRLS PASSWORD '${admin_password}'; END IF; END \$bootstrap\$;" \
+    "DO \$bootstrap\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'labelscan_app') THEN CREATE ROLE labelscan_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD '${runtime_password}'; END IF; END \$bootstrap\$;" \
     "ALTER ROLE labelscan_db_admin WITH LOGIN SUPERUSER CREATEDB CREATEROLE INHERIT NOREPLICATION BYPASSRLS PASSWORD '${admin_password}';" \
+    'REVOKE labelscan_db_admin FROM labelscan_app;' \
+    "DO \$bootstrap\$ BEGIN IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'labelscan_db_admin_retired_v2') THEN EXECUTE 'REVOKE labelscan_db_admin_retired_v2 FROM labelscan_app'; END IF; END \$bootstrap\$;" \
     'ALTER DATABASE labelscan OWNER TO labelscan_db_admin;' \
-    'REASSIGN OWNED BY labelscan_app TO labelscan_db_admin;' \
-    "ALTER ROLE labelscan_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD '${runtime_password}';" \
+    "SELECT format('ALTER TABLE %I.%I OWNER TO labelscan_db_admin;', namespace.nspname, object.relname) FROM pg_class object JOIN pg_namespace namespace ON namespace.oid = object.relnamespace JOIN pg_roles owner ON owner.oid = object.relowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2') AND object.relkind IN ('r', 'p');" \
+    '\gexec' \
+    "SELECT format('ALTER VIEW %I.%I OWNER TO labelscan_db_admin;', namespace.nspname, object.relname) FROM pg_class object JOIN pg_namespace namespace ON namespace.oid = object.relnamespace JOIN pg_roles owner ON owner.oid = object.relowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2') AND object.relkind = 'v';" \
+    '\gexec' \
+    "SELECT format('ALTER MATERIALIZED VIEW %I.%I OWNER TO labelscan_db_admin;', namespace.nspname, object.relname) FROM pg_class object JOIN pg_namespace namespace ON namespace.oid = object.relnamespace JOIN pg_roles owner ON owner.oid = object.relowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2') AND object.relkind = 'm';" \
+    '\gexec' \
+    "SELECT format('ALTER SEQUENCE %I.%I OWNER TO labelscan_db_admin;', namespace.nspname, object.relname) FROM pg_class object JOIN pg_namespace namespace ON namespace.oid = object.relnamespace JOIN pg_roles owner ON owner.oid = object.relowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2') AND object.relkind = 'S';" \
+    '\gexec' \
+    "SELECT format('ALTER FOREIGN TABLE %I.%I OWNER TO labelscan_db_admin;', namespace.nspname, object.relname) FROM pg_class object JOIN pg_namespace namespace ON namespace.oid = object.relnamespace JOIN pg_roles owner ON owner.oid = object.relowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2') AND object.relkind = 'f';" \
+    '\gexec' \
+    "SELECT format('ALTER %s %I.%I(%s) OWNER TO labelscan_db_admin;', CASE function.prokind WHEN 'p' THEN 'PROCEDURE' WHEN 'a' THEN 'AGGREGATE' ELSE 'FUNCTION' END, namespace.nspname, function.proname, pg_get_function_identity_arguments(function.oid)) FROM pg_proc function JOIN pg_namespace namespace ON namespace.oid = function.pronamespace JOIN pg_roles owner ON owner.oid = function.proowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2');" \
+    '\gexec' \
+    "SELECT format('ALTER %s %I.%I OWNER TO labelscan_db_admin;', CASE WHEN type.typtype = 'd' THEN 'DOMAIN' ELSE 'TYPE' END, namespace.nspname, type.typname) FROM pg_type type JOIN pg_namespace namespace ON namespace.oid = type.typnamespace JOIN pg_roles owner ON owner.oid = type.typowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2') AND type.typrelid = 0 AND type.typelem = 0;" \
+    '\gexec' \
+    "SELECT format('ALTER SCHEMA %I OWNER TO labelscan_db_admin;', namespace.nspname) FROM pg_namespace namespace JOIN pg_roles owner ON owner.oid = namespace.nspowner WHERE namespace.nspname IN ('ingestion', 'compliance', 'traceability', 'haccp', 'audit', 'identity', 'platform', 'public') AND owner.rolname IN ('labelscan_app', 'labelscan_db_admin_retired_v2');" \
+    '\gexec' \
     'COMMIT;' >"$sql_file"
 
-  admin_exists="$(docker compose -f "$COMPOSE_FILE" exec -T db sh -c \
-    'psql -U "$POSTGRES_USER" -d labelscan -Atc "SELECT count(*) FROM pg_roles WHERE rolname = '\''labelscan_db_admin'\''"')"
-  if [[ "$admin_exists" == "1" ]]; then
-    bootstrap_user=labelscan_db_admin
-  else
-    bootstrap_user="$(docker compose -f "$COMPOSE_FILE" exec -T db sh -c 'printf %s "$POSTGRES_USER"')"
-  fi
   docker compose -f "$COMPOSE_FILE" exec -T db \
     psql -U "$bootstrap_user" -d labelscan -v ON_ERROR_STOP=1 <"$sql_file"
+  docker compose -f "$COMPOSE_FILE" exec -T db \
+    psql -U labelscan_db_admin -d labelscan -v ON_ERROR_STOP=1 \
+    -c "ALTER ROLE labelscan_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD '${runtime_password}';"
   rm -f "$sql_file"
 
   install_secret "${SECRETS_ROOT}/db_admin_password" "$admin_password"
@@ -239,6 +290,11 @@ prepare_database_roles
 
 printf '==> Installing the reviewed single-VPS production contract\n'
 install -m 600 "${checkout_root}/${REPOSITORY_COMPOSE}" "$COMPOSE_FILE"
+
+printf '==> Recreating PostgreSQL with the owner-only service identity\n'
+docker compose -f "$COMPOSE_FILE" up -d --no-deps db
+docker compose -f "$COMPOSE_FILE" exec -T db \
+  sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done'
 
 if [[ "$reset_demo" -eq 1 ]]; then
   reset_demo_data

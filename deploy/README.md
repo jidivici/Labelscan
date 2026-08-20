@@ -36,9 +36,10 @@ The Hostinger deployment script backs up both PostgreSQL and the raw-image volum
 installing this contract. Demo seed data and images are preserved during normal updates;
 they are replaced only when the separately guarded `--reset-demo` option is used.
 
-Before the first hardened release, the script separates the historical PostgreSQL role:
-`labelscan_db_admin` retains ownership/migration rights while `labelscan_app` becomes a
-non-owner runtime login without superuser or RLS-bypass privileges. Their passwords and
+Before the first hardened release, the script separates the historical PostgreSQL role.
+When `labelscan_app` is PostgreSQL's immutable bootstrap superuser, that internal role is
+renamed to `labelscan_db_admin` and a fresh `labelscan_app` runtime login is created as a
+non-owner without superuser or RLS-bypass privileges. Their passwords and
 URLs are distinct root-only files. Legacy provider keys are split into worker-only secret
 files, the JWT signing key is rotated once, and known demo-account passwords are replaced
 once without reseeding or deleting the demo images/arrivals. Rotation details are in
