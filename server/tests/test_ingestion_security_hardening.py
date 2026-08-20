@@ -134,6 +134,10 @@ def test_vps_bootstrap_separates_runtime_from_database_owner() -> None:
     assert "FROM pg_auth_members membership" in deploy_script
     assert "psql -U labelscan_db_admin -d labelscan" in deploy_script
     assert 'up -d --no-deps db' in deploy_script
+    assert 'readonly APP_SECRET_GID="10001"' in deploy_script
+    assert "grant_application_secret_access" in deploy_script
+    assert 'chown root:"$APP_SECRET_GID" "$target"' in deploy_script
+    assert 'chmod 640 "$target"' in deploy_script
 
 
 def test_runtime_role_is_neither_elevated_nor_application_owner(engine) -> None:

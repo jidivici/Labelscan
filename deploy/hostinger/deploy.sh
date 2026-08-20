@@ -7,6 +7,7 @@ readonly COMPOSE_FILE="${APP_ROOT}/config/compose.yml"
 readonly REPOSITORY_COMPOSE="deploy/compose/single-vps.yml"
 readonly BACKUP_ROOT="${APP_ROOT}/backups"
 readonly SECRETS_ROOT="${APP_ROOT}/secrets"
+readonly APP_SECRET_GID="10001"
 readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v4"
 readonly DEMO_CREDENTIALS_MARKER="${APP_ROOT}/.demo-credentials-secured"
 readonly JWT_ROTATION_MARKER="${APP_ROOT}/.jwt-secret-v2"
@@ -57,6 +58,21 @@ install_secret() {
   printf '%s' "$value" >"$temporary"
   chown root:root "$temporary"
   mv -f "$temporary" "$target"
+}
+
+grant_application_secret_access() {
+  local target
+  for target in \
+    "${SECRETS_ROOT}/database_admin_url" \
+    "${SECRETS_ROOT}/database_url" \
+    "${SECRETS_ROOT}/jwt_secret" \
+    "${SECRETS_ROOT}/google_vision_api_key" \
+    "${SECRETS_ROOT}/anthropic_api_key" \
+    "${SECRETS_ROOT}/demo_credentials.json"; do
+    [[ -s "$target" ]] || die "required application secret is missing: ${target}"
+    chown root:"$APP_SECRET_GID" "$target"
+    chmod 640 "$target"
+  done
 }
 
 extract_legacy_secret() {
@@ -289,6 +305,7 @@ docker compose -f "${checkout_root}/${REPOSITORY_COMPOSE}" build migrate
 
 printf '==> Separating PostgreSQL owner and runtime roles\n'
 prepare_database_roles
+grant_application_secret_access
 
 printf '==> Installing the reviewed single-VPS production contract\n'
 install -m 600 "${checkout_root}/${REPOSITORY_COMPOSE}" "$COMPOSE_FILE"
