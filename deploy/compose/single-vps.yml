@@ -107,7 +107,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/v1/health/live')"]
+      test: ["CMD", "python", "-c", "import urllib.request; request = urllib.request.Request('http://127.0.0.1:8000/v1/health/live', headers={'Host': 'label-scan.fr'}); urllib.request.urlopen(request)"]
       interval: 10s
       timeout: 5s
       retries: 12
