@@ -185,7 +185,8 @@ def test_no_write_without_audit_context(engine):
                 text(
                     "INSERT INTO ingestion.ingestion "
                     "(status, image_ref, checksum_sha256, correlation_id, trace_id) "
-                    "VALUES ('raw_stored', 'ref', 'ck', 'x', 'y')"
-                )
+                    "VALUES ('raw_stored', 'ref', :checksum, 'x', 'y')"
+                ),
+                {"checksum": "c" * 64},
             )
     assert "audit context missing" in str(ei.value).lower()
