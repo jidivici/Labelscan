@@ -140,6 +140,18 @@ def test_vps_bootstrap_separates_runtime_from_database_owner() -> None:
     assert 'chmod 640 "$target"' in deploy_script
 
 
+def test_vps_healthcheck_uses_the_allowed_production_host() -> None:
+    compose = (
+        Path(__file__).resolve().parents[2]
+        / "deploy"
+        / "compose"
+        / "single-vps.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "http://127.0.0.1:8000/v1/health/live" in compose
+    assert "headers={'Host': 'label-scan.fr'}" in compose
+
+
 def test_runtime_role_is_neither_elevated_nor_application_owner(engine) -> None:
     with engine.connect() as conn:
         role = conn.execute(
