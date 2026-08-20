@@ -14,8 +14,11 @@ comme compromise et remplacée.
 2. Tourner un secret à la fois, vérifier le service, puis révoquer l'ancienne valeur.
 3. Générer au moins 48 octets aléatoires avec un gestionnaire de secrets ou, sur le VPS,
    `openssl rand -hex 48`.
-4. Conserver les fichiers sous `/opt/labelscan/secrets`, propriétaire `root:root`, mode
-   `0600`. Ne jamais les placer dans Git, une image Docker ou une variable `EXPO_PUBLIC_*`.
+4. Conserver les fichiers sous `/opt/labelscan/secrets`. Les mots de passe DB bruts non
+   montés restent `root:root` mode `0600`. Les secrets que les conteneurs non privilégiés
+   doivent lire sont `root:10001` mode `0640` et ne sont montés que dans le consommateur
+   prévu par Compose. Ne jamais les placer dans Git, une image Docker ou une variable
+   `EXPO_PUBLIC_*`.
 5. Écrire d'abord un nouveau fichier temporaire de mode `0600`, puis le renommer de façon
    atomique. Ne jamais modifier un secret partiellement pendant qu'un conteneur le lit.
 6. Après chaque rotation : redémarrer uniquement les composants consommateurs, passer les
@@ -36,6 +39,19 @@ comme compromise et remplacée.
 Le mobile ne reçoit que l'URL publique HTTPS. Les jetons de session sont conservés dans
 SecureStore; aucune clé fournisseur, DB, JWT ou AWS ne doit être compilée dans Android/iOS.
 
+## Mot de passe root du VPS
+
+Le mot de passe root est indépendant de tous les secrets LabelScan. Le déploiement ne le
+modifie pas et ne supprime aucune clé SSH existante.
+
+1. Utiliser **hPanel > VPS > Overview > Reset password**, avec une valeur unique générée
+   dans un gestionnaire et jamais publiée dans un chat, ticket ou dépôt.
+2. Ne jamais réutiliser un mot de passe DB, applicatif ou fournisseur pour root.
+3. Garder au moins une clé SSH existante et la console web hPanel disponibles pendant la
+   rotation; tester le nouvel accès dans une seconde session avant de fermer la première.
+4. Si une valeur a été publiée, ne pas l'installer : la considérer compromise et en
+   générer une nouvelle.
+
 ## PostgreSQL sur le VPS
 
 La production utilise deux rôles séparés :
@@ -51,10 +67,10 @@ renomme une fois ce compte bootstrap interne en `labelscan_db_admin`, puis recr�
 
 Les fichiers sont :
 
-- `/opt/labelscan/secrets/db_admin_password`;
-- `/opt/labelscan/secrets/db_runtime_password`;
-- `/opt/labelscan/secrets/database_admin_url` pour `migrate`;
-- `/opt/labelscan/secrets/database_url` pour API/workers/demo.
+- `/opt/labelscan/secrets/db_admin_password`, `root:root` mode `0600`;
+- `/opt/labelscan/secrets/db_runtime_password`, `root:root` mode `0600`;
+- `/opt/labelscan/secrets/database_admin_url`, `root:10001` mode `0640`, pour `migrate`;
+- `/opt/labelscan/secrets/database_url`, `root:10001` mode `0640`, pour API/workers/demo.
 
 ### Rotation du runtime sans changer l'administrateur
 

@@ -3,12 +3,12 @@
 **Dernière vérification : 20 août 2026**
 
 **Cible publique : `https://label-scan.fr`**
-**Décision actuelle : REFUSÉE**
+**Décision actuelle : VALIDÉE**
 
-Le code contient les garde-fous attendus pour le mode `production`, mais le service
-public vérifié le 20 août 2026 fonctionne encore avec une configuration hors
-production. Ce document doit passer à **VALIDÉE** uniquement après un déploiement et
-un passage intégral de `npm run security:production`.
+La révision applicative `0b5408ef52af95cd604f7bed0df4d302f267bcf7` a été déployée
+sur le VPS Hostinger le 20 août 2026. Le pipeline a créé des sauvegardes PostgreSQL et
+images brutes, appliqué la migration `0032_ingestion_db_hardening`, puis passé son
+contrôle de santé et l'intégralité de `npm run security:production`.
 
 ## Contrôles actuels
 
@@ -16,9 +16,12 @@ un passage intégral de `npm run security:production`.
 |---|---:|---|
 | API métier sans jeton | Conforme | Les routes protégées répondent `401` |
 | En-têtes d'identité forgés | Conforme | Les en-têtes `X-Actor-*` ne contournent pas le JWT |
-| Documentation OpenAPI publique | Non conforme | `/docs` et `/openapi.json` répondent `200` |
-| Détails de readiness | Non conforme | `/v1/health/ready` expose encore les contrôles internes |
-| Origine web étrangère au login | Non conforme | La requête atteint la vérification des identifiants au lieu d'être refusée `403` |
+| Documentation OpenAPI publique | Conforme | `/docs`, `/redoc` et `/openapi.json` répondent `404` |
+| Détails de readiness | Conforme | `/v1/health/ready` répond uniquement `{"status":"ready"}` |
+| Origine web étrangère au login | Conforme | Une origine étrangère est refusée `403` |
+| En-têtes HTTPS | Conforme | HSTS un an avec `includeSubDomains`; API en `no-store` |
+| Rôles PostgreSQL | Conforme | Runtime non privilégié, sans membership ni ownership; owner/migrateur séparé |
+| Données de démonstration | Conforme | 1 `super_admin`, 6 utilisateurs, 9 images brutes et 9 ingestions conservés |
 | Configuration Android | Conforme localement | URL publique HTTPS fixée par le profil; aucun secret ne doit être configuré en `EXPO_PUBLIC_*` |
 
 ## Preuves locales
@@ -52,13 +55,17 @@ n'est donc pas appliqué sans migration testée. La dépendance directe `uuid` a
 revanche été mise à jour vers sa version corrigée. Le portail web affiche
 **0 vulnérabilité**.
 
-## Critère de mise en production
+## Preuves de mise en production
 
-1. Configurer/faire tourner les secrets VPS sans les placer dans Git; EAS ne reçoit que
-   l'URL publique non secrète.
-2. Déployer l'image produite depuis la révision validée avec
-   `LABELSCAN_ENV=production`.
-3. Exécuter `npm run security:production -- https://label-scan.fr`.
-4. Rejouer la suite backend avec PostgreSQL 16, puis conserver le rapport de CI.
+1. Les secrets VPS ont été générés sur le serveur et restent absents de Git; EAS ne reçoit
+   que l'URL publique non secrète.
+2. L'image tourne avec `LABELSCAN_ENV=production` sur un réseau DB privé non publié.
+3. `npm run security:production -- https://label-scan.fr` passe intégralement depuis une
+   machine extérieure au VPS.
+4. La suite backend PostgreSQL 16 a produit 407 réussites, 0 échec et 1 test facturé
+   volontairement ignoré.
+5. Trois paires de sauvegardes DB/images ont été créées durant la transition. La clé SSH
+   temporaire de déploiement a été retirée du VPS, de hPanel et du poste local; la clé
+   existante et le mot de passe root n'ont pas été modifiés.
 
-Un échec de l'une de ces étapes bloque la validation production.
+Tout futur échec de l'un de ces contrôles bloque un nouveau déploiement.
