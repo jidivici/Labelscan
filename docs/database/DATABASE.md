@@ -1,14 +1,14 @@
 # LabelScan — Database Design
 
-**Status:** Implemented (migrations 0001–0009 applied; schema matches the running system).
+**Status:** Implemented; `server/migrations/` is the source of truth for the current revision.
 **Date:** 2026-06-18 (updated from 2026-06-14 design)
 **Author:** Database Optimizer
 **Target engine:** PostgreSQL 16. Assumes the `pgcrypto` extension (`gen_random_uuid()`, hashing).
 **Scope:** `LabelScan/` only. Sibling projects out of scope.
 
 > This document **builds on and does not contradict** the existing design. Read first:
-> [`../architecture/ARCHITECTURE.md`](../architecture/ARCHITECTURE.md) (§2 contexts, §6 events,
-> §7 aggregates, ADR-0003/0004/0005), [`../backend/BACKEND-ARCHITECTURE.md`](../backend/BACKEND-ARCHITECTURE.md)
+> [`../ENTERPRISE-ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md),
+> ADR-0003/0004/0005, [`../backend/BACKEND-ARCHITECTURE.md`](../backend/BACKEND-ARCHITECTURE.md)
 > (§7 idempotency, §2.3 outbox, §11 expand-and-contract),
 > [`../extraction/schema/extraction.v1.schema.json`](../extraction/schema/extraction.v1.schema.json),
 > [`../pipeline/shared-state.schema.json`](../pipeline/shared-state.schema.json), and

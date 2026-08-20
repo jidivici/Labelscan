@@ -102,9 +102,13 @@ def test_oversized_barcode_raw_is_rejected(client):
         ),
     ],
 )
-def test_invalid_image_is_rejected_before_raw_persistence(client, engine, content, media):
+def test_invalid_image_is_rejected_before_raw_persistence(
+    client, engine, content, media
+):
     with engine.connect() as conn:
-        before = conn.execute(text("SELECT count(*) FROM ingestion.raw_artifact")).scalar_one()
+        before = conn.execute(
+            text("SELECT count(*) FROM ingestion.raw_artifact")
+        ).scalar_one()
     files, data = _files(content, media=media)
     response = client.post(
         "/v1/ingestions",
@@ -114,7 +118,9 @@ def test_invalid_image_is_rejected_before_raw_persistence(client, engine, conten
     )
     assert response.status_code == 400
     with engine.connect() as conn:
-        after = conn.execute(text("SELECT count(*) FROM ingestion.raw_artifact")).scalar_one()
+        after = conn.execute(
+            text("SELECT count(*) FROM ingestion.raw_artifact")
+        ).scalar_one()
     assert after == before
 
 
@@ -126,3 +132,40 @@ def test_oversized_idempotency_key_is_rejected(client):
     )
     assert response.status_code == 400
     assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("barcode_raw", "valid\nforged"),
+        ("barcode_raw", "visible\u202etxt.exe"),
+        ("client_captured_at", "2026-08-20T10:00:00"),
+        ("client_captured_at", "not-a-timestamp"),
+    ],
+)
+def test_untrusted_ingestion_metadata_is_rejected(client, field, value):
+    response = client.post(
+        "/v1/ingestions",
+        files=_files(jpeg_bytes(f"metadata-{field}-{value}".encode()))[0],
+        data={field: value},
+        headers={"Idempotency-Key": f"metadata-{field}", **AUTH},
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_idempotency_key_reuse_with_different_image_is_conflict(client):
+    headers = {"Idempotency-Key": "stable-submit-key", **AUTH}
+    first = client.post(
+        "/v1/ingestions",
+        files=_files(jpeg_bytes(b"idempotency-first"))[0],
+        headers=headers,
+    )
+    conflict = client.post(
+        "/v1/ingestions",
+        files=_files(jpeg_bytes(b"idempotency-second"))[0],
+        headers=headers,
+    )
+    assert first.status_code == 202
+    assert conflict.status_code == 409
+    assert conflict.json()["error_code"] == "IDEMPOTENCY_KEY_CONFLICT"

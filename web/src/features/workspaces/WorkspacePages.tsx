@@ -4,12 +4,7 @@ import { useAuth } from '../../auth/AuthContext';
 import { hasCapability } from '../../auth/capabilities';
 import { CAPABILITIES } from '../../types';
 import { AdminPage } from '../identity/AdminPage';
-import { OperatorsPage } from '../identity/OperatorsPage';
 import { SuperAdminPage } from '../identity/SuperAdminPage';
-
-export function OperatorsWorkspacePage() {
-  return <OperatorsPage />;
-}
 
 export function AdminWorkspacePage() {
   return <AdminPage />;

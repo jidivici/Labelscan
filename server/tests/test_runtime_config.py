@@ -34,6 +34,34 @@ def test_production_database_requires_verified_tls(monkeypatch):
         validate_runtime_configuration("worker")
 
 
+def test_single_vps_accepts_only_private_database_and_mounted_raw_store(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_ENV", "production")
+    monkeypatch.setenv("LABELSCAN_DEPLOYMENT_TOPOLOGY", "single-vps")
+    monkeypatch.setenv("LABELSCAN_OBJECT_STORE", "filesystem")
+    monkeypatch.setenv("LABELSCAN_RAW_STORE_DIR", "/app/data/raw")
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+psycopg://app:secret@db:5432/labelscan"
+    )
+    monkeypatch.setenv("LABELSCAN_OCR_PROVIDER", "google")
+    monkeypatch.setenv("LABELSCAN_GOOGLE_VISION_API_KEY", "vision-secret")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-secret")
+
+    validate_runtime_configuration("worker")
+
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+psycopg://app:secret@database.example/labelscan"
+    )
+    with pytest.raises(RuntimeError, match="private db service"):
+        validate_runtime_configuration("worker")
+
+    monkeypatch.setenv(
+        "DATABASE_URL", "postgresql+psycopg://app:secret@db:5432/labelscan"
+    )
+    monkeypatch.setenv("LABELSCAN_RAW_STORE_DIR", "/tmp/raw")
+    with pytest.raises(RuntimeError, match="/app/data/raw"):
+        validate_runtime_configuration("worker")
+
+
 def test_production_api_requires_explicit_token_contract(monkeypatch):
     _production_storage(monkeypatch)
     monkeypatch.setenv(
@@ -49,6 +77,27 @@ def test_production_api_requires_explicit_token_contract(monkeypatch):
     monkeypatch.delenv("LABELSCAN_JWT_AUDIENCE", raising=False)
 
     with pytest.raises(RuntimeError, match="LABELSCAN_JWT_ISSUER"):
+        validate_runtime_configuration("api")
+
+
+def test_production_accepts_private_proxy_cidr_but_rejects_public_cidr(monkeypatch):
+    _production_storage(monkeypatch)
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql+psycopg://app:secret@db/labelscan?sslmode=verify-full",
+    )
+    monkeypatch.setenv("LABELSCAN_JWT_SECRET", "production-secret-0123456789abcdef")
+    monkeypatch.setenv("LABELSCAN_PUBLIC_ORIGIN", "https://labels.example")
+    monkeypatch.setenv("LABELSCAN_ALLOWED_HOSTS", "labels.example")
+    monkeypatch.setenv("LABELSCAN_VERSION", "test@sha256:abc")
+    monkeypatch.setenv("LABELSCAN_JWT_ISSUER", "https://labels.example")
+    monkeypatch.setenv("LABELSCAN_JWT_AUDIENCE", "labelscan-clients")
+    monkeypatch.setenv("LABELSCAN_TRUSTED_PROXIES", "172.16.0.0/12")
+
+    validate_runtime_configuration("api")
+
+    monkeypatch.setenv("LABELSCAN_TRUSTED_PROXIES", "8.8.8.0/24")
+    with pytest.raises(RuntimeError, match="private CIDRs"):
         validate_runtime_configuration("api")
 
 

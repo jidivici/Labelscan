@@ -6,7 +6,7 @@ Accepted & Implemented
 ## Context
 Today the OCR provider (Google Cloud Vision) is hardwired: `extractTextFromImage` in
 `src/services/ocr.ts` is imported and called directly from `src/screens/CameraScreen.tsx`
-(AUDIT.md A1). Persistence is hardwired to AsyncStorage. The brief requires that OCR and LLM
+([initial audit](../../archive/AUDIT.md), A1). Persistence is hardwired to AsyncStorage. The brief requires that OCR and LLM
 providers be **replaceable** and that the **domain layer not depend on** frameworks, DB, HTTP, or
 OCR/LLM providers (constraints #5, #6).
 
@@ -23,7 +23,7 @@ vendor shape leaks inward.
 ## Consequences
 - **Easier:** swapping OCR or LLM providers (new adapter, no domain change); unit-testing the
   domain and use cases with in-memory fakes (no network, no DB); keeping the bundled API-key
-  problem (AUDIT.md A3) out of the client entirely.
+  problem ([initial audit](../../archive/AUDIT.md), A3) out of the client entirely.
 - **Harder:** more indirection and a little boundary-mapping code; developers must resist calling
   SDKs directly from use cases.
 

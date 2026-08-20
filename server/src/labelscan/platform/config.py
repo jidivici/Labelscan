@@ -8,7 +8,7 @@ one interpretation of deployment mode and secret sources.
 from __future__ import annotations
 
 import os
-from ipaddress import ip_address
+from ipaddress import ip_address, ip_network
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -16,6 +16,7 @@ _ENVIRONMENTS = {"development", "test", "production"}
 _TRUTHY = {"1", "true", "yes", "on"}
 _DEFAULT_JWT_ISSUER = "labelscan-api"
 _DEFAULT_JWT_AUDIENCE = "labelscan-clients"
+_SINGLE_VPS_TOPOLOGY = "single-vps"
 
 
 def deployment_environment() -> str:
@@ -95,8 +96,43 @@ def trusted_proxy_addresses() -> list[str]:
     ]
 
 
+def is_trusted_proxy(address: str) -> bool:
+    """Match an exact proxy address or an explicitly configured CIDR."""
+
+    configured = trusted_proxy_addresses()
+    if address in configured:
+        return True
+    try:
+        peer = ip_address(address)
+    except ValueError:
+        return False
+    for candidate in configured:
+        if "/" not in candidate:
+            continue
+        try:
+            if peer in ip_network(candidate, strict=True):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _deployment_topology() -> str:
+    return (os.environ.get("LABELSCAN_DEPLOYMENT_TOPOLOGY") or "managed").strip().lower()
+
+
 def _validate_database_transport(url: str) -> None:
     parsed = urlsplit(url)
+    if _deployment_topology() == _SINGLE_VPS_TOPOLOGY:
+        if (
+            parsed.scheme != "postgresql+psycopg"
+            or parsed.hostname != "db"
+            or parsed.port not in {None, 5432}
+        ):
+            raise RuntimeError(
+                "single-vps production DATABASE_URL must target the private db service"
+            )
+        return
     sslmode = parse_qs(parsed.query).get("sslmode", [""])[0].lower()
     if sslmode != "verify-full":
         raise RuntimeError(
@@ -135,15 +171,24 @@ def _validate_public_http() -> None:
         raise RuntimeError("LABELSCAN_TRUSTED_PROXIES is required in production")
     try:
         for address in proxies:
-            ip_address(address)
+            network = ip_network(address, strict=True)
+            if network.num_addresses > 1 and not network.is_private:
+                raise ValueError("proxy CIDRs must be private")
     except ValueError as exc:
         raise RuntimeError(
-            "LABELSCAN_TRUSTED_PROXIES must contain exact IP addresses"
+            "LABELSCAN_TRUSTED_PROXIES must contain exact IPs or private CIDRs"
         ) from exc
 
 
 def _validate_object_store() -> None:
-    if (os.environ.get("LABELSCAN_OBJECT_STORE") or "").strip().lower() != "s3":
+    adapter = (os.environ.get("LABELSCAN_OBJECT_STORE") or "").strip().lower()
+    if _deployment_topology() == _SINGLE_VPS_TOPOLOGY and adapter == "filesystem":
+        if (os.environ.get("LABELSCAN_RAW_STORE_DIR") or "").strip() != "/app/data/raw":
+            raise RuntimeError(
+                "single-vps production filesystem storage must use /app/data/raw"
+            )
+        return
+    if adapter != "s3":
         raise RuntimeError("production requires LABELSCAN_OBJECT_STORE=s3")
     required = ("LABELSCAN_S3_BUCKET", "LABELSCAN_S3_REGION")
     missing = [name for name in required if not (os.environ.get(name) or "").strip()]
@@ -166,6 +211,12 @@ def validate_runtime_configuration(component: str) -> None:
     environment = deployment_environment()
     if environment != "production":
         return
+
+    topology = _deployment_topology()
+    if topology not in {"managed", _SINGLE_VPS_TOPOLOGY}:
+        raise RuntimeError(
+            "LABELSCAN_DEPLOYMENT_TOPOLOGY must be managed or single-vps"
+        )
 
     if env_flag("LABELSCAN_ALLOW_HEADER_AUTH"):
         raise RuntimeError("LABELSCAN_ALLOW_HEADER_AUTH is forbidden in production")

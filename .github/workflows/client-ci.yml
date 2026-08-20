@@ -2,9 +2,9 @@ name: client-ci
 
 on:
   push:
-    paths: ["src/**", "App.tsx", "index.ts", "app.json", "tsconfig.json", "package.json", "package-lock.json", "web/**", "security/**", "scripts/check-npm-audit.mjs", ".github/workflows/client-ci.yml"]
+    paths: ["src/**", "App.tsx", "index.ts", "app.json", "app.config.js", "eas.json", "tsconfig.json", "package.json", "package-lock.json", "web/**", "security/**", "scripts/check-npm-audit.mjs", "scripts/check-android-8.mjs", ".github/workflows/client-ci.yml"]
   pull_request:
-    paths: ["src/**", "App.tsx", "index.ts", "app.json", "tsconfig.json", "package.json", "package-lock.json", "web/**", "security/**", "scripts/check-npm-audit.mjs", ".github/workflows/client-ci.yml"]
+    paths: ["src/**", "App.tsx", "index.ts", "app.json", "app.config.js", "eas.json", "tsconfig.json", "package.json", "package-lock.json", "web/**", "security/**", "scripts/check-npm-audit.mjs", "scripts/check-android-8.mjs", ".github/workflows/client-ci.yml"]
 
 jobs:
   mobile:
@@ -16,6 +16,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm run check:android8
       - run: npm run typecheck
       - run: npm test -- --runInBand
       - run: node scripts/check-npm-audit.mjs security/npm-audit-allowlist.json

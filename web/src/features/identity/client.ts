@@ -6,7 +6,6 @@ import type {
   IamUser,
   IdentityDraft,
   ManagerDraft,
-  OperatorMutation,
 } from './types';
 import type { ProfessionCode, Store } from '../../types';
 
@@ -64,17 +63,6 @@ export function createManager(
   });
 }
 
-export function setManagerActive(
-  session: IamSession,
-  userId: string,
-  active: boolean,
-): Promise<IamUser> {
-  return request<IamUser>(`/v1/managers/${encodeURIComponent(userId)}`, session, {
-    method: 'PATCH',
-    ...json({ active }),
-  });
-}
-
 export function deleteManager(session: IamSession, userId: string): Promise<void> {
   return request<void>(`/v1/managers/${encodeURIComponent(userId)}`, session, {
     method: 'DELETE',
@@ -90,53 +78,6 @@ export function replaceManagerPortals(
     `/v1/managers/${encodeURIComponent(userId)}/portals`,
     session,
     { method: 'PATCH', ...json({ business_portal_ids: businessPortalIds }) },
-  );
-}
-
-export function listOperators(
-  session: IamSession,
-  portalId: string,
-): Promise<IamUser[]> {
-  return request<IamUser[]>(
-    `/v1/portals/${encodeURIComponent(portalId)}/operators`,
-    session,
-  );
-}
-
-export function createOperator(
-  session: IamSession,
-  portalId: string,
-  draft: IdentityDraft,
-): Promise<IamUser> {
-  return request<IamUser>(
-    `/v1/portals/${encodeURIComponent(portalId)}/operators`,
-    session,
-    { method: 'POST', ...json(draft) },
-  );
-}
-
-export function updateOperator(
-  session: IamSession,
-  portalId: string,
-  userId: string,
-  mutation: OperatorMutation,
-): Promise<IamUser> {
-  return request<IamUser>(
-    `/v1/portals/${encodeURIComponent(portalId)}/operators/${encodeURIComponent(userId)}`,
-    session,
-    { method: 'PATCH', ...json(mutation) },
-  );
-}
-
-export function resetOperatorCredential(
-  session: IamSession,
-  userId: string,
-  newPassword: string,
-): Promise<IamUser> {
-  return request<IamUser>(
-    `/v1/operators/${encodeURIComponent(userId)}/credential-reset`,
-    session,
-    { method: 'POST', ...json({ new_password: newPassword }) },
   );
 }
 

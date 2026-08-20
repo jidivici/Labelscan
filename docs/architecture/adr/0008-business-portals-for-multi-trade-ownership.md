@@ -23,11 +23,15 @@ would create incompatible assignments, filters, and historical ownership.
 Model a **business portal** as the unique
 `(organization_id, store_id, profession_code)` unit.
 
-- `super_admin` and `admin` are organization-wide, but never cross an
-  organization boundary.
-- A `manager` may have several explicit portal assignments; its visible stores
-  are derived from those portals.
-- An `operator` has exactly one active portal and uses the mobile surface only.
+- `super_admin` is organization-wide. An `admin` is bounded to portals of the
+  stores it owns. Neither may cross an organization boundary.
+- The assignable roles are exactly `super_admin`, `admin`, and `manager`.
+- A `manager` has exactly one active portal assignment; its visible store and
+  profession are derived from that portal. It may use the browser and mobile
+  surfaces.
+- The historical database value `operator` is retained only so old migrations
+  and immutable records remain interpretable. Production authentication rejects
+  it and no current HTTP route can assign it.
 - Capabilities (scopes) and data perimeter are separate checks. A valid scope
   never broadens the organization/store/portal predicate.
 - Access tokens carry canonical store and portal ids plus the primary portal and

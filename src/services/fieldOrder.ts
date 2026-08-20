@@ -4,12 +4,7 @@
  */
 import { BUSINESS_PROFILES, businessProfileFor } from './businessProfiles';
 
-export const FIELD_GROUPS = BUSINESS_PROFILES.poissonnerie.groups;
 export const FIELD_ORDER = BUSINESS_PROFILES.poissonnerie.fields;
-
-export function fieldGroupsForTrade(tradeCode: string | null | undefined) {
-  return businessProfileFor(tradeCode).groups;
-}
 
 export function fieldOrderForTrade(tradeCode: string | null | undefined) {
   return businessProfileFor(tradeCode).fields;

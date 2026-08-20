@@ -63,6 +63,7 @@ import { useScan } from '../hooks/useScanQueue';
 import {
   attachFinalizeOperation,
   completeScan,
+  discardScan,
   saveScanEdits,
   saveScanPhotoRotation,
 } from '../services/scanQueue';
@@ -72,6 +73,12 @@ import {
   NOT_COMMUNICATED_VALUE,
   notCommunicatedSuggestion,
 } from '../services/fieldCompleteness';
+import {
+  hasExploitableExtraction,
+  RECAPTURE_GUIDANCE,
+  RECAPTURE_MESSAGE,
+  RECAPTURE_TITLE,
+} from '../services/extractionUsability';
 import { SkeletonValue } from '../components/SkeletonFieldList';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
 import { RotatedPhoto } from '../components/RotatedPhoto';
@@ -501,6 +508,7 @@ export function ReviewScreen() {
   const { scan, result, interimValues } = useScan(pendingScanId);
   const ocrDone = scan?.ocrDone === true;
   const ready = scan?.status === 'ready';
+  const queueRequiresRecapture = scan?.status === 'recapture_required';
   const ingestion = result?.ingestion ?? null;
   const run = result?.run ?? null;
   const ingestionId = scan?.ingestionId ?? null;
@@ -543,6 +551,11 @@ export function ReviewScreen() {
 
   const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
   const fields = run?.fields ?? [];
+  // Defense in depth for a queue restored from an older app build: recompute the
+  // safety decision from the run too, so stale `ready` state still cannot confirm.
+  const requiresRecapture =
+    queueRequiresRecapture ||
+    (ready && run != null && !hasExploitableExtraction(fields, reviewProfile.code));
   const fieldsByName = useMemo(
     () => new Map(fields.map((field) => [field.field_name, field])),
     [fields],
@@ -633,15 +646,24 @@ export function ReviewScreen() {
   const capturedAt =
     scan?.capturedAt ?? ingestion?.client_captured_at ?? ingestion?.server_received_at ?? null;
 
-  // No more "Reprendre": Review no longer sits above a live Camera to reshoot onto —
-  // it opens from the home screen, so the back control is a plain return. Re-shooting
-  // a bad photo means discarding the card at home and scanning again.
+  // Ordinary review uses a plain return. A terminal unusable extraction gets a
+  // dedicated recapture action below that discards the bad local workflow safely and
+  // replaces this modal with the common Android/iOS Camera screen.
   const handleBack = useCallback(() => {
     navigation.goBack();
   }, [navigation]);
 
+  const handleRecapture = useCallback(async () => {
+    if (!scan) return;
+    // This terminal result must never reach the review outbox. Remove only the local
+    // workflow/photo, then create a completely fresh idempotent ingestion from Camera.
+    closingRef.current = true;
+    await discardScan(scan.id);
+    navigation.replace('Camera', { recapture: true });
+  }, [navigation, scan]);
+
   const handleSave = useCallback(async () => {
-    if (!run || !ingestion || !ingestionId || !scan) return;
+    if (requiresRecapture || !run || !ingestion || !ingestionId || !scan) return;
     // A scan captured by the short-lived +90° build has already reached the
     // server without physical rotation. It cannot be corrected safely after
     // OCR: ask for a new capture instead of submitting a payload the deployed
@@ -813,6 +835,7 @@ export function ReviewScreen() {
     fieldsByName,
     reviewProfile,
     photoRotationDegrees,
+    requiresRecapture,
     navigation,
   ]);
 
@@ -822,6 +845,7 @@ export function ReviewScreen() {
   const complete = filledCount === fieldOrder.length;
   const waitingForSync = scan?.reviewSyncStatus === 'pending';
   const canSave =
+    !requiresRecapture &&
     ready &&
     run != null &&
     ingestion != null &&
@@ -887,7 +911,22 @@ export function ReviewScreen() {
           </Text>
         ) : null}
 
-          {scan?.status === 'submit_error' || scan?.status === 'extract_error' ? (
+          {requiresRecapture ? (
+            <View style={[styles.ocrCard, styles.recaptureCard]} accessibilityRole="alert">
+              <View style={styles.recaptureTitleRow}>
+                <MaterialCommunityIcons name="camera-retake-outline" size={22} color={colors.error} />
+                <Text style={[typography.titleMedium, styles.recaptureTitle]}>
+                  {RECAPTURE_TITLE}
+                </Text>
+              </View>
+              <Text style={[typography.bodyMedium, styles.recaptureMessage]}>
+                {RECAPTURE_MESSAGE}
+              </Text>
+              <Text style={[typography.bodyMedium, styles.recaptureGuidance]}>
+                {RECAPTURE_GUIDANCE}
+              </Text>
+            </View>
+          ) : scan?.status === 'submit_error' || scan?.status === 'extract_error' ? (
             // Defensive only — a card in error state is not tappable from home, so this
             // normally can't be reached; kept in case the scan regresses while open.
             <View style={styles.ocrCard}>
@@ -993,6 +1032,8 @@ export function ReviewScreen() {
             onPress={handleBack}
             style={styles.retakeButton}
             android_ripple={{ color: colors.primaryContainer }}
+            accessibilityRole="button"
+            accessibilityLabel="Revenir à la liste"
           >
             <MaterialCommunityIcons
               name="arrow-left"
@@ -1004,23 +1045,31 @@ export function ReviewScreen() {
           </Pressable>
 
           <Pressable
-            onPress={canSave ? handleSave : undefined}
-            disabled={!canSave || saving}
-            style={[styles.saveButton, (!canSave || saving) && styles.saveButtonDisabled]}
+            onPress={requiresRecapture ? handleRecapture : canSave ? handleSave : undefined}
+            disabled={requiresRecapture ? false : !canSave || saving}
+            style={[
+              styles.saveButton,
+              requiresRecapture && styles.recaptureButton,
+              !requiresRecapture && (!canSave || saving) && styles.saveButtonDisabled,
+            ]}
             android_ripple={{ color: colors.primaryContainer }}
+            accessibilityRole="button"
+            accessibilityLabel={requiresRecapture ? 'Reprendre la photo' : 'Enregistrer l’arrivage'}
           >
             <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>
-              {saving
-                ? 'Enregistrement…'
-                : waitingForSync
-                  ? 'En attente de synchronisation'
-                  : scan?.reviewSyncStatus === 'dead_letter'
-                    ? 'Réessayer l’envoi'
-                : !ready
-                  ? 'Analyse en cours…'
-                  : !complete
-                    ? `Compléter (${filledCount}/${fieldOrder.length})`
-                    : 'Enregistrer l’arrivage'}
+              {requiresRecapture
+                ? 'Reprendre la photo'
+                : saving
+                  ? 'Enregistrement…'
+                  : waitingForSync
+                    ? 'En attente de synchronisation'
+                    : scan?.reviewSyncStatus === 'dead_letter'
+                      ? 'Réessayer l’envoi'
+                      : !ready
+                        ? 'Analyse en cours…'
+                        : !complete
+                          ? `Compléter (${filledCount}/${fieldOrder.length})`
+                          : 'Enregistrer l’arrivage'}
             </Text>
           </Pressable>
         </View>
@@ -1073,6 +1122,29 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.outlineVariant,
+  },
+  recaptureCard: {
+    borderWidth: 1,
+    borderColor: colors.error,
+  },
+  recaptureTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  recaptureTitle: {
+    color: colors.error,
+  },
+  recaptureMessage: {
+    color: colors.onSurface,
+    marginBottom: spacing.sm,
+  },
+  recaptureGuidance: {
+    color: colors.onSurfaceVariant,
+  },
+  recaptureButton: {
+    backgroundColor: colors.error,
   },
   fieldGroup: {
     marginBottom: spacing.lg,

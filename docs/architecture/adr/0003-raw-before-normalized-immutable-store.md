@@ -5,7 +5,8 @@ Accepted & Implemented
 
 ## Context
 The current app discards the raw OCR payload — `src/services/ocr.ts` keeps only
-`fullTextAnnotation.text` and drops bounding boxes and per-token confidence (AUDIT.md D2, D3) —
+`fullTextAnnotation.text` and drops bounding boxes and per-token confidence
+([initial audit](../../archive/AUDIT.md), D2/D3) —
 and history is mutable/destructive (D4). The brief requires: **raw label data stored before
 normalization** (#3), **immutable** historical data and **auditable** changes (#4), **confidence
 per field** (#2), and **no fabrication** of missing fields (#1). Re-running a better extractor

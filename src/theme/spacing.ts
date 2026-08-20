@@ -27,6 +27,3 @@ export const radius = {
   xl: 14,
   full: 9999,
 } as const;
-
-export type SpacingToken = keyof typeof spacing;
-export type RadiusToken = keyof typeof radius;

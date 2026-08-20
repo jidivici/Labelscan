@@ -107,20 +107,6 @@ def _portal_rows(conn, organization_id: str, portal_ids: tuple[str, ...]):
     return rows
 
 
-def _assigned_portals(conn, organization_id: str, user_id: str) -> frozenset[str]:
-    return frozenset(
-        str(value)
-        for value in conn.execute(
-            text(
-                "SELECT portal_id FROM identity.user_portal_assignment "
-                "WHERE organization_id = :organization_id AND user_id = :user_id "
-                "AND active = true"
-            ),
-            {"organization_id": organization_id, "user_id": user_id},
-        ).scalars()
-    )
-
-
 def _revoke_sessions(conn, organization_id: str, user_id: str) -> None:
     conn.execute(
         text(
@@ -210,8 +196,7 @@ def _admin_portals(
     rows = (
         conn.execute(
             text(
-                _PORTAL_SELECT
-                + "WHERE portal.organization_id = :organization_id "
+                _PORTAL_SELECT + "WHERE portal.organization_id = :organization_id "
                 "AND store.created_by = :actor_id "
                 "ORDER BY store.code, profession.code, portal.id"
             ),
@@ -301,9 +286,19 @@ class SqlAccessRepository(AccessRepository):
             if store_exists is None:
                 raise IdentityNotFound()
             if actor_role == SUPER_ADMIN_ROLE:
-                portals = tuple(portal for portal in _organization_portals(conn, audit.organization_id) if portal.store_id == store_id)
+                portals = tuple(
+                    portal
+                    for portal in _organization_portals(conn, audit.organization_id)
+                    if portal.store_id == store_id
+                )
             elif actor_role == ADMIN_ROLE:
-                portals = tuple(portal for portal in _admin_portals(conn, audit.organization_id, audit.actor_id) if portal.store_id == store_id)
+                portals = tuple(
+                    portal
+                    for portal in _admin_portals(
+                        conn, audit.organization_id, audit.actor_id
+                    )
+                    if portal.store_id == store_id
+                )
                 if not portals:
                     raise IdentityNotFound()
             elif actor_role in {MANAGER_ROLE, OPERATOR_ROLE}:
@@ -400,9 +395,7 @@ class SqlAccessRepository(AccessRepository):
                 )
             return AllowedPortal(**{**row, "active": active})
 
-    def list_role(
-        self, audit: IdentityAudit, role: str, portal_id: str | None = None
-    ) -> list[ManagedUser]:
+    def list_role(self, audit: IdentityAudit, role: str) -> list[ManagedUser]:
         with self._engine.begin() as conn:
             set_tenant_context(conn, audit.organization_id)
             actor_role = _actor_role(conn, audit)
@@ -414,31 +407,9 @@ class SqlAccessRepository(AccessRepository):
                 _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE}))
             elif role == MANAGER_ROLE:
                 _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}))
-            elif role == OPERATOR_ROLE:
-                _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, MANAGER_ROLE}))
-                if not portal_id or (
-                    actor_role != SUPER_ADMIN_ROLE
-                    and portal_id not in _assigned_portals(
-                        conn, audit.organization_id, audit.actor_id
-                    )
-                ):
-                    raise AccessDenied()
-                params["portal_id"] = portal_id
             else:
                 raise AccessDenied()
-            if role == OPERATOR_ROLE:
-                sql = text(
-                    "SELECT DISTINCT account.id::text FROM identity.app_user AS account "
-                    "JOIN identity.user_portal_assignment AS assignment "
-                    "ON assignment.user_id = account.id "
-                    "AND assignment.organization_id = account.organization_id "
-                    "AND assignment.active = true "
-                    "WHERE account.organization_id = :organization_id "
-                    "AND account.role = :role AND account.deleted_at IS NULL "
-                    "AND assignment.portal_id = :portal_id "
-                    "ORDER BY account.id::text"
-                )
-            elif role == MANAGER_ROLE and actor_role == ADMIN_ROLE:
+            if role == MANAGER_ROLE and actor_role == ADMIN_ROLE:
                 params["actor_id"] = audit.actor_id
                 sql = text(
                     "SELECT DISTINCT account.id::text FROM identity.app_user AS account "
@@ -496,20 +467,12 @@ class SqlAccessRepository(AccessRepository):
                     )
                 }:
                     raise AccessDenied()
-            elif role == OPERATOR_ROLE:
-                _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, MANAGER_ROLE}))
-                if len(portal_ids) != 1:
-                    raise ValueError("an operator requires exactly one portal")
-                if actor_role != SUPER_ADMIN_ROLE and not set(portal_ids) <= _assigned_portals(
-                    conn, audit.organization_id, audit.actor_id
-                ):
-                    raise AccessDenied()
             else:
                 raise AccessDenied()
 
             portals = _portal_rows(conn, audit.organization_id, portal_ids)
             user_id = str(uuid.uuid4())
-            scoped_role = role in {MANAGER_ROLE, OPERATOR_ROLE}
+            scoped_role = role == MANAGER_ROLE
             store_id = portals[0]["store_id"] if scoped_role else None
             store_code = portals[0]["store_code"] if scoped_role else None
             set_audit_context(
@@ -578,33 +541,17 @@ class SqlAccessRepository(AccessRepository):
             target = _managed(conn, audit.organization_id, target_user_id)
             if target.role != target_role:
                 raise IdentityNotFound()
-            if target_role == MANAGER_ROLE:
-                _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}))
-                if len(portal_ids) != 1:
-                    raise ValueError("a manager requires exactly one portal")
-                if actor_role == ADMIN_ROLE and not set(portal_ids) <= {
-                    portal.id
-                    for portal in _admin_portals(
-                        conn, audit.organization_id, audit.actor_id
-                    )
-                }:
-                    raise AccessDenied()
-            elif target_role == OPERATOR_ROLE:
-                _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, MANAGER_ROLE}))
-                if len(portal_ids) != 1 or (
-                    actor_role != SUPER_ADMIN_ROLE
-                    and not set(portal_ids) <= _assigned_portals(
-                        conn, audit.organization_id, audit.actor_id
-                    )
-                ):
-                    raise AccessDenied()
-                if actor_role != SUPER_ADMIN_ROLE and not set(
-                    target.business_portal_ids
-                ) <= _assigned_portals(
+            if target_role != MANAGER_ROLE:
+                raise AccessDenied()
+            _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}))
+            if len(portal_ids) != 1:
+                raise ValueError("a manager requires exactly one portal")
+            if actor_role == ADMIN_ROLE and not set(portal_ids) <= {
+                portal.id
+                for portal in _admin_portals(
                     conn, audit.organization_id, audit.actor_id
-                ):
-                    raise IdentityNotFound()
-            else:
+                )
+            }:
                 raise AccessDenied()
             portals = _portal_rows(conn, audit.organization_id, portal_ids)
             set_audit_context(
@@ -639,20 +586,19 @@ class SqlAccessRepository(AccessRepository):
                         "created_by": audit.actor_id,
                     },
                 )
-            if target_role in {MANAGER_ROLE, OPERATOR_ROLE}:
-                conn.execute(
-                    text(
-                        "UPDATE identity.app_user SET store_id = :store_id, "
-                        "store_code = :store_code, updated_at = clock_timestamp() "
-                        "WHERE organization_id = :organization_id AND id = :user_id"
-                    ),
-                    {
-                        "organization_id": audit.organization_id,
-                        "user_id": target_user_id,
-                        "store_id": portals[0]["store_id"],
-                        "store_code": portals[0]["store_code"],
-                    },
-                )
+            conn.execute(
+                text(
+                    "UPDATE identity.app_user SET store_id = :store_id, "
+                    "store_code = :store_code, updated_at = clock_timestamp() "
+                    "WHERE organization_id = :organization_id AND id = :user_id"
+                ),
+                {
+                    "organization_id": audit.organization_id,
+                    "user_id": target_user_id,
+                    "store_id": portals[0]["store_id"],
+                    "store_code": portals[0]["store_code"],
+                },
+            )
             _revoke_sessions(conn, audit.organization_id, target_user_id)
             return _managed(conn, audit.organization_id, target_user_id)
 
@@ -676,20 +622,6 @@ class SqlAccessRepository(AccessRepository):
                 _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE}))
             elif target_role == MANAGER_ROLE:
                 _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}))
-            elif target_role == OPERATOR_ROLE:
-                _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, MANAGER_ROLE}))
-                if len(target.business_portal_ids) != 1 or (
-                    actor_role != SUPER_ADMIN_ROLE
-                    and not set(target.business_portal_ids)
-                    <= _assigned_portals(conn, audit.organization_id, audit.actor_id)
-                ):
-                    raise IdentityNotFound()
-                if active:
-                    _portal_rows(
-                        conn,
-                        audit.organization_id,
-                        tuple(target.business_portal_ids),
-                    )
             else:
                 raise AccessDenied()
             set_audit_context(
@@ -730,7 +662,9 @@ class SqlAccessRepository(AccessRepository):
                 raise IdentityNotFound()
             if actor_role == ADMIN_ROLE and not set(target.business_portal_ids) <= {
                 portal.id
-                for portal in _admin_portals(conn, audit.organization_id, audit.actor_id)
+                for portal in _admin_portals(
+                    conn, audit.organization_id, audit.actor_id
+                )
             }:
                 raise IdentityNotFound()
 
@@ -765,52 +699,6 @@ class SqlAccessRepository(AccessRepository):
                 },
             )
             _revoke_sessions(conn, audit.organization_id, target_user_id)
-
-    def reset_password(
-        self,
-        audit: IdentityAudit,
-        *,
-        target_user_id: str,
-        password_hash: str,
-    ) -> ManagedUser:
-        with self._engine.begin() as conn:
-            set_tenant_context(conn, audit.organization_id)
-            actor_role = _actor_role(conn, audit)
-            _require_role(actor_role, frozenset({SUPER_ADMIN_ROLE, MANAGER_ROLE}))
-            target = _managed(conn, audit.organization_id, target_user_id)
-            if (
-                target.role != OPERATOR_ROLE
-                or not target.active
-                or len(target.business_portal_ids) != 1
-                or (
-                    actor_role != SUPER_ADMIN_ROLE
-                    and not set(target.business_portal_ids)
-                    <= _assigned_portals(conn, audit.organization_id, audit.actor_id)
-                )
-            ):
-                raise IdentityNotFound()
-            _portal_rows(conn, audit.organization_id, tuple(target.business_portal_ids))
-            set_audit_context(
-                conn,
-                actor_id=audit.actor_id,
-                action="identity.operator_password_changed",
-                correlation_id=audit.correlation_id,
-                trace_id=audit.trace_id,
-            )
-            conn.execute(
-                text(
-                    "UPDATE identity.app_user SET password_hash = :password_hash, "
-                    "updated_at = clock_timestamp() WHERE organization_id = :organization_id "
-                    "AND id = :user_id"
-                ),
-                {
-                    "organization_id": audit.organization_id,
-                    "user_id": target_user_id,
-                    "password_hash": password_hash,
-                },
-            )
-            _revoke_sessions(conn, audit.organization_id, target_user_id)
-            return _managed(conn, audit.organization_id, target_user_id)
 
     def own_credentials(self, audit: IdentityAudit) -> tuple[str, str]:
         with self._engine.begin() as conn:

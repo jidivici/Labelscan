@@ -8,6 +8,7 @@ is coerced to null, and any defect routes the whole run to human review.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -67,6 +68,7 @@ class RuleSet:
 
     version: str
     required_fields: frozenset[str]
+    allowed_fields: frozenset[str] = frozenset()
 
 
 @dataclass(frozen=True)
@@ -165,11 +167,33 @@ def evaluate(
     inconsistent: list[str] = []
     security_flags: list[str] = []
 
+    if not math.isfinite(ocr_confidence) or not 0.0 <= ocr_confidence <= 1.0:
+        ocr_confidence = 0.0
+        security_flags.append("INVALID_OCR_CONFIDENCE")
+
+    seen_names: set[str] = set()
+
     for f in fields:
+        if rule_set.allowed_fields and f.name not in rule_set.allowed_fields:
+            unverifiable.append(f.name)
+            security_flags.append("UNEXPECTED_FIELD_NAME")
+            continue
+        if f.name in seen_names:
+            unverifiable.append(f.name)
+            security_flags.append("DUPLICATE_FIELD_NAME")
+            continue
+        seen_names.add(f.name)
         value = f.value
         evidence: tuple[str, ...] | None = f.evidence or None
         spans: tuple[Span, ...] = ()
         vstatus = f.validation_status
+
+        if not math.isfinite(f.llm_confidence) or not 0.0 <= f.llm_confidence <= 1.0:
+            value = None
+            evidence = None
+            vstatus = "invalid"
+            unverifiable.append(f.name)
+            security_flags.append("INVALID_LLM_CONFIDENCE")
 
         if value is not None:
             # --- NO FABRICATION: ground every value in the raw OCR text ---
@@ -237,6 +261,8 @@ def evaluate(
             low_conf_required.append(name)
 
     reasons: list[str] = []
+    if not any(item.value is not None for item in evaluated):
+        reasons.append("no_field_extracted")
     if missing_required:
         reasons.append("missing_required_field")
     if low_conf_required:

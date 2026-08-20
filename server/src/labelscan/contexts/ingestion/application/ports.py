@@ -49,7 +49,8 @@ class AuditContext:
 class IngestionWriteRepository(Protocol):
     """Durably records an ingestion + its raw artifact in ONE transaction, with
     the audit context set so the DB audit trigger fires. Idempotent on the
-    content scope hash: a duplicate returns the existing id and writes nothing."""
+    caller-scoped request key (or the content hash for non-HTTP callers): a duplicate
+    returns the existing id and writes nothing."""
 
     def persist(
         self,
@@ -66,6 +67,7 @@ class IngestionWriteRepository(Protocol):
         trade_profile_version: str = "1",
         captured_by_user_id: str | None = None,
         principal: str,
+        idempotency_key: str | None = None,
         route: str,
         audit: AuditContext,
         action: str,

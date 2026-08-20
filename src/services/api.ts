@@ -34,7 +34,7 @@ import type {
   IngestionStatusResponse,
 } from '../types/api';
 
-export const DEFAULT_TIMEOUT_MS = 30_000;
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 /** Safe, serializable error surface. Never carries secrets or raw provider bodies. */
 export class ApiError extends Error {

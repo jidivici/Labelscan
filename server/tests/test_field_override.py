@@ -56,11 +56,13 @@ def ingestion_id(client, engine, raw_store):
     fields stand alone, so FAO_area/supplier_name are source='llm' and overridable).
 
     Fully isolated: quiesce any outbox rows other tests left pending so our worker only
-    processes OUR event, and use UNIQUE image bytes so submit idempotency (keyed on the
-    content hash, not the Idempotency-Key header) yields a fresh ingestion every run."""
+    processes OUR event, and use a unique image + Idempotency-Key so every test gets a
+    fresh ingestion."""
     with engine.begin() as c:
         c.execute(
-            text("UPDATE platform.outbox SET published_at = now() WHERE published_at IS NULL")
+            text(
+                "UPDATE platform.outbox SET published_at = now() WHERE published_at IS NULL"
+            )
         )
     content = jpeg_bytes(b"override-4-2-" + uuid.uuid4().hex.encode())
     r = client.post(
@@ -84,13 +86,17 @@ def ingestion_id(client, engine, raw_store):
 
 def _runs(engine, iid):
     with engine.connect() as c:
-        return c.execute(
-            text(
-                "SELECT id::text AS id, attempt_no FROM ingestion.extraction_run "
-                "WHERE ingestion_id = :i ORDER BY attempt_no"
-            ),
-            {"i": iid},
-        ).mappings().all()
+        return (
+            c.execute(
+                text(
+                    "SELECT id::text AS id, attempt_no FROM ingestion.extraction_run "
+                    "WHERE ingestion_id = :i ORDER BY attempt_no"
+                ),
+                {"i": iid},
+            )
+            .mappings()
+            .all()
+        )
 
 
 def _field_by_run(engine, iid, field_name):
@@ -260,3 +266,51 @@ def test_override_unknown_ingestion_is_404(client):
     )
     assert r.status_code == 404
     assert r.json()["error_code"] == "NOT_FOUND"
+
+
+def test_override_key_cannot_be_reused_for_another_request(client, ingestion_id):
+    headers = {"Idempotency-Key": "bound-override-key", **REVIEW}
+    first = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/FAO_area",
+        json={"value": "27.8.b.1"},
+        headers=headers,
+    )
+    conflict = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/commercial_designation",
+        json={"value": "Cabillaud"},
+        headers=headers,
+    )
+    assert first.status_code == 200
+    assert conflict.status_code == 409
+    assert conflict.json()["error_code"] == "IDEMPOTENCY_KEY_CONFLICT"
+
+
+@pytest.mark.parametrize(
+    ("field_name", "value"),
+    [
+        ("expiry_date", "2026-02-30"),
+        ("production_method", "wild'; DROP TABLE ingestion.ingestion; --"),
+        ("commercial_designation", "visible\u202etxt.exe"),
+    ],
+)
+def test_override_rejects_malformed_or_spoofed_field_values(
+    client, engine, ingestion_id, field_name, value
+):
+    before = len(_runs(engine, ingestion_id))
+    response = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/{field_name}",
+        json={"value": value},
+        headers={"Idempotency-Key": f"invalid-{field_name}", **REVIEW},
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+    assert len(_runs(engine, ingestion_id)) == before
+
+
+def test_override_rejects_unknown_json_properties(client, ingestion_id):
+    response = client.patch(
+        f"/v1/ingestions/{ingestion_id}/fields/FAO_area",
+        json={"value": "27", "organization_id": str(uuid.uuid4())},
+        headers=REVIEW,
+    )
+    assert response.status_code == 400

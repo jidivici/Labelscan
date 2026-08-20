@@ -24,6 +24,7 @@ from labelscan.platform.config import jwt_audience, jwt_issuer, secret_value
 
 _ALGORITHM = "HS256"
 _DEFAULT_TTL_SECONDS = 15 * 60  # 15 minutes
+_MAX_TTL_SECONDS = 60 * 60  # access tokens must remain short-lived
 
 
 class TokenError(Exception):
@@ -61,6 +62,10 @@ def default_ttl_seconds() -> int:
         raise RuntimeError(
             "LABELSCAN_JWT_TTL_SECONDS must be a positive number of seconds"
         )
+    if value > _MAX_TTL_SECONDS:
+        raise RuntimeError(
+            f"LABELSCAN_JWT_TTL_SECONDS must not exceed {_MAX_TTL_SECONDS} seconds"
+        )
     return value
 
 
@@ -72,6 +77,10 @@ def encode(claims: dict[str, Any], *, ttl_seconds: int | None = None) -> str:
     """
     now = datetime.now(timezone.utc)
     ttl = ttl_seconds if ttl_seconds is not None else default_ttl_seconds()
+    if ttl <= 0 or ttl > _MAX_TTL_SECONDS:
+        raise RuntimeError(
+            f"access-token TTL must be between 1 and {_MAX_TTL_SECONDS} seconds"
+        )
     payload = {
         **claims,
         "jti": claims.get("jti") or str(uuid.uuid4()),
@@ -92,7 +101,7 @@ def decode(token: str) -> dict[str, Any]:
             algorithms=[_ALGORITHM],
             issuer=jwt_issuer(),
             audience=jwt_audience(),
-            options={"require": ["exp", "iat", "jti", "iss", "aud"]},
+            options={"require": ["sub", "exp", "iat", "jti", "iss", "aud"]},
         )
     except jwt.PyJWTError as exc:
         raise TokenError(str(exc)) from exc

@@ -21,6 +21,10 @@ from labelscan.contexts.ingestion.application.ports import (
     FieldOverrideRepository,
     OverriddenField,
 )
+from labelscan.contexts.ingestion.domain.input_validation import (
+    validate_human_field_value,
+    validate_note,
+)
 from labelscan.platform.http.access import AccessContext
 
 _ACTION = "ingestion.field_overridden"
@@ -72,6 +76,10 @@ class IngestionNotFound(Exception):
     """No extraction run exists for this ingestion to override (→ 404)."""
 
 
+class FieldIdempotencyConflict(Exception):
+    """A request key was reused for another field, ingestion or value."""
+
+
 @dataclass(frozen=True)
 class OverrideFieldCommand:
     ingestion_id: str
@@ -106,13 +114,14 @@ class OverrideField:
 
         # Normalize: a blank string is a cleared field (value=null), consistent with
         # the storage invariant (a null value carries no provenance).
-        value = cmd.value.strip() if cmd.value and cmd.value.strip() else None
+        value = validate_human_field_value(cmd.field_name, cmd.value)
+        note = validate_note(cmd.note)
 
         result = self._repository.override_field(
             ingestion_id=cmd.ingestion_id,
             field_name=cmd.field_name,
             value=value,
-            note=cmd.note,
+            note=note,
             audit=AuditContext(
                 actor_id=cmd.actor_id,
                 correlation_id=cmd.correlation_id,

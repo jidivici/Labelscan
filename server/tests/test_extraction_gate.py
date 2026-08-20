@@ -127,3 +127,42 @@ def test_inconsistent_dates_routes_to_review():
     v = evaluate(fields, ocr_text=OCR_TEXT, ocr_confidence=0.95, rule_set=RULES)
     assert v.outcome is GateOutcome.NEEDS_REVIEW
     assert "expiry_date" in v.inconsistent
+
+
+def test_non_finite_model_confidence_is_quarantined() -> None:
+    fields = (
+        field("scientific_name", "Gadus morhua", float("nan"), ["Gadus morhua"]),
+        field("expiry_date", "2026-06-20", 0.95, ["2026-06-20"]),
+        field("production_method", "wild_caught", 0.93, ["Wild caught"]),
+    )
+    verdict = evaluate(fields, ocr_text=OCR_TEXT, ocr_confidence=0.95, rule_set=RULES)
+    assert verdict.outcome is GateOutcome.NEEDS_REVIEW
+    assert _by(verdict, "scientific_name").value is None
+    assert "INVALID_LLM_CONFIDENCE" in verdict.security_flags
+
+
+def test_unexpected_or_duplicate_machine_fields_never_reach_storage() -> None:
+    rules = RuleSet(
+        version="closed",
+        required_fields=frozenset({"scientific_name"}),
+        allowed_fields=frozenset({"scientific_name"}),
+    )
+    fields = (
+        field("scientific_name", "Gadus morhua", 0.95, ["Gadus morhua"]),
+        field("scientific_name", "Gadus morhua", 0.95, ["Gadus morhua"]),
+        field("attacker_supplied", "Gadus morhua", 0.95, ["Gadus morhua"]),
+    )
+    verdict = evaluate(fields, ocr_text=OCR_TEXT, ocr_confidence=0.95, rule_set=rules)
+    assert [item.name for item in verdict.fields] == ["scientific_name"]
+    assert verdict.outcome is GateOutcome.NEEDS_REVIEW
+    assert "DUPLICATE_FIELD_NAME" in verdict.security_flags
+    assert "UNEXPECTED_FIELD_NAME" in verdict.security_flags
+
+
+def test_zero_extracted_values_explicitly_requires_review_and_recapture() -> None:
+    rules = RuleSet(version="no-required", required_fields=frozenset())
+    verdict = evaluate(
+        (), ocr_text="Lisible mais hors étiquette", ocr_confidence=0.95, rule_set=rules
+    )
+    assert verdict.outcome is GateOutcome.NEEDS_REVIEW
+    assert "no_field_extracted" in verdict.review_reasons

@@ -1,4 +1,4 @@
-import { CAPABILITIES, type Arrival, type Session, type Store } from '../types';
+import { CAPABILITIES, type Session, type Store } from '../types';
 
 export const fixtureStores: Store[] = [
   { id: 'store-paris', code: 'PARIS-01', name: 'Paris Centre', active: true },
@@ -63,25 +63,3 @@ export const adminFixtureSession: Session = {
     business_portal_ids: [],
   },
 };
-
-export const arrivalFixtures: Arrival[] = [
-  {
-    batch_id: 'batch-1',
-    store_code: 'PARIS-01',
-    profession_code: 'poissonnerie',
-    product_name: 'Saumon Atlantique',
-    scientific_name: 'Salmo salar',
-    gtin: '03701234567890',
-    lot_code: 'LOT-2408-A',
-    supplier_name: 'Maison Océane',
-    status: 'registered',
-    fao_area_code: '27',
-    production_method: 'farmed',
-    use_by: '2026-08-08',
-    packaging_date: '2026-08-03',
-    recorded_at: '2026-08-04T08:30:00Z',
-    photo_available: false,
-    operator_id: 'operator-1',
-    operator_name: 'Lina Bernard',
-  },
-];

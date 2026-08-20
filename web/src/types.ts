@@ -31,7 +31,7 @@ export interface Store {
   active: boolean;
 }
 
-export interface SessionUser {
+interface SessionUser {
   id: string;
   username: string;
   display_name: string;
@@ -51,7 +51,7 @@ export interface Session {
   user: SessionUser;
 }
 
-export interface SessionUserPayload extends Omit<
+interface SessionUserPayload extends Omit<
   SessionUser,
   'capabilities' | 'profession_codes' | 'accessible_stores' | 'business_portal_ids'
 > {
@@ -67,7 +67,7 @@ export interface AuthPayload {
   user: SessionUserPayload;
 }
 
-export interface BusinessPortalAccess {
+interface BusinessPortalAccess {
   id: string;
   store_id: string;
   store_code: string;
@@ -86,7 +86,7 @@ export interface AccessOverviewPayload {
   business_portals: BusinessPortalAccess[];
 }
 
-export interface User {
+interface User {
   id: string;
   username: string;
   display_name: string;

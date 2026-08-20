@@ -4,7 +4,8 @@
 Accepted & Implemented
 
 ## Context
-The system needs a real backend (today there is none — AUDIT.md A2). The dominant workloads are
+The system needs a real backend (today there is none —
+[initial audit](../../archive/AUDIT.md), A2). The dominant workloads are
 OCR/LLM orchestration, structured field extraction, validation, and an audit-ready relational
 store. The existing client is an Expo/React Native TypeScript app (`package.json` Expo SDK 54,
 `react-native 0.81.5`). A stack must be chosen for the new `server/`.

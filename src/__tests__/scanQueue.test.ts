@@ -226,7 +226,7 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].ingestionId).toBe('ing-2');
   });
 
-  it('poll ready → status ready with the result stored, interim cleared', async () => {
+  it('poll ready without a loadable run becomes retryable and stays non-confirmable', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
     mockedWait.mockResolvedValue({
@@ -239,24 +239,69 @@ describe('scanQueue', () => {
     await flush(6);
 
     const snap = getSnapshot();
-    expect(snap.scans[0].status).toBe('ready');
+    expect(snap.scans[0].status).toBe('extract_error');
+    expect(snap.scans[0].errorCode).toBe('FIELDS_UNAVAILABLE');
     expect(snap.results[scan.id]).toBeDefined();
     expect(snap.interim[scan.id]).toBeUndefined();
   });
 
-  it('poll failed → extract_error, retryable via retryScan (fresh poll)', async () => {
+  it('an empty final extraction requires a fresh photo and cannot enter ready review', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-empty', replayed: false });
+    mockedWait.mockResolvedValue({
+      kind: 'ready',
+      ingestion: { ingestion_id: 'ing-empty' } as never,
+      run: { fields: [] } as never,
+    });
+
+    await enqueueScan({ tempUri: 'file:///cache/empty.jpg', capturedAt: '2026-08-20T10:00:00Z' });
+    await flush(6);
+
+    expect(getSnapshot().scans[0].status).toBe('recapture_required');
+    expect(getSnapshot().results).toBeDefined();
+  });
+
+  it('persists the recapture decision and restores it safely after an offline restart', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-offline-bad', replayed: false });
+    mockedWait.mockResolvedValue({
+      kind: 'ready',
+      ingestion: { ingestion_id: 'ing-offline-bad' } as never,
+      run: { fields: [] } as never,
+    });
+
+    await enqueueScan({ tempUri: 'file:///cache/offline-bad.jpg', capturedAt: '2026-08-20T10:00:00Z' });
+    await flush(8);
+    expect(getSnapshot().scans[0].status).toBe('recapture_required');
+    expect(JSON.parse((await AsyncStorage.getItem('@labelscan:scanQueue')) as string)[0].status)
+      .toBe('recapture_required');
+
+    _resetScanQueueForTests();
+    mockedWait.mockResolvedValue({
+      kind: 'ready',
+      ingestion: { ingestion_id: 'ing-offline-bad' } as never,
+      run: { fields: [] } as never,
+    });
+    await initScanQueue();
+    await flush(6);
+
+    expect(getSnapshot().scans[0].status).toBe('recapture_required');
+  });
+
+  it('a terminal extraction failure requires a new photo instead of re-polling', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
     mockedWait.mockResolvedValueOnce({ kind: 'failed', status: 'extraction_failed' });
 
     const scan = await enqueueScan({ tempUri: 'file:///cache/x.jpg', capturedAt: '2026-07-05T10:00:00Z' });
     await flush(6);
-    expect(getSnapshot().scans[0].status).toBe('extract_error');
+    expect(getSnapshot().scans[0].status).toBe('recapture_required');
 
-    mockedWait.mockReturnValue(new Promise(() => {}));
+    const pollCalls = mockedWait.mock.calls.length;
     await retryScan(scan.id);
     await flush();
-    expect(getSnapshot().scans[0].status).toBe('extracting');
+    expect(getSnapshot().scans[0].status).toBe('recapture_required');
+    expect(mockedWait).toHaveBeenCalledTimes(pollCalls);
   });
 
   it('caps concurrent polls at 3 and drains the FIFO wait list as slots free up', async () => {

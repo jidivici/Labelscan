@@ -6,17 +6,30 @@ côté backend, celui-ci comble le manque.
 **Date :** 2026-07-06 (v1.1 — module Calendrier, accueil scopé par journée ; v2.1 la veille).
 **Périmètre :** `src/` uniquement.
 
+## Contrat de compatibilité
+
+- Expo SDK 54 / React Native 0.81.
+- Android minimum : **Android 8.0, API 26**, avec le même parcours métier qu'iOS
+  (connexion, capture, file hors ligne, revue 17/17, catalogue et déconnexion).
+- Les builds preview et production refusent le trafic HTTP en clair et embarquent
+  obligatoirement `https://label-scan.fr` comme origine API.
+- La session est stockée dans Android Keystore/iOS Keychain via SecureStore et la
+  sauvegarde applicative Android est désactivée.
+
+`npm run check:android8` vérifie le contrat statique. Une release reste bloquée tant
+qu'un test du parcours complet n'a pas réussi sur un appareil ou émulateur API 26.
+
 > **À lire en regard :**
 > - [`../backend/API-CONTRACTS.md`](../backend/API-CONTRACTS.md) — les endpoints que le client appelle.
 > - [`../ai-pipeline/AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) — OCR + extraction côté serveur.
 > - [`../extraction/PROMPT-CONTRACT.md`](../extraction/PROMPT-CONTRACT.md) — le gate anti-fabrication.
-> - `CLAUDE.md` (racine) — roadmap et backlog vivants.
+> - [`../README.md`](../README.md) — index de la documentation vivante.
 
 ---
 
 ## 1. Vue d'ensemble
 
-- **Auth** : JWT opérateur (`POST /v1/mobile/auth/login`), token attaché en `Authorization: Bearer`
+- **Auth** : JWT manager mono-portail (`POST /v1/mobile/auth/login`), token attaché en `Authorization: Bearer`
   ([`services/auth.ts`](../../src/services/auth.ts), [`services/api.ts`](../../src/services/api.ts)).
   Toute l'app est derrière l'écran de connexion ([`context/AuthContext.tsx`](../../src/context/AuthContext.tsx)).
 - **Extraction backend uniquement.** L'ancien chemin OCR sur l'appareil (Google Vision côté client)
@@ -156,8 +169,8 @@ soit un nouveau cycle de sondage (`retryScan` sur `extract_error`).
   `scanStepFromStatus(status, ocrDone)` → 3 étapes (Photo envoyée / Extraction / À valider) +
   libellé de l'étape active. Sobre par construction (Clean UI) : pas de pourcentage, pas de
   confiance — une étape est faite / active / en attente / en erreur.
-- **`PendingScanCard.tsx`** : vignette photo + libellé d'étape (issu de `scanStepFromStatus` — le
-  composant visuel `ScanStepper.tsx` n'est plus branché depuis la v2.1), ou — en cas d'erreur — boutons
+- **`PendingScanCard.tsx`** : vignette photo + libellé d'étape issu de `scanStepFromStatus`,
+  ou — en cas d'erreur — boutons
   **Réessayer** / **Supprimer** (avec confirmation). Hauteur **fixe** (`PENDING_CARD_HEIGHT`) pour
   que `getItemLayout` de la `FlatList` des articles reste exact malgré la zone « En cours » en
   `ListHeaderComponent` (la hauteur du header est **mesurée** via `onLayout`, jamais devinée).
@@ -228,7 +241,7 @@ deux panneaux.
 - **Nettoyage Revue** : l'**icône agrandir** et le **bouton retour flottant en haut** sont retirés de
   `ReviewScreen` (le tap sur la photo ouvre toujours la visionneuse ; le retour se fait par le bouton
   « Retour » de la barre d'action du bas). `ArticleDetailScreen` conserve son icône d'agrandissement.
-- **Au save** : chemin inchangé (`saveBackendArticle` local → overrides → `confirm` → drain), puis
+- **Au save** : finalisation serveur atomique (overrides + confirmation via l'outbox), puis
   `completeScan(scanId)` retire l'entrée de la file (et sa photo `pending/`) — la carte quitte la
   zone « En cours » et l'article apparaît dans la liste (comptage à jour).
 
@@ -324,8 +337,7 @@ retirée avec ce chemin — audit §7.3.)
   `Login`.
 - **`components/`** — `CaptureFab`, `FrameOverlay`, `CaptureButton`, `FlashOverlay`, `ArticleCard`,
   `EmptyState`, `ScanTray`, `PendingScanCard`, `CalendarPanel`, `PhotoViewerModal`,
-  `ExtractionProgress`, `CascadeReveal`, `PulseDot`, `SkeletonFieldList`. (`ScanStepper` n'est
-  plus branché — candidat à suppression, voir audit v1.1.)
+  `ExtractionProgress`, `PulseDot`, `SkeletonValue`.
 - **`services/`** — I/O : `api`, `auth`/`authStorage`, `ingestionSubmit`, `ingestionResult`,
   `ingestionPolling`, `scanQueue`, `storage`, `outbox`, `outboxDrain`, `export`,
   `fieldOverrideSubmit`. Helpers **purs** (testables) : `dates`, `calendar`, `inputMasks`,

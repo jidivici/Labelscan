@@ -11,3 +11,4 @@ venv/
 
 # Local env
 .env
+demo/credentials.local.json

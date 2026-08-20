@@ -61,5 +61,3 @@ export const colors = {
   overlayZone: 'rgba(8,127,114,0.16)',
   overlayZoneBorder: 'rgba(8,127,114,0.88)',
 } as const;
-
-export type ColorToken = keyof typeof colors;

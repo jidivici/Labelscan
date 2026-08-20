@@ -14,6 +14,7 @@ import uuid
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
+from labelscan.platform.config import is_production
 from labelscan.platform.http import jwt as jwt_codec
 from labelscan.platform.http.errors import problem_response
 from labelscan.platform.http.rate_limit import LimitExceeded, rate_limits
@@ -55,9 +56,11 @@ class MutationRateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
             return await call_next(request)
-        if request.url.path.startswith("/v1/auth/") or request.url.path.startswith(
-            "/v1/mobile/auth/"
-        ) or "/auth/" in request.url.path:
+        if (
+            request.url.path.startswith("/v1/auth/")
+            or request.url.path.startswith("/v1/mobile/auth/")
+            or "/auth/" in request.url.path
+        ):
             return await call_next(request)
         authorization = request.headers.get("Authorization") or ""
         scheme, _, token = authorization.partition(" ")
@@ -103,6 +106,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
+        if is_production():
+            response.headers.setdefault(
+                "Strict-Transport-Security", "max-age=31536000; includeSubDomains"
+            )
         if request.url.path.startswith("/v1"):
             # APIs are non-cacheable by default.  Endpoints serving immutable,
             # private assets (such as authenticated arrival photos) may opt in
@@ -110,6 +117,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             if "Cache-Control" not in response.headers:
                 response.headers["Cache-Control"] = "no-store"
                 response.headers["Pragma"] = "no-cache"
+            response.headers.setdefault(
+                "Content-Security-Policy",
+                "default-src 'none'; base-uri 'none'; frame-ancestors 'none'",
+            )
         if request.url.path.startswith("/backoffice"):
             response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
             response.headers.setdefault("Cross-Origin-Resource-Policy", "same-origin")

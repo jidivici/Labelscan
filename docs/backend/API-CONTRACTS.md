@@ -3,23 +3,22 @@
 **Status:** Core enterprise flow implemented — see
 [`ENTERPRISE-ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md) for the tenant,
 storage and synchronization invariants.
-**Date:** 2026-08-04
+**Date:** 2026-08-20
 **Companion to:** [`BACKEND-ARCHITECTURE.md`](./BACKEND-ARCHITECTURE.md) (see §8 endpoint list,
 §9 error model, §10 auth, §11 idempotency). Machine-readable skeleton:
 [`openapi.v1.yaml`](./openapi.v1.yaml).
 
 **Implementation notes (as of 2026-08-04):**
 - Auth: HS256 access JWT plus rotating, server-side refresh sessions. The
-  implemented RBAC roles are `super_admin`, `admin`, `manager`, and `operator`.
+  only assignable RBAC roles are `super_admin`, `admin`, and `manager`.
 - Data authorization is evaluated independently on the
   `organization × store × business_portal` dimensions.
 - Default LLM: `claude-haiku-4-5` (not `claude-opus-4-8`); GS1 handles critical exact fields.
 - `extracted_field.source` ∈ `{llm, gs1, human}` (not `{llm, human}`); `field_name` includes `gtin`.
 - Implemented identity endpoints include `/o/{organization_slug}/auth/login`,
   `/mobile/auth/login`, `/me`, `/professions`, `/admins`,
-  `/managers`, `/portals/{portal_id}/operators`, `/stores`, and
-  `/stores/{store_id}/portals`. Generic `/users` reads and writes are disabled in favor of
-  the role-specific administration routes.
+  `/managers`, `/stores`, and `/stores/{store_id}/portals`. Generic `/users`
+  routes and the former operator-administration routes are not registered.
 - Implemented business endpoints include
   GET /arrivals, GET /arrivals/{batch_id}, GET /arrivals/{batch_id}/image,
   POST /ingestions, GET /ingestions/{id},
@@ -78,9 +77,8 @@ authoritative even if a JWT contains a broader, stale, or forged scope.
 | Role | Client surface | Visibility | Identity administration |
 |---|---|---|---|
 | `super_admin` | Browser | Entire organization | Create/list/soft-delete admins; all admin powers |
-| `admin` | Browser | Every store and portal in its organization | Create/disable stores and choose their professions; create/list/disable managers; assign manager portals |
-| `manager` | Browser | Assigned active portals and their derived stores | Create/list/disable/reassign operators only inside assigned portals; issue operator credential-reset grants |
-| `operator` | Browser and mobile | Its single active portal and derived store | Reads arrivals; no identity-administration access |
+| `admin` | Browser | Stores it owns and their portals | Create/disable stores and choose their professions; create/list/disable managers; assign one manager portal |
+| `manager` | Browser and mobile | Its single assigned active portal and derived store | No identity-administration access |
 
 `super_admin` is organization-scoped, not platform-global. Only it may add or
 soft-delete an `admin`. An `admin` cannot set, read, move, or reset credentials.
@@ -101,20 +99,20 @@ instead:
 | `PATCH` | `/v1/managers/{user_id}` | Admin/super-admin toggles manager activity |
 | `DELETE` | `/v1/managers/{user_id}` | Removes the manager from active administration and revokes access; the historical identity remains available to labels and the username becomes reusable |
 | `PATCH` | `/v1/managers/{user_id}/portals` | Replaces active manager assignments without deleting history |
-| `GET`, `POST` | `/v1/portals/{portal_id}/operators` | Manager lists or creates active operators in an assigned portal |
-| `PATCH` | `/v1/portals/{portal_id}/operators/{user_id}` | Manager reassigns or toggles an operator within its portal perimeter |
-| `POST` | `/v1/operators/{user_id}/credential-reset` | Manager sets a new operator password and revokes the operator sessions |
 | `POST` | `/v1/stores` | Admin/super-admin creates a store and chooses at least one profession |
 | `PATCH` | `/v1/stores/{store_code}` | Admin/super-admin renames, disables, or reactivates a store |
-| `GET` | `/v1/stores/{store_id}/portals` | Admin/super-admin sees all organization portals; manager/operator sees only its active assignments; invisible stores return `404` |
+| `GET` | `/v1/stores/{store_id}/portals` | Super-admin sees organization portals; admin sees owned-store portals; manager sees its active assignment; invisible stores return `404` |
 | `PUT` | `/v1/stores/{store_id}/portals` | Admin/super-admin idempotently sets `{portal_id, active}`; no physical delete; deactivation revokes affected sessions |
 
 Creating a store provisions the three canonical portal ownership rows in the
 same transaction and activates only the professions selected by the admin.
-Creating an admin, manager, or operator requires a direct password and creates
-an immediately active account. Operator passwords require eight characters;
-the other roles require twelve. Role, assignment, password, account, or portal
-changes revoke affected refresh sessions.
+Creating an admin or manager requires a direct password of at least twelve
+characters and creates an immediately active account. Role, assignment,
+password, account, or portal changes revoke affected refresh sessions.
+
+The database retains the historical `operator` value solely so immutable rows
+and old migrations remain interpretable. It is not assignable, receives no new
+session, and has no current HTTP administration route.
 
 Account, assignment, store, and portal-state transitions are audited in the
 same database transaction. Assignment and account deletion are soft state
@@ -125,14 +123,15 @@ changes; runtime IAM code has no physical delete path.
 ### 0.4 Browser and mobile sessions
 
 `POST /v1/mobile/auth/login` accepts the same identifier/password pair as the
-web login but issues tokens only for an active `operator` assigned to an active
-portal. Browser login accepts only `manager`, `admin`, or `super_admin`.
+web login but issues tokens only for an active `manager` assigned to exactly one
+active portal and store. Browser login accepts `manager`, `admin`, or
+`super_admin`.
 
 Browser refresh tokens are opaque rotating cookies; mobile refresh tokens are
 returned to the client for secure device storage. Each server session records
 `client_type = browser|mobile`. Login and refresh both reject crossing the
 surface boundary; a browser refresh cannot be replayed on `/mobile/auth/refresh`
-while operator accounts can also acquire a browser session to consult arrivals.
+while manager accounts may use the browser and mobile surfaces.
 
 ---
 
@@ -141,8 +140,8 @@ while operator accounts can also acquire a browser session to consult arrivals.
 The arrivals feed exposes registered traceability batches as product occurrences.
 It requires `catalog:read`.
 
-- Admin and super-admin are organization-wide. Managers and operators are
-  restricted server-side to their `business_portal_ids` and derived stores;
+- Super-admin is organization-wide. Admins are restricted to portals of stores
+  they own, and managers to their assigned portal and derived store;
   requesting another portal returns `403 FORBIDDEN`.
 - `store_code` is repeatable. `business_portal_id` and `profession` select one
   access dimension; `profession` accepts only `poissonnerie`, `boucherie`, or
@@ -632,13 +631,11 @@ client retry (with backoff + jitter, reusing the same `Idempotency-Key` for unsa
 | `NOT_FOUND` | 404 | Resource absent or not visible. | No |
 | `METHOD_NOT_ALLOWED` | 405 | e.g. write attempt on audit log. | No |
 | `STORE_NOT_FOUND` | 400 | Referenced store code does not exist. | No |
-| `STORE_REQUIRED` | 400 | An operator has no store assignment. | No |
+| `STORE_REQUIRED` | 400 | The account has no attributable store assignment. | No |
 | `USER_ALREADY_EXISTS` | 409 | Username is already assigned. | No |
 | `STORE_ALREADY_EXISTS` | 409 | Store code is already assigned. | No |
 | `STORE_INACTIVE` | 409 | Disabled store cannot receive an assignment. | No |
 | `STORE_IN_USE` | 409 | Store still has active users or active portal assignments. | No |
-| `LAST_ACTIVE_ADMIN` | 409 | Mutation would remove the last active administrator. | No |
-| `SELF_ACCESS_CHANGE_NOT_ALLOWED` | 409 | Administrator tried to revoke their own access. | No |
 | `IDEMPOTENCY_KEY_CONFLICT` | 409 | Key reused with a different payload. | No (new key) |
 | `RESOURCE_CONFLICT` | 409 | Generic conflict (e.g. in-progress idempotent op, duplicate). | Sometimes (poll) |
 | `ALERT_INVALID_TRANSITION` | 409 | Alert lifecycle move not allowed. | No |

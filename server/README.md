@@ -1,7 +1,8 @@
 # LabelScan Server — PG-0 → PG-6
 
 This is the backend modular monolith for the HACCP seafood traceability system.
-**Phase-groups PG-0 … PG-6 are built here** (per `docs/IMPLEMENTATION-PLAN.md`):
+**Phase-groups PG-0 … PG-6 are built here** (historical plan:
+`docs/archive/IMPLEMENTATION-PLAN.md`):
 
 - **PG-0** — project structure + dependency-boundary enforcement (G-ARCH).
 - **PG-1** — PostgreSQL append-only + audit foundations, installed **before any
@@ -23,7 +24,7 @@ This is the backend modular monolith for the HACCP seafood traceability system.
 
 > Enterprise OIDC/SSO reste hors périmètre. L’isolation multi-organisation,
 > PostgreSQL RLS, les JWT tenantés et le stockage objet S3 compatible sont
-> implémentés pour les rôles locaux `admin` et `operator`.
+> implémentés pour les rôles locaux `super_admin`, `admin` et `manager`.
 
 ## User backoffice
 
@@ -33,8 +34,8 @@ The API serves the authenticated LabelScan web portal at
 `/v1/stores` routes plus the store-scoped `/v1/arrivals` feed.
 It keeps the bearer token in session storage until expiry, so reloads preserve
 the session without surviving a browser restart. Administrators manage accounts
-and stores; operators see only registered products captured for their assigned
-store, searchable by product, lot, GTIN or supplier and filterable by date.
+and stores; managers see only registered products captured for their assigned
+portal/store, searchable by product, lot, GTIN or supplier and filterable by date.
 
 In local Docker Compose, open
 [http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
@@ -108,9 +109,9 @@ BACKEND §3.4) can be bypassed by any direct SQL write; a DB trigger cannot.
 - The three append-only tables are `PARTITION BY RANGE` on their server timestamp
   (monthly + a DEFAULT partition). The audit trigger records the **logical
   parent** table name (via `pg_partition_root`), never the physical partition.
-- `labelscan_app` is a NOLOGIN least-privilege runtime role (tests assume it via
-  `SET ROLE`); table ownership stays with the migration role so the app can never
-  bypass its own grants.
+- `labelscan_app` is the least-privilege runtime role (tests assume it via `SET ROLE`);
+  production migrations verify it is neither superuser, `BYPASSRLS`, nor owner of
+  application objects. Table ownership stays with the separate migration role.
 - `ingestion.raw_artifact` has a content-addressed unique index
   `(ingestion_id, artifact_kind, checksum_sha256, occurred_at)` — the idempotency
   anchor so a duplicate submit never double-appends (used in PG-2).

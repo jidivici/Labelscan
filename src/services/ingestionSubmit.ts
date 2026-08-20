@@ -91,9 +91,3 @@ export async function executeCreateIngestionOp(opId: string): Promise<SubmitOutc
     return { kind: 'pending', code: opError.code };
   }
 }
-
-/** Enqueue + execute in one call (legacy shape, kept for direct submissions). */
-export async function submitCapture(input: CaptureInput): Promise<SubmitOutcome> {
-  const op = await enqueueCapture(input);
-  return executeCreateIngestionOp(op.id);
-}

@@ -51,7 +51,23 @@ def test_production_disables_docs_and_rejects_unknown_hosts(monkeypatch):
     client = TestClient(create_app())
     assert client.get("/docs").status_code == 404
     assert client.get("/openapi.json").status_code == 404
-    assert client.get("/v1/health/live", headers={"Host": "attacker.test"}).status_code == 400
+    assert (
+        client.get("/v1/health/live", headers={"Host": "attacker.test"}).status_code
+        == 400
+    )
+
+
+def test_production_responses_enable_hsts_and_api_content_is_non_executable(
+    monkeypatch,
+):
+    configure_production(monkeypatch)
+    response = TestClient(create_app()).get("/v1/health/live")
+    assert response.headers["Strict-Transport-Security"] == (
+        "max-age=31536000; includeSubDomains"
+    )
+    assert response.headers["Content-Security-Policy"] == (
+        "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    )
 
 
 def test_production_rejects_browser_auth_without_same_origin(monkeypatch):
@@ -83,3 +99,12 @@ def test_api_responses_are_not_cacheable():
     response = TestClient(create_app()).get("/v1/health/live")
     assert response.headers["Cache-Control"] == "no-store"
     assert response.headers["Pragma"] == "no-cache"
+
+
+def test_authentication_payload_rejects_unknown_fields():
+    response = TestClient(create_app()).post(
+        "/v1/auth/login",
+        json={"username": "alice", "password": "secret", "role": "super_admin"},
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"

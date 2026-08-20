@@ -8,7 +8,7 @@ anti-fabrication gate, GS1 reconciliation, DLQ+backoff).
 **System:** HACCP-oriented seafood traceability for large-scale retail fishmongery.
 
 > **This document builds on, and does not contradict, the locked design. Read those first:**
-> - [`../architecture/ARCHITECTURE.md`](../architecture/ARCHITECTURE.md) + ADRs
+> - [`../ENTERPRISE-ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md) + ADRs
 >   [`0002`](../architecture/adr/0002-hexagonal-ports-adapters-ocr-llm.md) (ports),
 >   [`0003`](../architecture/adr/0003-raw-before-normalized-immutable-store.md) (raw-before-normalized),
 >   [`0005`](../architecture/adr/0005-confidence-scores-in-the-model.md) (confidence + evidence per field).

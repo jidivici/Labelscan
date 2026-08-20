@@ -34,7 +34,7 @@ import type { PendingScan } from '../services/scanQueue';
 import { RotatedPhoto } from './RotatedPhoto';
 import { colors, spacing, radius, typography } from '../theme';
 
-export const PENDING_CARD_HEIGHT = 88;
+const PENDING_CARD_HEIGHT = 88;
 // Swipe-to-delete geometry — SAME values as ArticleCard so both card types answer the
 // identical gesture identically.
 const DELETE_WIDTH = 80;
@@ -76,6 +76,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
   const extracting = scan.status === 'extracting';
   const submitting = scan.status === 'submitting';
   const ready = scan.status === 'ready';
+  const requiresRecapture = scan.status === 'recapture_required';
   // Workflow v2: a "ready" scan is only truly "à valider" once all 17 fields are filled.
   // Below that it stays "en cours" and reads "À compléter" — it is NOT an article yet.
   const complete = ready && filledCount === totalFieldCount;
@@ -149,7 +150,9 @@ export const PendingScanCard = React.memo(function PendingScanCard({
     if (openable) onOpen(scan);
   }, [openable, onOpen, scan]);
 
-  const hint = ready
+  const hint = requiresRecapture
+    ? 'Touchez pour reprendre la photo'
+    : ready
     ? complete
       ? 'Touchez pour valider'
       : 'Touchez pour compléter'
@@ -181,7 +184,13 @@ export const PendingScanCard = React.memo(function PendingScanCard({
             style={styles.pressable}
             android_ripple={openable ? { color: colors.primaryContainer } : undefined}
             accessibilityRole={openable ? 'button' : undefined}
-            accessibilityLabel={openable ? 'Ouvrir la revue de cette étiquette' : activeLabel}
+            accessibilityLabel={
+              requiresRecapture
+                ? 'Ouvrir les instructions pour reprendre la photo'
+                : openable
+                  ? 'Ouvrir la revue de cette étiquette'
+                  : activeLabel
+            }
           >
             <View style={styles.thumbnail}>
               <RotatedPhoto
@@ -221,13 +230,25 @@ export const PendingScanCard = React.memo(function PendingScanCard({
                     {submitting ? (
                       <PulseDot size={8} color={colors.primary} />
                     ) : (
-                      <View style={[styles.dot, { backgroundColor: complete ? colors.success : colors.primary }]} />
+                      <View
+                        style={[
+                          styles.dot,
+                          {
+                            backgroundColor: requiresRecapture
+                              ? colors.error
+                              : complete
+                                ? colors.success
+                                : colors.primary,
+                          },
+                        ]}
+                      />
                     )}
                     <Text
                       style={[
                         typography.titleSmall,
                         styles.statusLabel,
                         complete && styles.statusLabelReady,
+                        requiresRecapture && styles.errorLabel,
                         highlightLabel && styles.statusLabelHighlight,
                       ]}
                       numberOfLines={1}
@@ -242,8 +263,10 @@ export const PendingScanCard = React.memo(function PendingScanCard({
               )}
             </View>
 
-            {errored ? null : showGauge ? (
-                <CompletenessGauge filled={filledCount} total={totalFieldCount} loading={extracting} />
+            {errored ? null : requiresRecapture ? (
+              <MaterialCommunityIcons name="camera-retake-outline" size={24} color={colors.error} />
+            ) : showGauge ? (
+              <CompletenessGauge filled={filledCount} total={totalFieldCount} loading={extracting} />
             ) : (
               <PulseDot size={10} color={colors.primary} />
             )}

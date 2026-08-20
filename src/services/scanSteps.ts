@@ -2,6 +2,8 @@
  * scanStepFromStatus — pure mapping from a PendingScan's workflow status to the
  * home screen's 3-step counter (workflow v1, CLAUDE.md directive §2):
  *   1. Photo envoyée   2. Extraction   3. À valider
+ * A terminal unusable extraction is a separate, tappable recapture decision: it
+ * never masquerades as step 3 and never exposes a confirmation action.
  * Sober by design (Clean UI): no percentages, no confidence — a step is done,
  * active, pending, or errored; the active step gets a short present-participle
  * label (never a spinner — PulseDot carries the "live" cue, as in ExtractionProgress).
@@ -25,6 +27,7 @@ const LABELS = {
   ocr: 'Lecture du texte',
   llm: 'Analyse en cours',
   ready: 'À valider',
+  recapture: 'Photo à reprendre',
   submitError: 'Envoi impossible',
   extractError: 'Analyse impossible',
 } as const;
@@ -43,6 +46,8 @@ export function scanStepFromStatus(status: PendingScanStatus, ocrDone: boolean):
       };
     case 'ready':
       return { steps: ['done', 'done', 'active'], activeLabel: LABELS.ready, openable: true };
+    case 'recapture_required':
+      return { steps: ['done', 'error', 'pending'], activeLabel: LABELS.recapture, openable: true };
     case 'submit_error':
       return { steps: ['error', 'pending', 'pending'], activeLabel: LABELS.submitError, openable: false };
     case 'extract_error':

@@ -51,8 +51,10 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/labelscan_demo
       LABELSCAN_OBJECT_STORE: "filesystem"
       LABELSCAN_RAW_STORE_DIR: "/app/data/raw"
+      LABELSCAN_DEMO_CREDENTIALS_FILE: "/run/secrets/demo_credentials"
     volumes:
       - labelscan-raw-store:/app/data/raw
+      - ./server/demo/credentials.local.json:/run/secrets/demo_credentials:ro
     depends_on:
       migrate:
         condition: service_completed_successfully

@@ -130,7 +130,7 @@ export function formatPrice(amount: string, currency: string): string {
 // Digits and separators (space/dot) vary by country, so the mask only forces case; it
 // never strips a character the operator typed (no-fabrication — read off the label).
 
-export const HEALTH_MARK_FIELD = 'health_mark';
+const HEALTH_MARK_FIELD = 'health_mark';
 
 export function isHealthMarkField(fieldName: string): boolean {
   return fieldName === HEALTH_MARK_FIELD;

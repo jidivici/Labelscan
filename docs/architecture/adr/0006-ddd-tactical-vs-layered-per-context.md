@@ -36,7 +36,8 @@ no rich aggregates) in the **supporting/generic** contexts:
    identity; ceremony with no invariant to protect (anemic aggregates).
 2. **Layered everywhere, no aggregates.** Rejected: the ingestion and HACCP invariants (raw-
    before-normalized, confidence-per-field, monotonic alert lifecycle, versioned thresholds) would
-   leak into procedural code and erode — exactly the data-integrity failures in AUDIT.md.
+   leak into procedural code and erode — exactly the data-integrity failures in the
+   [initial audit](../../archive/AUDIT.md).
 
 ## Trade-offs
 We trade *idiom uniformity* for *effort proportional to complexity*. The boundary rules and ports

@@ -39,7 +39,7 @@ export type RootStackParamList = {
   ArticleList: undefined;
   /** Full immutable record (the "lot") for one saved article, by local id. */
   ArticleDetail: { articleId: string };
-  Camera: undefined;
+  Camera: { recapture?: boolean } | undefined;
   Review: ReviewParams;
 };
 

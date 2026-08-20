@@ -280,6 +280,10 @@ def adjusted_outcome(
         return GateOutcome.NEEDS_REVIEW
 
     residual = False
+    if "no_field_extracted" in verdict.review_reasons and not any(
+        field.value is not None for field in reconciled
+    ):
+        residual = True
     # GS1 clears missing / low-confidence on the fields it supplies exactly.
     if set(verdict.missing_required) - gs1_ok:
         residual = True

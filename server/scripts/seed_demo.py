@@ -17,21 +17,21 @@ from pathlib import Path
 
 from sqlalchemy import text
 
-from labelscan.contexts.identity.domain.password import hash_password
+from labelscan.contexts.identity.domain.password import hash_password, validate_password
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.engine import make_engine
 from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.storage_factory import build_raw_store
 
 NAMESPACE = uuid.UUID("6df40d77-d761-4a76-a259-a75209ca88bd")
-DEMO_PASSWORDS = {
-    "super_admin": "Super_admin1!",
-    "admin": "Admin1!",
-    "manager_p_f": "Manager_p_f1!",
-    "manager_p_n": "Manager_p_n1!",
-    "manager_p_c": "Manager_p_c1!",
-    "manager_p_m": "Manager_p_m1!",
-}
+DEMO_USERS = (
+    "super_admin",
+    "admin",
+    "manager_p_f",
+    "manager_p_n",
+    "manager_p_c",
+    "manager_p_m",
+)
 
 MANAGER_USERNAMES = {
     "FREJUS": "manager_p_f",
@@ -43,6 +43,31 @@ MANAGER_USERNAMES = {
 
 def stable_id(value: str) -> str:
     return str(uuid.uuid5(NAMESPACE, value))
+
+
+def load_demo_passwords() -> dict[str, str]:
+    """Read demo credentials from a bounded root-mounted JSON secret."""
+
+    file_name = (os.environ.get("LABELSCAN_DEMO_CREDENTIALS_FILE") or "").strip()
+    if not file_name:
+        raise RuntimeError("LABELSCAN_DEMO_CREDENTIALS_FILE is required for demo data")
+    path = Path(file_name)
+    try:
+        if path.stat().st_size > 64 * 1024:
+            raise RuntimeError("demo credentials file exceeds the 64 KiB secret limit")
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("unable to read the demo credentials file") from exc
+    if not isinstance(raw, dict) or set(raw) != set(DEMO_USERS):
+        raise RuntimeError("demo credentials must contain exactly the six demo usernames")
+    passwords: dict[str, str] = {}
+    for username in DEMO_USERS:
+        password = raw.get(username)
+        if not isinstance(password, str):
+            raise RuntimeError(f"demo password for {username} must be a string")
+        validate_password(password)
+        passwords[username] = password
+    return passwords
 
 
 @dataclass(frozen=True)
@@ -164,7 +189,7 @@ def upsert_user(conn, organization_id: str, username: str, role: str,
             role=excluded.role, active=true, store_id=excluded.store_id,
             store_code=excluded.store_code, updated_at=clock_timestamp()
     """), {"id": user_id, "org": organization_id, "username": username,
-            "password_hash": hash_password(password, min_length=1, reject_known_placeholder=False),
+            "password_hash": hash_password(password),
             "role": role, "store_id": store_id, "store_code": store_code,
             "created_by": created_by})
     return str(conn.execute(text("SELECT id FROM identity.app_user WHERE organization_id=:org AND username=:username AND deleted_at IS NULL"),
@@ -172,6 +197,7 @@ def upsert_user(conn, organization_id: str, username: str, role: str,
 
 
 def seed() -> None:
+    demo_passwords = load_demo_passwords()
     image_dir = Path(os.environ.get("LABELSCAN_DEMO_IMAGE_DIR", "/app/demo/images"))
     image_content: dict[str, tuple[str, bytes]] = {}
     for arrival in ARRIVALS:
@@ -197,8 +223,8 @@ def seed() -> None:
         set_tenant_context(conn, organization_id)
         bootstrap_actor = conn.execute(text("SELECT id::text FROM identity.app_user WHERE organization_id=:org AND active=true ORDER BY CASE role WHEN 'super_admin' THEN 0 ELSE 1 END LIMIT 1"), {"org": organization_id}).scalar_one_or_none()
         bootstrap_actor = bootstrap_actor or stable_id("user:super_admin")
-        super_id = upsert_user(conn, organization_id, "super_admin", "super_admin", DEMO_PASSWORDS["super_admin"], bootstrap_actor)
-        admin_id = upsert_user(conn, organization_id, "admin", "admin", DEMO_PASSWORDS["admin"], super_id)
+        super_id = upsert_user(conn, organization_id, "super_admin", "super_admin", demo_passwords["super_admin"], bootstrap_actor)
+        admin_id = upsert_user(conn, organization_id, "admin", "admin", demo_passwords["admin"], super_id)
 
         # Keep the historic Fréjus store so its append-only history stays valid;
         # present every active store with a clear city name.
@@ -232,7 +258,7 @@ def seed() -> None:
             store_id, code, portal_id = stores[city]
             username = MANAGER_USERNAMES[city]
             manager_id = upsert_user(conn, organization_id, username, "manager",
-                                     DEMO_PASSWORDS[username], admin_id, store_id, code)
+                                     demo_passwords[username], admin_id, store_id, code)
             audit(conn, admin_id, "identity.demo_manager_assigned")
             conn.execute(text("UPDATE identity.user_portal_assignment SET active=false, updated_at=clock_timestamp() WHERE organization_id=:org AND user_id=:user_id AND portal_id<>:portal_id AND active=true"), {"org": organization_id, "user_id": manager_id, "portal_id": portal_id})
             conn.execute(text("""
@@ -245,7 +271,7 @@ def seed() -> None:
             managers[city] = manager_id
 
 
-        demo_names = tuple(DEMO_PASSWORDS)
+        demo_names = DEMO_USERS
         audit(conn, super_id, "identity.legacy_demo_accounts_deactivated")
         conn.execute(text("""
             UPDATE identity.app_user SET active=false, updated_at=clock_timestamp()

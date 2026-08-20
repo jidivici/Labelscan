@@ -25,13 +25,17 @@ Idempotent twice over:
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from labelscan.business_profiles import trade_profile
-from labelscan.contexts.ingestion.application.override_field import UnknownField
+from labelscan.contexts.ingestion.application.override_field import (
+    FieldIdempotencyConflict,
+    UnknownField,
+)
 from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
     FieldOverrideRepository,
@@ -102,13 +106,14 @@ _INSERT_HUMAN_CLEARED = text(
 # transaction as the run it records; ON CONFLICT DO NOTHING keeps a concurrent
 # duplicate harmless (the loser's SELECT on retry finds the winner's row).
 _LOOKUP_IDEMPOTENCY = text(
-    "SELECT run_id::text AS run_id, field_name FROM ingestion.request_idempotency "
+    "SELECT run_id::text AS run_id, ingestion_id::text AS ingestion_id, "
+    "field_name, request_hash FROM ingestion.request_idempotency "
     "WHERE endpoint = 'override_field' AND actor_id = :actor AND idempotency_key = :key"
 )
 _RECORD_IDEMPOTENCY = text(
     "INSERT INTO ingestion.request_idempotency "
-    "(endpoint, actor_id, idempotency_key, ingestion_id, run_id, field_name) "
-    "VALUES ('override_field', :actor, :key, :iid, :rid, :fn) "
+    "(endpoint, actor_id, idempotency_key, ingestion_id, run_id, field_name, request_hash) "
+    "VALUES ('override_field', :actor, :key, :iid, :rid, :fn, :request_hash) "
     "ON CONFLICT (endpoint, actor_id, idempotency_key) DO NOTHING"
 )
 
@@ -129,6 +134,20 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
         idempotency_key: str | None = None,
         access: AccessContext | None = None,
     ) -> OverriddenField | None:
+        request_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "ingestion_id": ingestion_id,
+                    "field_name": field_name,
+                    "value": value,
+                    "note": note,
+                    "action": action,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
         with self._engine.begin() as conn:
             if audit.organization_id:
                 set_tenant_context(conn, audit.organization_id)
@@ -176,6 +195,19 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
             # field as recorded on the run the ORIGINAL request produced, before any
             # value comparison (a later A→B edit must not turn a retry into a write).
             if idempotency_key:
+                # Serialize identical actor/key pairs before inspecting the ledger.
+                # Without this, two concurrent retries could both append a run before
+                # one loses the final ON CONFLICT on the key record.
+                conn.execute(
+                    text(
+                        "SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"
+                    ),
+                    {
+                        "lock_key": (
+                            f"override_field:{audit.actor_id}:{idempotency_key}"
+                        )
+                    },
+                )
                 seen = (
                     conn.execute(
                         _LOOKUP_IDEMPOTENCY,
@@ -185,6 +217,15 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                     .first()
                 )
                 if seen is not None:
+                    if (
+                        seen["ingestion_id"] != ingestion_id
+                        or seen["field_name"] != field_name
+                        or (
+                            seen["request_hash"] is not None
+                            and seen["request_hash"] != request_hash
+                        )
+                    ):
+                        raise FieldIdempotencyConflict()
                     recorded = (
                         conn.execute(
                             _CURRENT_FIELD,
@@ -204,6 +245,12 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                         replayed=True,
                     )
 
+            # Different request keys can still target the same ingestion. Serialize
+            # append-only attempt allocation so both cannot choose the same attempt_no.
+            conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+                {"lock_key": f"extraction_run:{ingestion_id}"},
+            )
             latest = (
                 conn.execute(
                     _LATEST_RUN,
@@ -237,6 +284,7 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                     ingestion_id,
                     parent_run_id,
                     field_name,
+                    request_hash,
                 )
                 return OverriddenField(
                     run_id=parent_run_id,
@@ -291,7 +339,13 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                     },
                 )
                 self._record_key(
-                    conn, idempotency_key, audit, ingestion_id, new_run_id, field_name
+                    conn,
+                    idempotency_key,
+                    audit,
+                    ingestion_id,
+                    new_run_id,
+                    field_name,
+                    request_hash,
                 )
                 self._emit_projection_update(conn, ingestion_id, new_run_id, audit)
                 return OverriddenField(
@@ -307,7 +361,13 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
 
             conn.execute(_INSERT_HUMAN_CLEARED, {"rid": new_run_id, "fn": field_name})
             self._record_key(
-                conn, idempotency_key, audit, ingestion_id, new_run_id, field_name
+                conn,
+                idempotency_key,
+                audit,
+                ingestion_id,
+                new_run_id,
+                field_name,
+                request_hash,
             )
             self._emit_projection_update(conn, ingestion_id, new_run_id, audit)
             return OverriddenField(
@@ -323,7 +383,13 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
 
     @staticmethod
     def _record_key(
-        conn, idempotency_key, audit: AuditContext, ingestion_id, run_id, field_name
+        conn,
+        idempotency_key,
+        audit: AuditContext,
+        ingestion_id,
+        run_id,
+        field_name,
+        request_hash,
     ) -> None:
         """Bind the request key to the run it resolved to — same transaction as the
         write it protects, so key and result commit (or roll back) together."""
@@ -337,6 +403,7 @@ class SqlFieldOverrideRepository(FieldOverrideRepository):
                 "iid": ingestion_id,
                 "rid": run_id,
                 "fn": field_name,
+                "request_hash": request_hash,
             },
         )
 

@@ -44,8 +44,3 @@ export interface IdentityDraft {
 export interface ManagerDraft extends IdentityDraft {
   business_portal_ids: string[];
 }
-
-export interface OperatorMutation {
-  business_portal_id?: string;
-  active?: boolean;
-}

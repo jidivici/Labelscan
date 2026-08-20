@@ -11,8 +11,7 @@ wired to. Provider-specific wiring (tool-use APIs, vendor JSON modes, model ids,
 budgets, temperature) is **out of scope** here and belongs to the AI Engineer adapter step.
 
 > **Read first (this contract is consistent with them):**
-> [`../architecture/ARCHITECTURE.md`](../architecture/ARCHITECTURE.md) (§2.1 Ingestion context,
-> §6 domain events, §7.1 `Ingestion` aggregate invariants),
+> [`../ENTERPRISE-ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md),
 > [`../architecture/adr/0002-hexagonal-ports-adapters-ocr-llm.md`](../architecture/adr/0002-hexagonal-ports-adapters-ocr-llm.md),
 > [`../architecture/adr/0003-raw-before-normalized-immutable-store.md`](../architecture/adr/0003-raw-before-normalized-immutable-store.md),
 > [`../architecture/adr/0005-confidence-scores-in-the-model.md`](../architecture/adr/0005-confidence-scores-in-the-model.md),

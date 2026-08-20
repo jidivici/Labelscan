@@ -82,9 +82,7 @@ class AccessRepository(Protocol):
         active: bool,
     ) -> AllowedPortal: ...
 
-    def list_role(
-        self, audit: IdentityAudit, role: str, portal_id: str | None = None
-    ) -> list[ManagedUser]: ...
+    def list_role(self, audit: IdentityAudit, role: str) -> list[ManagedUser]: ...
 
     def create_active(
         self,
@@ -126,14 +124,6 @@ class AccessRepository(Protocol):
         actor_roles: frozenset[str],
     ) -> None: ...
 
-    def reset_password(
-        self,
-        audit: IdentityAudit,
-        *,
-        target_user_id: str,
-        password_hash: str,
-    ) -> ManagedUser: ...
-
     def own_credentials(self, audit: IdentityAudit) -> tuple[str, str]: ...
 
     def change_own_password(
@@ -168,11 +158,7 @@ def _password(value: str, *, role: str) -> str:
             raise ValueError("password must contain a special character")
         return hash_password(value, min_length=12)
     if role == MANAGER_ROLE:
-        return hash_password(
-            value,
-            min_length=1,
-            reject_known_placeholder=False,
-        )
+        return hash_password(value, min_length=12)
     raise ValueError("unknown password policy")
 
 
@@ -203,10 +189,8 @@ class AccessManagementService:
             active=active,
         )
 
-    def list_role(
-        self, audit: IdentityAudit, role: str, portal_id: str | None = None
-    ) -> list[ManagedUser]:
-        return self._repository.list_role(audit, role, portal_id)
+    def list_role(self, audit: IdentityAudit, role: str) -> list[ManagedUser]:
+        return self._repository.list_role(audit, role)
 
     def create_active(
         self,
@@ -276,15 +260,6 @@ class AccessManagementService:
             audit,
             target_user_id=target_user_id,
             actor_roles=actor_roles,
-        )
-
-    def reset_password(
-        self, audit: IdentityAudit, target_user_id: str, new_password: str
-    ) -> ManagedUser:
-        return self._repository.reset_password(
-            audit,
-            target_user_id=target_user_id,
-            password_hash=_password(new_password, role=MANAGER_ROLE),
         )
 
     def change_own_password(

@@ -12,7 +12,7 @@ export const PORTALS: Record<ProfessionCode, PortalDefinition> = {
   charcuterie_traiteur: charcuterieTraiteurPortal,
 };
 
-export function isProfessionCode(value: string | undefined): value is ProfessionCode {
+function isProfessionCode(value: string | undefined): value is ProfessionCode {
   return Boolean(value && Object.hasOwn(PORTALS, value));
 }
 

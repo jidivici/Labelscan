@@ -6,16 +6,14 @@ so the security-critical logic is verified even without PostgreSQL.
 
 from __future__ import annotations
 
+import os
+import time
+
+import jwt
 import pytest
 
 from labelscan.contexts.identity.application.login import InvalidCredentials, Login
-from labelscan.contexts.identity.application.manage_users import (
-    CreateUserCommand,
-    UpdateUserCommand,
-    UserAdminService,
-)
-from labelscan.contexts.identity.application.ports import AdminAuditContext
-from labelscan.contexts.identity.application.store_ports import StoreRequired
+from labelscan.contexts.identity.application.sessions import refresh_ttl_seconds
 from labelscan.contexts.identity.domain.password import hash_password, verify_password
 from labelscan.contexts.identity.domain.store import normalize_store_code
 from labelscan.contexts.identity.domain.user import (
@@ -23,7 +21,6 @@ from labelscan.contexts.identity.domain.user import (
     MANAGER_SCOPES,
     SUPER_ADMIN_SCOPES,
     USER_ROLES,
-    ManagedUser,
     StoredUser,
     scopes_for_role,
 )
@@ -56,6 +53,11 @@ def test_password_rejects_empty():
 def test_verify_handles_garbage_without_raising():
     assert not verify_password("x", "not-an-encoded-hash")
     assert not verify_password("x", "")
+    assert not verify_password(
+        "x",
+        "pbkdf2_sha256$999999999$MDEyMzQ1Njc4OWFiY2RlZg$"
+        "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY",
+    )
 
 
 # ── JWT codec ───────────────────────────────────────────────────────────────
@@ -80,7 +82,19 @@ def test_jwt_roundtrip_preserves_claims():
 
 
 def test_jwt_expired_is_rejected():
-    token = jwt_codec.encode({"sub": "admin"}, ttl_seconds=-1)
+    now = int(time.time())
+    token = jwt.encode(
+        {
+            "sub": "admin",
+            "iss": "labelscan-api",
+            "aud": "labelscan-clients",
+            "jti": "expired-test-token",
+            "iat": now - 60,
+            "exp": now - 1,
+        },
+        os.environ["LABELSCAN_JWT_SECRET"],
+        algorithm="HS256",
+    )
     with pytest.raises(jwt_codec.TokenError):
         jwt_codec.decode(token)
 
@@ -93,7 +107,7 @@ def test_jwt_tampered_is_rejected():
 
 def test_jwt_rejects_a_token_for_another_audience(monkeypatch):
     monkeypatch.setenv("LABELSCAN_JWT_AUDIENCE", "labelscan-clients")
-    token = jwt_codec.encode({"actor_id": "actor-1", "scopes": []})
+    token = jwt_codec.encode({"sub": "actor-1", "actor_id": "actor-1", "scopes": []})
     monkeypatch.setenv("LABELSCAN_JWT_AUDIENCE", "another-service")
     with pytest.raises(jwt_codec.TokenError):
         jwt_codec.decode(token)
@@ -102,10 +116,48 @@ def test_jwt_rejects_a_token_for_another_audience(monkeypatch):
 def test_production_principal_requires_tenant_claims(monkeypatch):
     monkeypatch.setenv("LABELSCAN_ENV", "production")
     token = jwt_codec.encode(
-        {"actor_id": ADMIN_ID, "scopes": [], "sid": "session-family"}
+        {
+            "sub": "admin",
+            "actor_id": ADMIN_ID,
+            "scopes": [],
+            "sid": "session-family",
+        }
     )
     with pytest.raises(ApiError, match="UNAUTHENTICATED"):
         _principal_from_bearer(token)
+
+
+def test_production_principal_rejects_noncanonical_claim_shapes(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_ENV", "production")
+    token = jwt_codec.encode(
+        {
+            "sub": "admin",
+            "actor_id": ADMIN_ID,
+            "principal": "admin",
+            "scopes": "catalog:read",
+            "role": "admin",
+            "organization_id": "22222222-2222-2222-2222-222222222222",
+            "organization_slug": "labelscan",
+            "sid": "33333333-3333-3333-3333-333333333333",
+        }
+    )
+    with pytest.raises(ApiError) as rejected:
+        _principal_from_bearer(token)
+    assert rejected.value.error_code == "UNAUTHENTICATED"
+    assert rejected.value.detail == "invalid or expired token"
+
+
+def test_configured_token_lifetimes_are_bounded(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_JWT_TTL_SECONDS", "3601")
+    with pytest.raises(RuntimeError, match="must not exceed 3600"):
+        jwt_codec.default_ttl_seconds()
+
+    monkeypatch.setenv("LABELSCAN_REFRESH_TTL_SECONDS", "2592001")
+    with pytest.raises(RuntimeError, match="must not exceed 2592000"):
+        refresh_ttl_seconds()
+
+    with pytest.raises(RuntimeError, match="between 1 and 3600"):
+        jwt_codec.encode({"sub": "admin"}, ttl_seconds=3601)
 
 
 # ── Login use case ──────────────────────────────────────────────────────────
@@ -152,7 +204,7 @@ def test_login_unknown_user_rejected():
         Login(_FakeRepo(None))("ghost", "pw")
 
 
-# ── RBAC + administrative user-management service ──────────────────────────
+# ── RBAC and identity normalization ────────────────────────────────────────
 
 
 def test_role_scope_matrix_is_additive_and_fail_closed():
@@ -168,133 +220,7 @@ def test_role_scope_matrix_is_additive_and_fail_closed():
     assert scopes_for_role("unknown") == frozenset()
 
 
-class _FakeAdminRepo:
-    def __init__(self) -> None:
-        self.created = None
-        self.updated = None
-
-    def create_user(self, user, audit: AdminAuditContext):
-        self.created = (user, audit)
-        return ManagedUser(
-            id="22222222-2222-2222-2222-222222222222",
-            username=user.username,
-            display_name=user.display_name,
-            role=user.role,
-            active=True,
-            store_code=user.store_code,
-            created_by=user.created_by,
-            created_at="2026-07-26T00:00:00Z",
-            updated_at="2026-07-26T00:00:00Z",
-        )
-
-    def update_user(self, user_id, changes, audit):
-        self.updated = (user_id, changes, audit)
-        return ManagedUser(
-            id=user_id,
-            username="manager",
-            display_name=changes.display_name or "Manager",
-            role=changes.role or "manager",
-            active=changes.active if changes.active is not None else True,
-            store_code=changes.store_code or "PARIS-01",
-            created_by=ADMIN_ID,
-            created_at="2026-07-26T00:00:00Z",
-            updated_at="2026-07-26T00:01:00Z",
-        )
-
-
-def test_create_user_normalizes_fields_and_hashes_password():
-    repo = _FakeAdminRepo()
-    created = UserAdminService(repo).create(
-        CreateUserCommand(
-            username="  alice  ",
-            display_name="  Alice   Martin ",
-            password="long-password-123",
-            role="manager",
-            store_code="PARIS-01",
-            actor_id=ADMIN_ID,
-            correlation_id="corr",
-            trace_id="trace",
-        )
-    )
-    stored, audit = repo.created
-    assert created.username == "alice"
-    assert stored.display_name == "Alice Martin"
-    assert verify_password("long-password-123", stored.password_hash)
-    assert audit.actor_id == ADMIN_ID
-
-
-def test_create_user_enforces_credential_bounds_and_rejects_unknown_role():
-    service = UserAdminService(_FakeAdminRepo())
-    long_username = "a" * 600
-    base = dict(
-        username=long_username,
-        display_name="Alice",
-        actor_id=ADMIN_ID,
-        correlation_id="corr",
-        trace_id="trace",
-    )
-    with pytest.raises(ValueError, match="at most 254"):
-        service.create(
-            CreateUserCommand(
-                password="valid passphrase",
-                role="manager",
-                store_code="PARIS-01",
-                **base,
-            )
-        )
-    with pytest.raises(ValueError, match="unknown role"):
-        service.create(
-            CreateUserCommand(
-                password="long-password-123",
-                role="superuser",
-                store_code="PARIS-01",
-                **base,
-            )
-        )
-
-
-def test_manager_requires_a_store_assignment():
-    with pytest.raises(StoreRequired):
-        UserAdminService(_FakeAdminRepo()).create(
-            CreateUserCommand(
-                username="alice",
-                display_name="Alice",
-                password="valid passphrase",
-                role="manager",
-                store_code=None,
-                actor_id=ADMIN_ID,
-                correlation_id="corr",
-                trace_id="trace",
-            )
-        )
-
-
 def test_store_code_is_canonical_and_rejects_unsafe_characters():
     assert normalize_store_code(" paris-01 ") == "PARIS-01"
     with pytest.raises(ValueError):
         normalize_store_code("Paris centre")
-
-
-def test_update_user_rejects_empty_patch_and_hashes_reset_password():
-    repo = _FakeAdminRepo()
-    service = UserAdminService(repo)
-    with pytest.raises(ValueError, match="at least one"):
-        service.update(
-            UpdateUserCommand(
-                user_id=ADMIN_ID,
-                actor_id=ADMIN_ID,
-                correlation_id="corr",
-                trace_id="trace",
-            )
-        )
-
-    service.update(
-        UpdateUserCommand(
-            user_id="22222222-2222-2222-2222-222222222222",
-            password="replacement-password",
-            actor_id=ADMIN_ID,
-            correlation_id="corr",
-            trace_id="trace",
-        )
-    )
-    assert verify_password("replacement-password", repo.updated[1].password_hash)
