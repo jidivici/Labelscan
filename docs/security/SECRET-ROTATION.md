@@ -81,7 +81,9 @@ Les fichiers sont :
    dans un fichier temporaire. Une valeur contenant d'autres caractères que l'hexadécimal
    doit être encodée pour une URL.
 4. Remplacer atomiquement `db_runtime_password` et `database_url`.
-5. Recréer API et workers, vérifier readiness, login, route protégée, ingestion et RLS.
+5. Garder `db_runtime_password` en `root:root` mode `0600`, puis remettre
+   `database_url` en `root:10001` mode `0640` avant de recréer les conteneurs.
+6. Recréer API et workers, vérifier readiness, login, route protégée, ingestion et RLS.
 
 La base doit être changée avant les conteneurs : les connexions existantes continuent
 temporairement, tandis que les nouvelles utilisent immédiatement le nouveau secret.
@@ -91,7 +93,9 @@ temporairement, tandis que les nouvelles utilisent immédiatement le nouveau sec
 1. Générer la nouvelle valeur et exécuter localement `ALTER ROLE labelscan_db_admin
    PASSWORD '<nouvelle valeur>';` via le socket PostgreSQL du conteneur.
 2. Remplacer atomiquement `db_admin_password` et `database_admin_url`.
-3. Lancer le job `migrate` en mode vérification et confirmer qu'il peut lire la révision
+3. Garder `db_admin_password` en `root:root` mode `0600`, puis remettre
+   `database_admin_url` en `root:10001` mode `0640`.
+4. Lancer le job `migrate` en mode vérification et confirmer qu'il peut lire la révision
    Alembic. Ne jamais redémarrer l'API avec cette URL.
 
 Les valeurs ne doivent pas apparaître sur la ligne de commande. Utiliser un fichier root
@@ -101,7 +105,8 @@ temporaire ou l'outil de rotation contrôlé du déploiement, puis le supprimer.
 
 1. Générer une valeur aléatoire d'au moins 48 octets.
 2. Remplacer atomiquement `/opt/labelscan/secrets/jwt_secret`.
-3. Recréer l'API et vérifier login, refresh et route protégée.
+3. Remettre le fichier en `root:10001` mode `0640`, puis recréer l'API et vérifier login,
+   refresh et route protégée.
 4. Informer les utilisateurs qu'ils doivent se reconnecter : le modèle HS256 actuel ne
    conserve qu'une clé active et tous les anciens access tokens deviennent invalides.
 5. Révoquer/expirer les sessions serveur existantes si la rotation répond à un incident.
@@ -113,7 +118,8 @@ Pour chaque fournisseur, séparément :
 1. Créer une nouvelle clé côté fournisseur, limitée au projet/API requis, aux quotas
    attendus et, si disponible, aux adresses de sortie du VPS.
 2. Mettre à jour le fichier secret lu uniquement par les workers.
-3. Recréer les workers et valider une image de test contrôlée de bout en bout.
+3. Remettre ce fichier en `root:10001` mode `0640`, puis recréer les workers et valider
+   une image de test contrôlée de bout en bout.
 4. Vérifier les erreurs, quotas et coûts, puis révoquer l'ancienne clé.
 
 Une clé qui a existé en clair dans un poste de développement doit être tournée avant la
