@@ -1,6 +1,12 @@
-import { validateApiBaseUrl } from '../config';
+import { DEFAULT_RELEASE_API_BASE_URL, validateApiBaseUrl } from '../config';
 
 describe('API URL release guard', () => {
+  it('keeps a stable HTTPS endpoint for standalone Android release builds', () => {
+    expect(DEFAULT_RELEASE_API_BASE_URL).toBe('https://label-scan.fr');
+    expect(validateApiBaseUrl(DEFAULT_RELEASE_API_BASE_URL, false)).toBe(
+      'https://label-scan.fr',
+    );
+  });
   it('rejects cleartext URLs in release builds', () => {
     expect(() => validateApiBaseUrl('http://api.example.test', false)).toThrow(
       'Release builds require an HTTPS',

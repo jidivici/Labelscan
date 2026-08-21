@@ -85,12 +85,12 @@ externes restent dans `SECURITY-ARCHITECTURE.md` et `PRE-PENTEST-CHECKLIST.md`.
 - Les appels fournisseurs ont timeout, validation, quota/budget et erreurs neutralisées;
   aucun secret ou contenu brut n'est journalisé.
 
-## Conteneurs, dépendances et mobile Android 8
+## Conteneurs, dépendances et mobile Android 13
 
 - Images applicatives de base par digest; processus applicatifs UID/GID non root; système
   de fichiers en lecture seule; tmpfs `noexec,nosuid,nodev`; capabilities supprimées;
   `no-new-privileges`; limites PID/mémoire/CPU; aucun socket Docker.
-- Android minimum API 26 (Android 8), Expo SDK 54, mêmes contrats API et règles métier que
+- Android minimum API 33 (Android 13), Expo SDK 54, mêmes contrats API et règles métier que
   sur iOS. Le build release active minification/réduction et interdit le cleartext.
 - Le check Expo, typecheck, tests mobile/web/backend, audit de dépendances, scan de secrets,
   tests PostgreSQL/RLS et build Android release sont des portes de release.
@@ -104,5 +104,5 @@ La release est refusée si un seul contrôle suivant échoue : tests PostgreSQL 
 configuration fail-closed, séparation des rôles DB, scan des dépendances/secrets, build
 Android, smoke tests publics, snapshot/sauvegarde ou conservation des images. Après
 déploiement, `npm run security:production -- https://label-scan.fr` doit être intégralement
-vert et une capture réelle doit être validée sur Android 8/API 26 avant de déclarer la
+vert et une capture réelle doit être validée sur Android 13/API 33 avant de déclarer la
 parité complète avec iOS.
