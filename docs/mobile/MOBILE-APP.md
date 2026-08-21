@@ -9,15 +9,29 @@ côté backend, celui-ci comble le manque.
 ## Contrat de compatibilité
 
 - Expo SDK 54 / React Native 0.81.
-- Android minimum : **Android 8.0, API 26**, avec le même parcours métier qu'iOS
+- Android minimum : **Android 13, API 33**, sur un appareil recevant encore les correctifs
+  de son fabricant, avec le même parcours métier qu'iOS
   (connexion, capture, file hors ligne, revue 17/17, catalogue et déconnexion).
 - Les builds preview et production refusent le trafic HTTP en clair et embarquent
   obligatoirement `https://label-scan.fr` comme origine API.
+- Les releases Android assemblées localement (hors EAS) utilisent la même origine
+  publique comme repli non secret ; un oubli de variable EAS ne produit donc plus
+  une application installable mais incapable de joindre le serveur.
+- Les permissions réseau Android (`INTERNET` et `ACCESS_NETWORK_STATE`) sont déclarées
+  explicitement et contrôlées par `npm run check:android13`.
+- Les permissions microphone, overlay système et ancien stockage externe ajoutées
+  transitivement par des modules natifs sont explicitement retirées du manifeste final.
+- Les requêtes JSON Android (authentification incluse) utilisent `expo/fetch`, le
+  transport WinterCG natif fourni par Expo SDK 54. iOS conserve son transport déjà
+  validé et les uploads gardent le pont React Native compatible avec les parties
+  fichier `{ uri, name, type }`.
 - La session est stockée dans Android Keystore/iOS Keychain via SecureStore et la
   sauvegarde applicative Android est désactivée.
+- Aucun certificat racine, contournement TLS ou compatibilité spécifique aux anciens Android
+  n'est embarqué. Le build s'appuie sur le magasin de certificats maintenu par le système.
 
-`npm run check:android8` vérifie le contrat statique. Une release reste bloquée tant
-qu'un test du parcours complet n'a pas réussi sur un appareil ou émulateur API 26.
+`npm run check:android13` vérifie le contrat statique. Une release reste bloquée tant
+qu'un test du parcours complet n'a pas réussi sur un appareil ou émulateur API 33.
 
 > **À lire en regard :**
 > - [`../backend/API-CONTRACTS.md`](../backend/API-CONTRACTS.md) — les endpoints que le client appelle.
