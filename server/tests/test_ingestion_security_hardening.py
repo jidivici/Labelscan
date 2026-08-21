@@ -140,6 +140,16 @@ def test_vps_bootstrap_separates_runtime_from_database_owner() -> None:
     assert 'chmod 640 "$target"' in deploy_script
 
 
+def test_privileged_deploy_trusts_only_its_checkout_for_git_validation() -> None:
+    deploy_script = (
+        Path(__file__).resolve().parents[2] / "deploy" / "hostinger" / "deploy.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'git -c safe.directory="$checkout_root" -C "$checkout_root"' in deploy_script
+    assert "git config --global" not in deploy_script
+    assert '[[ "$checkout_head" == "$commit_sha" ]]' in deploy_script
+
+
 def test_vps_healthcheck_uses_the_allowed_production_host() -> None:
     compose = (
         Path(__file__).resolve().parents[2]
