@@ -171,13 +171,19 @@ def _gs1_candidates(gs1: Gs1Result, *, image_artifact_id: str) -> list[Reconcile
         )
 
     if gs1.gtin:
+        gtin_check_digit_warning = tuple(
+            warning for warning in gs1.warnings if "Clé de contrôle GTIN" in warning
+        )
         out.append(
             _gs1_field(
                 "gtin",
                 gs1.gtin,
                 ai="01",
                 image_artifact_id=image_artifact_id,
-                validation_status="present",
+                # Keep the exact GS1 payload and let the operator see the same green
+                # correction cue as an uncertain extraction. It remains saveable.
+                validation_status="invalid" if gtin_check_digit_warning else "present",
+                warnings=gtin_check_digit_warning,
             )
         )
 
