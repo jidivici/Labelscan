@@ -9,9 +9,19 @@
 
 /**
  * Backend base URL, e.g. "https://api.example.com" or "http://192.168.1.10:8000".
- * Empty when unset — the API client throws a clear error instead of guessing a host.
+ * Development stays empty when unset. Standalone releases use the public production
+ * endpoint below so builds made outside EAS remain connected.
  */
 declare const __DEV__: boolean | undefined;
+
+/**
+ * Public, non-secret production endpoint used by standalone release builds.
+ *
+ * EAS still injects EXPO_PUBLIC_API_BASE_URL for explicit environment tracking,
+ * but a locally assembled Android release must not become unusable just because
+ * it was built outside EAS (where eas.json env values are not loaded).
+ */
+export const DEFAULT_RELEASE_API_BASE_URL = 'https://label-scan.fr';
 
 export function validateApiBaseUrl(value: string, isDev: boolean): string {
   const normalized = value.trim();
@@ -37,9 +47,13 @@ export function validateApiBaseUrl(value: string, isDev: boolean): string {
   return normalized.replace(/\/+$/, '');
 }
 
+const isDevelopmentBuild =
+  typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
+
 export const API_BASE_URL: string = validateApiBaseUrl(
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? '',
-  typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production',
+  process.env.EXPO_PUBLIC_API_BASE_URL ??
+    (isDevelopmentBuild ? '' : DEFAULT_RELEASE_API_BASE_URL),
+  isDevelopmentBuild,
 );
 
 // Authentication is now real JWT: the app obtains a token via POST /v1/auth/login

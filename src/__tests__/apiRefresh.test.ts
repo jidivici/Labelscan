@@ -2,11 +2,13 @@ describe('API access-token refresh', () => {
   beforeEach(() => {
     jest.resetModules();
     process.env.EXPO_PUBLIC_API_BASE_URL = 'https://api.example.test';
+    process.env.EXPO_OS = 'android';
   });
 
   afterEach(() => {
     jest.restoreAllMocks();
     delete process.env.EXPO_PUBLIC_API_BASE_URL;
+    delete process.env.EXPO_OS;
   });
 
   it('serializes refresh and retries concurrent failed requests once', async () => {
@@ -71,5 +73,7 @@ describe('API access-token refresh', () => {
       businessPortalId: 'portal-1',
       tradeCode: 'poissonnerie',
     });
+    const { fetch: expoFetch } = await import('expo/fetch');
+    expect(jest.mocked(expoFetch)).toHaveBeenCalled();
   });
 });

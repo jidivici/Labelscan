@@ -140,7 +140,7 @@ Les `.env` sont git-ignorés et vérifiés absents de tout l'historique.
 |---|---|
 | `npm run typecheck` | TypeScript strict, 0 erreur attendu |
 | `npm test` | Suite Jest mobile |
-| `npm run check:android8` | Vérifie le plancher API 26 et les garde-fous réseau de la release Android |
+| `npm run check:android13` | Vérifie le plancher API 33 et les garde-fous réseau de la release Android |
 | `npm run security:production -- https://label-scan.fr` | Refuse une cible publique qui n'applique pas les garde-fous de production |
 | `bash server/scripts/run_local_proofs.sh` | PostgreSQL éphémère, migrations, contrats d’architecture et tests backend |
 | `docker compose up` | Stack locale (db + api + 2 workers) |

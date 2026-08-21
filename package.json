@@ -46,7 +46,7 @@
     "test": "jest --config jest.config.js",
     "test:watch": "jest --config jest.config.js --watch",
     "typecheck": "tsc --noEmit",
-    "check:android8": "node scripts/check-android-8.mjs",
+    "check:android13": "node scripts/check-android-13.mjs",
     "security:tracked-secrets": "node scripts/check-tracked-secrets.mjs",
     "security:production": "node scripts/check-production-security.mjs"
   },

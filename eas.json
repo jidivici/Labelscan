@@ -15,6 +15,9 @@
     "preview": {
       "distribution": "internal",
       "environment": "preview",
+      "android": {
+        "buildType": "apk"
+      },
       "env": {
         "LABELSCAN_BUILD_PROFILE": "preview",
         "EXPO_PUBLIC_API_BASE_URL": "https://label-scan.fr"
