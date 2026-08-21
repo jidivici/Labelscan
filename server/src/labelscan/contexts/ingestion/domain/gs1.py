@@ -29,6 +29,14 @@ from datetime import date
 
 FNC1 = "\x1d"  # GS / Group Separator — the GS1 variable-field terminator
 
+
+def _normalise_scan(raw: str) -> str:
+    """Remove scanner transport metadata while preserving GS1 payload bytes."""
+    text = raw.strip()
+    if len(text) >= 3 and text[0] == "]" and text[1].isalpha() and text[2].isdigit():
+        text = text[3:]
+    return text.replace("<GS>", FNC1).replace("{GS}", FNC1)
+
 # Fixed-length AIs (AI -> payload length in characters). HACCP-relevant subset.
 _FIXED_LEN: dict[str, int] = {
     "00": 18,  # SSCC
@@ -45,6 +53,7 @@ _FIXED_LEN: dict[str, int] = {
 # Weight/measure family: 4-char AI "NNNx" where x is the implied decimal position;
 # payload is always 6 digits. We decode the net-weight (kg) family for HACCP.
 _MEASURE_PREFIXES = ("310", "311", "312", "313", "315", "316", "320", "321")
+_FOUR_DIGIT_AIS = ("7030",)
 
 
 @dataclass(frozen=True)
@@ -98,9 +107,23 @@ def _decode_measure(ai: str, payload: str) -> float | None:
     return int(payload) / (10**decimals)
 
 
+def _has_valid_gtin_check_digit(value: str) -> bool:
+    if len(value) < 2 or not value.isdigit():
+        return False
+    weighted = sum(
+        int(digit) * (3 if index % 2 == 0 else 1)
+        for index, digit in enumerate(reversed(value[:-1]))
+    )
+    return int(value[-1]) == (10 - weighted % 10) % 10
+
+
 def _read_ai(s: str, i: int) -> tuple[str | None, int]:
     """Return (ai, ai_length) at position i, or (None, 0) if unrecognisable."""
-    if i + 4 <= len(s) and s[i : i + 3] in _MEASURE_PREFIXES and s[i : i + 4].isdigit():
+    if (
+        i + 4 <= len(s)
+        and (s[i : i + 3] in _MEASURE_PREFIXES or s[i : i + 4] in _FOUR_DIGIT_AIS)
+        and s[i : i + 4].isdigit()
+    ):
         return s[i : i + 4], 4
     two = s[i : i + 2]
     if two.isdigit():
@@ -160,12 +183,14 @@ def parse_gs1(raw: str | None) -> Gs1Result:
     if not raw or not raw.strip():
         return Gs1Result(elements={})
 
-    s = raw.strip()
+    s = _normalise_scan(raw)
     elements, warnings = _parse_parenthesised(s) if "(" in s else _parse_positional(s)
 
     gtin = elements.get("01") or None
     if gtin is not None and (len(gtin) != 14 or not gtin.isdigit()):
         warnings.append(f"GTIN (AI 01) is not 14 digits: {gtin!r}")
+    elif gtin is not None and not _has_valid_gtin_check_digit(gtin):
+        warnings.append(f"Clé de contrôle GTIN (AI 01) à vérifier : {gtin!r}")
 
     lot = (elements.get("10") or "").strip() or None
 
