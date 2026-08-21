@@ -35,7 +35,11 @@ commit_sha="$2"
 
 [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] || die "commit SHA is invalid"
 [[ -d "${checkout_root}/.git" || -f "${checkout_root}/.git" ]] || die "source is not a Git checkout"
-[[ "$(git -C "$checkout_root" rev-parse HEAD)" == "$commit_sha" ]] || die "checkout does not match requested commit"
+# The self-hosted runner owns the checkout while this reviewed wrapper runs as
+# root. Trust only this checkout for this command; never weaken Git globally.
+checkout_head="$(git -c safe.directory="$checkout_root" -C "$checkout_root" rev-parse --verify HEAD^{commit})" \
+  || die "source Git revision cannot be inspected"
+[[ "$checkout_head" == "$commit_sha" ]] || die "checkout does not match requested commit"
 [[ -f "${checkout_root}/server/Dockerfile" ]] || die "server Dockerfile is missing"
 [[ -f "${checkout_root}/web/package-lock.json" ]] || die "web lockfile is missing"
 [[ -f "${checkout_root}/${REPOSITORY_COMPOSE}" ]] || die "single-VPS Compose file is missing"
