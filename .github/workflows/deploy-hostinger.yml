@@ -61,6 +61,11 @@ jobs:
           RESET_DEMO: ${{ inputs.reset_demo }}
         run: |
           set -Eeuo pipefail
+          # The runner invokes this wrapper with sudo. Refresh it from the exact,
+          # reviewed checkout first so an older VPS copy cannot block the rollout.
+          sudo --non-interactive install -m 755 \
+            "$GITHUB_WORKSPACE/deploy/hostinger/deploy.sh" \
+            /usr/local/sbin/labelscan-deploy
           test -x /usr/local/sbin/labelscan-deploy
           if [[ -z "$RESET_DEMO" ]]; then
             sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA"
