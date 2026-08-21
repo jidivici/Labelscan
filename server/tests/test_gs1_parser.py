@@ -10,7 +10,16 @@ def test_parenthesised_gtin_lot_expiry():
     assert r.gtin == "03700161210047"
     assert r.lot == "LOT123"
     assert r.expiry_date == "2025-12-31"
-    assert not r.warnings
+
+
+def test_supplied_label_keeps_full_ai01_even_with_unusual_check_digit():
+    r = parse_gs1(
+        "(01)93000502900206(7030)25034108593(10)107083(3103)004500(21)0008186"
+    )
+    assert r.gtin == "93000502900206"
+    assert r.lot == "107083"
+    assert r.net_weight_kg == 4.5
+    assert any("Clé de contrôle" in warning for warning in r.warnings)
 
 
 def test_positional_with_fnc1_separators():

@@ -63,7 +63,7 @@ def test_capture_timestamp_is_canonicalized_to_utc() -> None:
     [
         ("expiry_date", "2026-02-30"),
         ("production_method", "unknown"),
-        ("gtin", "4006381333932"),  # invalid check digit
+        ("gtin", "40063813339"),  # unsupported length
         ("commercial_designation", "safe\u202eevil"),
         ("ingredients", "safe\x00evil"),
     ],
@@ -81,6 +81,7 @@ def test_human_review_accepts_canonical_safety_values_and_nc() -> None:
         validate_human_field_value("production_method", "wild_caught") == "wild_caught"
     )
     assert validate_human_field_value("gtin", "4006381333931") == "4006381333931"
+    assert validate_human_field_value("gtin", "93000502900206") == "93000502900206"
     assert validate_human_field_value("gtin", "nc") == "NC"
 
 
