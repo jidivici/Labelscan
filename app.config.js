@@ -15,8 +15,8 @@ module.exports = ({ config }) => {
         'expo-build-properties',
         {
           android: {
-            // Product contract: Android 8.0 (API 26) is the oldest supported OS.
-            minSdkVersion: 26,
+            // Product contract: only maintained Android generations are supported.
+            minSdkVersion: 33,
             // Release traffic must use HTTPS. Development keeps LAN HTTP available.
             usesCleartextTraffic: !releaseBuild,
             enableMinifyInReleaseBuilds: true,

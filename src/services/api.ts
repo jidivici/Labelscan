@@ -15,6 +15,7 @@
  */
 
 import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
+import { fetch as expoFetch, type FetchRequestInit } from 'expo/fetch';
 import { v4 as uuidv4 } from 'uuid';
 import * as FileSystem from 'expo-file-system/legacy';
 
@@ -35,6 +36,24 @@ import type {
 } from '../types/api';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
+
+type HttpResponse = Pick<Response, 'json' | 'ok' | 'status' | 'text'>;
+
+/**
+ * Android JSON transport.
+ *
+ * The React Native legacy fetch bridge can collapse Android DNS/TLS failures into
+ * an opaque `Network request failed` before the request reaches Caddy. Expo SDK 54
+ * ships a native WinterCG fetch implementation specifically for consistent mobile
+ * networking. Keep iOS on its proven transport and keep multipart uploads on the
+ * legacy bridge, whose `{ uri, name, type }` file parts are React-Native-specific.
+ */
+async function fetchJson(url: string, init: RequestInit): Promise<HttpResponse> {
+  if (process.env.EXPO_OS === 'android') {
+    return expoFetch(url, init as FetchRequestInit);
+  }
+  return globalThis.fetch(url, init);
+}
 
 /** Safe, serializable error surface. Never carries secrets or raw provider bodies. */
 export class ApiError extends Error {
@@ -84,7 +103,7 @@ async function refreshAccessToken(): Promise<string | null> {
     const refreshToken = await getRefreshToken();
     if (!refreshToken) return null;
     try {
-      const response = await fetch(resolveUrl('/v1/mobile/auth/refresh'), {
+      const response = await fetchJson(resolveUrl('/v1/mobile/auth/refresh'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refreshToken }),
@@ -138,7 +157,7 @@ function resolveUrl(path: string): string {
   return `${API_BASE_URL.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
 }
 
-async function parseError(response: Response, fallbackCorrelationId: string): Promise<ApiError> {
+async function parseError(response: HttpResponse, fallbackCorrelationId: string): Promise<ApiError> {
   // Read only the safe, stable RFC 9457 fields — never echo a raw body that could
   // contain unexpected content.
   let code = `HTTP_${response.status}`;
@@ -165,6 +184,7 @@ async function send<T>(
   init: RequestInit,
   opts: RequestOptions,
   baseHeaders: Record<string, string>,
+  transport: (url: string, init: RequestInit) => Promise<HttpResponse>,
 ): Promise<T> {
   const url = resolveUrl(path);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -190,12 +210,12 @@ async function send<T>(
   }
 
   try {
-    const response = await fetch(url, { ...init, headers, signal: controller.signal });
+    const response = await transport(url, { ...init, headers, signal: controller.signal });
     if (!response.ok) {
       if (response.status === 401 && !opts.skipAuth && !opts.authRetried) {
         const refreshed = await refreshAccessToken();
         if (refreshed) {
-          return send<T>(path, init, { ...opts, authRetried: true }, baseHeaders);
+          return send<T>(path, init, { ...opts, authRetried: true }, baseHeaders, transport);
         }
       }
       const apiError = await parseError(response, correlationId);
@@ -239,7 +259,7 @@ export function apiRequest<T>(
     baseHeaders['Content-Type'] = 'application/json';
     init.body = JSON.stringify(body);
   }
-  return send<T>(path, init, opts, baseHeaders);
+  return send<T>(path, init, opts, baseHeaders, fetchJson);
 }
 
 /**
@@ -291,7 +311,7 @@ export function apiUpload<T>(
       ...options,
       idempotencyKey: options.idempotencyKey ?? uuidv4(),
     };
-    return send<T>(path, { method: 'POST', body: form }, opts, {});
+    return send<T>(path, { method: 'POST', body: form }, opts, {}, globalThis.fetch);
   })();
 }
 
