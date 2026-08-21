@@ -63,7 +63,7 @@ def test_capture_timestamp_is_canonicalized_to_utc() -> None:
     [
         ("expiry_date", "2026-02-30"),
         ("production_method", "unknown"),
-        ("gtin", "4006381333932"),  # invalid check digit
+        ("gtin", "40063813339"),  # unsupported length
         ("commercial_designation", "safe\u202eevil"),
         ("ingredients", "safe\x00evil"),
     ],
@@ -81,6 +81,7 @@ def test_human_review_accepts_canonical_safety_values_and_nc() -> None:
         validate_human_field_value("production_method", "wild_caught") == "wild_caught"
     )
     assert validate_human_field_value("gtin", "4006381333931") == "4006381333931"
+    assert validate_human_field_value("gtin", "93000502900206") == "93000502900206"
     assert validate_human_field_value("gtin", "nc") == "NC"
 
 
@@ -138,6 +139,16 @@ def test_vps_bootstrap_separates_runtime_from_database_owner() -> None:
     assert "grant_application_secret_access" in deploy_script
     assert 'chown root:"$APP_SECRET_GID" "$target"' in deploy_script
     assert 'chmod 640 "$target"' in deploy_script
+
+
+def test_privileged_deploy_trusts_only_its_checkout_for_git_validation() -> None:
+    deploy_script = (
+        Path(__file__).resolve().parents[2] / "deploy" / "hostinger" / "deploy.sh"
+    ).read_text(encoding="utf-8")
+
+    assert 'git -c safe.directory="$checkout_root" -C "$checkout_root"' in deploy_script
+    assert "git config --global" not in deploy_script
+    assert '[[ "$checkout_head" == "$commit_sha" ]]' in deploy_script
 
 
 def test_vps_healthcheck_uses_the_allowed_production_host() -> None:

@@ -386,8 +386,11 @@ or null. Use only explicitly DECLARED allergens (typically after "Contains:"). T
 precautionary "may contain traces of ..." statement as a warning, NOT a declared \
 allergen. Absence of any allergen statement is "value" null, "validation_status" \
 "missing".
-- gtin: the GTIN is NOT readable label text - it comes from the scanned barcode and is \
-handled outside this extraction. Set gtin to "value" null, "validation_status" \
+- gtin: when a GS1 human-readable element is printed, extract the COMPLETE payload after \
+AI (01), exactly 14 digits including its check digit; never use only its prefix. For example, \
+"(01)93000502900206" means gtin "93000502900206". The barcode scanner remains the \
+authoritative source and may override this OCR confirmation. If no complete AI (01) GTIN is \
+printed or scanned, set gtin to "value" null, "validation_status" \
 "missing", "evidence" null, UNLESS a full GTIN digit string is literally printed on the \
 label. Never derive a GTIN from other numbers.
 

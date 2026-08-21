@@ -128,18 +128,12 @@ def validate_note(value: str | None) -> str | None:
 
 
 def _valid_gtin(value: str) -> bool:
-    if len(value) not in _GTIN_LENGTHS or not value.isascii() or not value.isdigit():
-        return False
-    digits = [int(char) for char in value]
-    expected = (
-        10
-        - sum(
-            digit * (3 if index % 2 == 0 else 1)
-            for index, digit in enumerate(reversed(digits[:-1]))
-        )
-        % 10
-    ) % 10
-    return digits[-1] == expected
+    # AI (01) values come from the scanned GS1-128 payload and must be preserved
+    # exactly. Some seafood labels carry an internal 14-digit identifier whose final
+    # digit does not satisfy the retail GTIN checksum; rejecting it blocks a valid
+    # traceability receipt. Structural validation still prevents truncated/non-numeric
+    # data; checksum anomalies are reported by the GS1 parser as a warning, not a 400.
+    return len(value) in _GTIN_LENGTHS and value.isascii() and value.isdigit()
 
 
 def _valid_iso_date(value: str) -> bool:
