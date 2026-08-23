@@ -126,8 +126,15 @@ export async function getAllArticles(): Promise<Article[]> {
 export async function getArticleById(id: string): Promise<Article | null> {
   const cached = queryClient.getQueryData<Article[]>(['catalog', 'arrivals'])
     ?.find((article) => article.id === id);
-  if (cached) return cached;
+  // An optimistic arrival has no server batch id yet; its locally assembled record
+  // already contains the complete reviewed field set and is the only available detail.
+  if (cached?.id.startsWith('pending-')) return cached;
+
+  // Catalogue rows are deliberately lightweight summaries. Never use one as a product
+  // detail merely because it is cached: it only carries a subset of the recovered
+  // fields and would make the fiche disagree with the completed review. Fetch the
+  // authoritative full record first, keeping the summary solely as an offline fallback.
   const { getCatalogArticle } = await import('./catalogApi');
   const serverArticle = await getCatalogArticle(id);
-  return serverArticle ?? store.getById(id);
+  return serverArticle ?? cached ?? store.getById(id);
 }

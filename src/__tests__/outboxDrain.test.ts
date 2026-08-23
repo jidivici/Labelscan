@@ -88,6 +88,45 @@ describe('drainOutbox', () => {
     expect(r2.succeeded).toBe(1);
   });
 
+  it('a save waits for an already-running drain and its trailing pass', async () => {
+    let releaseFirst!: () => void;
+    let signalFirstStarted!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      signalFirstStarted = resolve;
+    });
+    mockedConfirm.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        signalFirstStarted();
+        releaseFirst = () => resolve({
+          ingestion_id: 'ing-1',
+          status: 'confirmed',
+          replayed: false,
+        });
+      }),
+    );
+
+    await enqueueConfirmIngestion({ ingestion_id: 'ing-1' });
+    const activeDrain = drainOutbox();
+    // Let the first drain claim its operation before a save queues another one.
+    await firstStarted;
+
+    await enqueueConfirmIngestion({ ingestion_id: 'ing-2' });
+    let saveDrainFinished = false;
+    const saveDrain = drainOutbox().then(() => {
+      saveDrainFinished = true;
+    });
+    await Promise.resolve();
+    expect(saveDrainFinished).toBe(false);
+
+    releaseFirst();
+    await Promise.all([activeDrain, saveDrain]);
+
+    const all = await listAll();
+    expect(all).toHaveLength(2);
+    expect(all.every((op) => op.status === 'succeeded')).toBe(true);
+    expect(mockedConfirm).toHaveBeenCalledTimes(2);
+  });
+
   it('leaves op types it does not own untouched', async () => {
     await enqueuePollIngestionStatus({ ingestion_id: 'ing-3' });
     const result = await drainOutbox();

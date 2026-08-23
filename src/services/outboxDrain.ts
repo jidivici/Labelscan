@@ -110,12 +110,18 @@ async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
 // a save landing during the foreground drain) goes out immediately, not "next time".
 let draining = false;
 let rerunRequested = false;
+let drainWaiters: Array<() => void> = [];
 
 /** Drain due review writes. Never throws — safe to fire-and-forget. */
 export async function drainOutbox(now: number = Date.now()): Promise<DrainResult> {
   const result: DrainResult = { succeeded: 0, failed: 0, skipped: 0 };
   if (draining) {
     rerunRequested = true;
+    // A save action needs to know the state AFTER its operation has had a chance
+    // to run. Waiting for the active drain (including the trailing re-pass requested
+    // above) avoids reporting a false, blocking "En attente de synchronisation" while
+    // another foreground/network-triggered drain is already sending the review.
+    await new Promise<void>((resolve) => drainWaiters.push(resolve));
     return result;
   }
   draining = true;
@@ -151,15 +157,19 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
           result.failed += 1;
         }
       }
+      // Keep housekeeping inside the coalescing loop. If another trigger arrives
+      // while this storage write is in progress, rerunRequested stays observable by
+      // the loop and its newly queued review cannot miss the trailing pass.
+      await purgeTerminalOps({ now });
     } while (rerunRequested);
-    // Housekeeping: drop old terminal ops so the queue cannot grow without bound
-    // (every scan enqueues ops that would otherwise live in AsyncStorage forever).
-    await purgeTerminalOps({ now });
   } catch {
     // Storage failure reading the queue — nothing to do; the next trigger retries.
   } finally {
     draining = false;
     rerunRequested = false;
+    const waiters = drainWaiters;
+    drainWaiters = [];
+    for (const resolve of waiters) resolve();
   }
   // A landed create_ingestion must advance its scan card (step 1 → 2). Fire-and-forget
   // AFTER the latch released — reconciliation may schedule polls, never another drain.

@@ -1,9 +1,6 @@
 import {
-  type FocusEvent as ReactFocusEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useEffect,
-  useId,
   useRef,
   useState,
 } from 'react';
@@ -15,6 +12,7 @@ import { PORTALS, portalDefinition } from '../portals/registry';
 import { ScopeProvider, useScope } from '../scope/ScopeContext';
 import { CAPABILITIES, type ProfessionCode } from '../types';
 import { BrandMark } from '../BrandMark';
+import { DropdownSelect } from '../components/DropdownSelect';
 
 const ROLE_LABELS: Record<string, string> = {
   manager: 'Manager',
@@ -199,108 +197,15 @@ function SidebarScopeSelect({ label, placeholder, value, options, disabled = fal
   disabled?: boolean;
   onChange: (value: string) => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const optionRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const pendingFocusIndex = useRef<number | null>(null);
-  const labelId = useId();
-  const valueId = useId();
-  const selectedIndex = options.findIndex((option) => option.value === value);
-  const selectedLabel = options[selectedIndex]?.label ?? placeholder;
-
-  useEffect(() => {
-    if (!open || pendingFocusIndex.current === null) return;
-    optionRefs.current[pendingFocusIndex.current]?.focus();
-    pendingFocusIndex.current = null;
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const closeOnOutsidePress = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener('pointerdown', closeOnOutsidePress);
-    return () => document.removeEventListener('pointerdown', closeOnOutsidePress);
-  }, [open]);
-
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
-
-  function openAt(index: number) {
-    pendingFocusIndex.current = Math.max(0, Math.min(options.length - 1, index));
-    setOpen(true);
-  }
-
-  function handleTriggerKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>) {
-    if (event.key === 'Escape' && open) {
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
-      return;
-    }
-    if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-    event.preventDefault();
-    openAt(selectedIndex >= 0 ? selectedIndex : event.key === 'ArrowDown' ? 0 : options.length - 1);
-  }
-
-  function handleOptionKeyDown(event: ReactKeyboardEvent<HTMLButtonElement>, index: number) {
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      event.stopPropagation();
-      setOpen(false);
-      triggerRef.current?.focus();
-      return;
-    }
-    const nextIndex = event.key === 'ArrowDown'
-      ? (index + 1) % options.length
-      : event.key === 'ArrowUp'
-        ? (index - 1 + options.length) % options.length
-        : event.key === 'Home'
-          ? 0
-          : event.key === 'End'
-            ? options.length - 1
-            : null;
-    if (nextIndex === null) return;
-    event.preventDefault();
-    optionRefs.current[nextIndex]?.focus();
-  }
-
-  function handleBlur(event: ReactFocusEvent<HTMLDivElement>) {
-    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOpen(false);
-  }
-
-  return <div ref={rootRef} className={`scope-dropdown ${open ? 'open' : ''}`} onBlur={handleBlur}>
-    <span id={labelId} className="scope-dropdown-label">{label}</span>
-    <button
-      ref={triggerRef}
-      type="button"
-      className="scope-dropdown-trigger"
-      aria-labelledby={`${labelId} ${valueId}`}
-      aria-haspopup="listbox"
-      aria-expanded={open}
-      disabled={disabled}
-      onClick={() => setOpen((current) => !current)}
-      onKeyDown={handleTriggerKeyDown}
-    >
-      <span id={valueId}>{selectedLabel}</span>
-      <span className="scope-dropdown-chevron" aria-hidden="true" />
-    </button>
-    {open && <div className="scope-dropdown-menu" role="listbox" aria-label={label}>
-      {options.map((option, index) => <button
-        ref={(element) => { optionRefs.current[index] = element; }}
-        type="button"
-        role="option"
-        aria-selected={option.value === value}
-        className="scope-dropdown-option"
-        key={option.value}
-        onClick={() => { setOpen(false); onChange(option.value); }}
-        onKeyDown={(event) => handleOptionKeyDown(event, index)}
-      >
-        <span>{option.label}</span>
-        {option.value === value && <span aria-hidden="true">✓</span>}
-      </button>)}
-    </div>}
-  </div>;
+  return <DropdownSelect
+    className="scope-dropdown"
+    options={options}
+    selected={value}
+    onChange={onChange}
+    ariaLabel={label}
+    placeholder={placeholder}
+    label={label}
+    disabled={disabled}
+    portalMenu={false}
+  />;
 }

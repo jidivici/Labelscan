@@ -20,6 +20,24 @@ describe('GS1 parser (client mirror of server domain/gs1.py)', () => {
     expect(r.expiryDate).toBe('2025-12-31');
   });
 
+  it('decodes the complete GS1-128 payload from the supplied label', () => {
+    const r = parseGs1(
+      '(01)93000502900206(7030)25034108593(10)107083(3103)004500(21)0008186',
+    );
+    expect(r.gtin).toBe('93000502900206');
+    expect(r.lot).toBe('107083');
+    expect(r.netWeightKg).toBe(4.5);
+    expect(r.elements['21']).toBe('0008186');
+    expect(r.warnings.some((warning) => warning.includes('Clé de contrôle'))).toBe(true);
+  });
+
+  it('accepts scanner AIM prefixes and textual FNC1 separators', () => {
+    const r = parseGs1(']C1019300050290020610107083<GS>17260812');
+    expect(r.gtin).toBe('93000502900206');
+    expect(r.lot).toBe('107083');
+    expect(r.expiryDate).toBe('2026-08-12');
+  });
+
   it('net weight 310x: implied decimals', () => {
     // AI 3103 -> 3 implied decimals; payload 001500 -> 1.500 kg
     const r = parseGs1('(3103)001500');

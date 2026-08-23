@@ -241,7 +241,8 @@ test('professional filters persist in the URL, reach the server, and reset pagin
   await expect(page.getByRole('option', { name: 'Signalés' })).toHaveCount(0);
   await expect(page.getByRole('option', { name: 'Enregistrés' })).toHaveCount(0);
   await page.getByLabel('Espèce / désignation commerciale').fill('saumon atlantique');
-  await page.getByLabel('Mode de production').selectOption('farmed');
+  await page.getByRole('button', { name: 'Mode de production' }).click();
+  await page.getByRole('option', { name: 'Élevage', exact: true }).click();
 
   const expectedFilters = ['commercial_designation:saumon atlantique', 'production_method:farmed'];
   await expect.poll(() => new URL(page.url()).searchParams.getAll('field_filter')).toEqual(expectedFilters);

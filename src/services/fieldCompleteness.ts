@@ -42,7 +42,8 @@ export function canonicalFieldCount(tradeCode?: string | null): number {
 
 /** A field value counts as "filled" when it is a non-blank string. */
 function isFilledValue(value: string | null | undefined): boolean {
-  return value != null && value.trim() !== '';
+  if (value == null || value.trim() === '') return false;
+  return true;
 }
 
 /**
