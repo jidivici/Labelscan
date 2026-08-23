@@ -77,10 +77,15 @@ export const PendingScanCard = React.memo(function PendingScanCard({
   const submitting = scan.status === 'submitting';
   const ready = scan.status === 'ready';
   const requiresRecapture = scan.status === 'recapture_required';
+  const waitingForSync = scan.reviewSyncStatus === 'pending';
   // Workflow v2: a "ready" scan is only truly "à valider" once all 17 fields are filled.
   // Below that it stays "en cours" and reads "À compléter" — it is NOT an article yet.
   const complete = ready && filledCount === totalFieldCount;
-  const displayLabel = ready && !complete ? 'À compléter' : activeLabel;
+  const displayLabel = waitingForSync
+    ? 'En attente de synchronisation'
+    : ready && !complete
+      ? 'À compléter'
+      : activeLabel;
   // Highlight the active label (accent) while the product name is still unknown.
   const highlightLabel = extracting && !nameKnown;
   // The gauge is the live "n/17" cue: it waves while extracting, settles when ready.
@@ -150,7 +155,9 @@ export const PendingScanCard = React.memo(function PendingScanCard({
     if (openable) onOpen(scan);
   }, [openable, onOpen, scan]);
 
-  const hint = requiresRecapture
+  const hint = waitingForSync
+    ? 'Touchez pour relancer l’envoi'
+    : requiresRecapture
     ? 'Touchez pour reprendre la photo'
     : ready
     ? complete
@@ -197,6 +204,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
                 source={{ uri: scan.photoUri }}
                 style={styles.thumbnailImage}
                 resizeMode="cover"
+                halfTurn={scan.photoRotationDegrees === 180}
                 baseRotationDegrees={scan.photoBaseRotationDegrees ?? -90}
               />
             </View>
@@ -236,7 +244,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
                           {
                             backgroundColor: requiresRecapture
                               ? colors.error
-                              : complete
+                              : complete && !waitingForSync
                                 ? colors.success
                                 : colors.primary,
                           },
@@ -247,7 +255,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
                       style={[
                         typography.titleSmall,
                         styles.statusLabel,
-                        complete && styles.statusLabelReady,
+                        complete && !waitingForSync && styles.statusLabelReady,
                         requiresRecapture && styles.errorLabel,
                         highlightLabel && styles.statusLabelHighlight,
                       ]}
@@ -265,6 +273,8 @@ export const PendingScanCard = React.memo(function PendingScanCard({
 
             {errored ? null : requiresRecapture ? (
               <MaterialCommunityIcons name="camera-retake-outline" size={24} color={colors.error} />
+            ) : waitingForSync ? (
+              <PulseDot size={10} color={colors.primary} />
             ) : showGauge ? (
               <CompletenessGauge filled={filledCount} total={totalFieldCount} loading={extracting} />
             ) : (

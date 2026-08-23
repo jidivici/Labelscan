@@ -347,7 +347,16 @@ export function updatePendingFinalizeReview(
         op.type === 'finalize_review' &&
         (op.status === 'pending' || op.status === 'dead_letter')
       ) {
-        updated = { ...op, payload, updated_at: isoAt(now) };
+        updated = {
+          ...op,
+          payload,
+          // This function is called by an explicit manager action. A previous
+          // transient failure may have scheduled next_attempt_at in the future;
+          // make the corrected review due now instead of leaving the UI trapped
+          // behind a backoff with no retry action.
+          next_attempt_at: isoAt(now),
+          updated_at: isoAt(now),
+        };
         return updated;
       }
       return op;

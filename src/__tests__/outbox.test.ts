@@ -3,6 +3,9 @@ import {
   enqueueFinalizeReview,
   isRetryableError,
   listAll,
+  listPendingDue,
+  markFailed,
+  markInFlight,
   MAX_ATTEMPTS,
   operationMatchesOperatorContext,
   updatePendingFinalizeReview,
@@ -116,5 +119,35 @@ describe('pending review updates', () => {
     expect((await listAll())[0]).toMatchObject({
       payload: { photo_rotation_degrees: 180 },
     });
+  });
+
+  it('makes a backed-off review immediately due after an explicit retry', async () => {
+    const firstAttemptAt = Date.parse('2026-08-21T10:00:00.000Z');
+    const retryAt = firstAttemptAt + 1_000;
+    const operation = await enqueueFinalizeReview(
+      {
+        ingestion_id: 'ing-1',
+        fields: { commercial_designation: 'Saumon' },
+      },
+      { now: firstAttemptAt },
+    );
+    await markInFlight(operation.id, firstAttemptAt);
+    await markFailed(
+      operation.id,
+      { code: 'NETWORK_ERROR', status: 0, retriable: true },
+      firstAttemptAt,
+    );
+    expect(await listPendingDue(retryAt)).toHaveLength(0);
+
+    await updatePendingFinalizeReview(
+      operation.id,
+      {
+        ingestion_id: 'ing-1',
+        fields: { commercial_designation: 'Saumon' },
+      },
+      retryAt,
+    );
+
+    expect((await listPendingDue(retryAt)).map((op) => op.id)).toEqual([operation.id]);
   });
 });

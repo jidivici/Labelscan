@@ -22,6 +22,16 @@ import { displayDate } from './inputMasks';
 
 const FNC1 = '\x1d'; // GS / Group Separator — the GS1 variable-field terminator
 
+/** Scanner vendors may prepend an AIM symbology identifier (for example `]C1`
+ * for GS1-128). It is transport metadata, not an application identifier. */
+function normalizeScan(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^\][A-Za-z][0-9]/, '')
+    // A few scanner bridges expose the FNC1 group separator textually.
+    .replace(/(?:<GS>|\{GS\})/g, FNC1);
+}
+
 // Fixed-length AIs (AI -> payload length in characters). HACCP-relevant subset.
 const FIXED_LEN: Record<string, number> = {
   '00': 18, // SSCC
@@ -38,6 +48,7 @@ const FIXED_LEN: Record<string, number> = {
 // Weight/measure family: 4-char AI "NNNx" where x is the implied decimal position;
 // payload is always 6 digits. We decode the net-weight (kg) family for HACCP.
 const MEASURE_PREFIXES = ['310', '311', '312', '313', '315', '316', '320', '321'];
+const FOUR_DIGIT_AIS = new Set(['7030']);
 
 export interface Gs1Decoded {
   /** Every AI parsed (ai -> raw payload). */
@@ -54,6 +65,16 @@ export interface Gs1Decoded {
 
 const isDigits = (s: string): boolean => s.length > 0 && /^\d+$/.test(s);
 const pad2 = (n: number): string => String(n).padStart(2, '0');
+
+function hasValidGtinCheckDigit(value: string): boolean {
+  if (value.length < 2 || !isDigits(value)) return false;
+  const digits = [...value].map(Number);
+  const weighted = digits.slice(0, -1).reverse().reduce(
+    (sum, digit, index) => sum + digit * (index % 2 === 0 ? 3 : 1),
+    0,
+  );
+  return digits.at(-1) === (10 - (weighted % 10)) % 10;
+}
 
 /** Days in a 1-indexed month (matches GS1 day '00' = last day of month). */
 function lastDay(year: number, month: number): number {
@@ -82,7 +103,11 @@ function decodeMeasure(ai: string, payload: string): number | null {
 /** Return [ai, aiLength] at position i, or [null, 0] if unrecognisable. */
 function readAi(s: string, i: number): [string | null, number] {
   const four = s.slice(i, i + 4);
-  if (four.length === 4 && MEASURE_PREFIXES.includes(s.slice(i, i + 3)) && isDigits(four)) {
+  if (
+    four.length === 4 &&
+    (MEASURE_PREFIXES.includes(s.slice(i, i + 3)) || FOUR_DIGIT_AIS.has(four)) &&
+    isDigits(four)
+  ) {
     return [four, 4];
   }
   const two = s.slice(i, i + 2);
@@ -158,12 +183,14 @@ export function parseGs1(raw: string | null | undefined): Gs1Decoded {
   };
   if (!raw || !raw.trim()) return empty;
 
-  const s = raw.trim();
+  const s = normalizeScan(raw);
   const { elements, warnings } = s.includes('(') ? parseParenthesised(s) : parsePositional(s);
 
   const gtin = elements['01'] || null;
   if (gtin !== null && (gtin.length !== 14 || !isDigits(gtin))) {
     warnings.push(`GTIN (AI 01) is not 14 digits: ${JSON.stringify(gtin)}`);
+  } else if (gtin !== null && !hasValidGtinCheckDigit(gtin)) {
+    warnings.push(`Clé de contrôle GTIN (AI 01) à vérifier : ${JSON.stringify(gtin)}`);
   }
 
   const lot = (elements['10'] || '').trim() || null;

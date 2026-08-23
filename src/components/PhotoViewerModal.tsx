@@ -115,12 +115,16 @@ export function PhotoViewerModal({
   const composed = Gesture.Simultaneous(pinch, pan);
   const gesture = Gesture.Race(doubleTap, composed);
 
-  // Use the exact same base + manager-approved rotation as every thumbnail/card.
+  // Keep pan translations in screen coordinates. React Native composes transform
+  // entries from right to left, so putting the rotation first also rotates the pan
+  // axes (a horizontal drag moves a quarter-turned photo vertically). Applying the
+  // translations first keeps drag direction natural while preserving the exact same
+  // base + manager-approved rotation as every thumbnail/card.
   const imageStyle = useAnimatedStyle(() => ({
     transform: [
-      ...(displayRotation === '0deg' ? [] : [{ rotate: displayRotation }]),
       { translateX: translateX.value },
       { translateY: translateY.value },
+      ...(displayRotation === '0deg' ? [] : [{ rotate: displayRotation }]),
       { scale: scale.value },
     ],
   }));

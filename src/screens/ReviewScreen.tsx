@@ -85,6 +85,7 @@ import { RotatedPhoto } from '../components/RotatedPhoto';
 import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
+import { validateFinalReviewValues } from '../services/finalReviewValidation';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import type { RootStackParamList } from '../navigation/RootNavigator';
@@ -349,6 +350,12 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // "À compléter" highlight is REACTIVE to the live draft (not the server value): an
   // empty field is highlighted with the brand tint, which vanishes as soon as it is filled.
   const empty = draft.trim() === '';
+  // A questionable extraction is deliberately styled like an empty field: same calm
+  // green cue, never an alarming error colour. We do not expose raw provider text;
+  // the usual field suggestions remain the only assistance under the input.
+  const needsCorrection = ['ambiguous', 'unnormalizable', 'invalid'].includes(
+    field.validation_status,
+  );
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
   const showSuggestion = !!suggestion && empty;
@@ -448,7 +455,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           style={[
             typography.bodyMedium,
             styles.input,
-            empty ? styles.inputHighlighted : null,
+            empty || needsCorrection ? styles.inputHighlighted : null,
           ]}
           autoCapitalize={isHealthMark ? 'characters' : 'words'}
           autoCorrect={false}
@@ -519,6 +526,7 @@ export function ReviewScreen() {
   const fieldOrder = reviewProfile.fields;
 
   const [saving, setSaving] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
@@ -676,6 +684,7 @@ export function ReviewScreen() {
       return;
     }
     setSaving(true);
+    setSaveFeedback(null);
     try {
       const savedFields: ArticleField[] = fieldOrder.map((name): ArticleField => {
         const extractedField = fieldsByName.get(name);
@@ -723,6 +732,17 @@ export function ReviewScreen() {
         photo_rotation_degrees: photoRotationDegrees,
         photo_base_rotation_degrees: scan.photoBaseRotationDegrees ?? -90,
       };
+      const validationErrors = validateFinalReviewValues(finalReviewPayload.fields);
+      if (validationErrors.length > 0) {
+        Alert.alert(
+          'Champs à corriger',
+          validationErrors
+            .slice(0, 3)
+            .map((error) => `${fieldLabelFr(error.fieldName)} : ${error.message}`)
+            .join('\n'),
+        );
+        return;
+      }
       if (!operation) {
         operation = await enqueueFinalizeReview(finalReviewPayload);
         attachFinalizeOperation(scan.id, operation.id);
@@ -738,11 +758,11 @@ export function ReviewScreen() {
       await drainOutbox();
       const synchronized = operation ? await getOperation(operation.id) : null;
       if (synchronized?.status !== 'succeeded') {
-        Alert.alert(
-          'En attente de synchronisation',
+        const serverReason = synchronized?.last_error_message?.trim();
+        setSaveFeedback(
           synchronized?.status === 'dead_letter'
-            ? 'L’envoi a échoué après plusieurs tentatives. Vous pourrez le reprendre depuis cette fiche.'
-            : 'L’arrivage reste conservé sur cet appareil et sera envoyé automatiquement dès que le réseau revient.',
+            ? serverReason || 'Le serveur a refusé cet arrivage. Corrigez les champs puis réessayez.'
+            : 'Envoi non confirmé : l’arrivage est conservé sur cet appareil et sera renvoyé dès le retour du réseau.',
         );
         return;
       }
@@ -836,7 +856,7 @@ export function ReviewScreen() {
     reviewProfile,
     photoRotationDegrees,
     requiresRecapture,
-    navigation,
+      navigation,
   ]);
 
   // Save is gated on 17/17 (workflow v2): the arrivage is only recorded — and counted —
@@ -849,8 +869,7 @@ export function ReviewScreen() {
     ready &&
     run != null &&
     ingestion != null &&
-    complete &&
-    !waitingForSync;
+    complete;
 
   return (
     <View style={styles.root}>
@@ -1027,6 +1046,13 @@ export function ReviewScreen() {
           )}
       </ScrollView>
 
+      {saveFeedback ? (
+        <View style={styles.saveFeedback} accessibilityRole="alert">
+          <MaterialCommunityIcons name="information-outline" size={18} color={colors.onPrimaryContainer} />
+          <Text style={[typography.bodySmall, styles.saveFeedbackText]}>{saveFeedback}</Text>
+        </View>
+      ) : null}
+
         <View style={[styles.actionRow, { paddingBottom: insets.bottom + spacing.md }]}>
           <Pressable
             onPress={handleBack}
@@ -1062,7 +1088,7 @@ export function ReviewScreen() {
                 : saving
                   ? 'Enregistrement…'
                   : waitingForSync
-                    ? 'En attente de synchronisation'
+                    ? 'Réessayer la synchronisation'
                     : scan?.reviewSyncStatus === 'dead_letter'
                       ? 'Réessayer l’envoi'
                       : !ready
@@ -1223,6 +1249,20 @@ const styles = StyleSheet.create({
   inputHint: {
     color: colors.onSurfaceVariant,
     marginTop: spacing.xs,
+  },
+  saveFeedback: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginTop: spacing.sm,
+    padding: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.primaryContainer,
+  },
+  saveFeedbackText: {
+    flex: 1,
+    color: colors.onPrimaryContainer,
   },
   // Allergen suggestion pill (chantier B) — a discreet, tappable primary-tinted chip
   // shown under the (empty) allergens input. Tapping it fills the field as a human edit.

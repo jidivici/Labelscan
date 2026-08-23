@@ -1,5 +1,6 @@
 import type { PortalDefinition } from '../../portals/registry';
 import type { ArrivalFilters, Store } from '../../types';
+import { DropdownSelect } from '../../components/DropdownSelect';
 import type { ScalarArrivalFilterKey } from './filterState';
 import { DateRangeCalendar } from './DateRangeCalendar';
 
@@ -25,7 +26,13 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onDateRangeChan
         <button type="button" className="button text small" onClick={onReset}>Réinitialiser tous les filtres</button>
       </div>
       <div className="filter-grid">
-        {stores.length > 1 && <label className="field"><span>Magasin</span><select value={filters.storeCode} onChange={(event) => onUpdate('storeCode', event.target.value)}><option value="">Tous les magasins autorisés</option>{stores.map((store) => <option value={store.code} key={store.code}>{store.name}</option>)}</select></label>}
+        {stores.length > 1 && <label className="field"><span>Magasin</span><DropdownSelect
+          className="filter-dropdown"
+          options={[{ value: '', label: 'Tous les magasins autorisés' }, ...stores.map((store) => ({ value: store.code, label: store.name }))]}
+          selected={filters.storeCode}
+          onChange={(value) => onUpdate('storeCode', value)}
+          ariaLabel="Magasin"
+        /></label>}
       </div>
     </div>
 
@@ -43,7 +50,13 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onDateRangeChan
       <div className="filter-group-heading"><strong>Critères {portal.shortLabel.toLocaleLowerCase('fr-FR')}</strong><span>Champs métier</span></div>
       <div className="filter-grid">{portal.fieldFilters.map((definition) =>
         <label className="field" key={definition.field}><span>{definition.label}</span>{definition.type === 'select'
-          ? <select value={fieldValue(filters, definition.field)} onChange={(event) => onFieldFilter(definition.field, event.target.value)}><option value="">Tous</option>{definition.options?.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>
+          ? <DropdownSelect
+              className="filter-dropdown"
+              options={[{ value: '', label: 'Tous' }, ...(definition.options ?? [])]}
+              selected={fieldValue(filters, definition.field)}
+              onChange={(value) => onFieldFilter(definition.field, value)}
+              ariaLabel={definition.label}
+            />
           : <input value={fieldValue(filters, definition.field)} onChange={(event) => onFieldFilter(definition.field, event.target.value)} placeholder={definition.placeholder} />}</label>,
       )}</div>
     </div>}
@@ -52,8 +65,26 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onDateRangeChan
 
     <div className="filter-footer">
       <div className="sort-controls">
-        <label className="field"><span>Trier par</span><select value={filters.sortBy} onChange={(event) => onUpdate('sortBy', event.target.value)}><option value="recorded_at">Date d’enregistrement</option><option value="expiry_date">Date d’expiration</option><option value="product_name">Produit</option><option value="supplier">Fournisseur</option><option value="lot_code">Lot</option></select></label>
-        <label className="field"><span>Ordre</span><select value={filters.sortDirection} onChange={(event) => onUpdate('sortDirection', event.target.value)}><option value="desc">Décroissant</option><option value="asc">Croissant</option></select></label>
+        <label className="field"><span>Trier par</span><DropdownSelect
+          className="filter-dropdown"
+          options={[
+            { value: 'recorded_at', label: 'Date d’enregistrement' },
+            { value: 'expiry_date', label: 'Date d’expiration' },
+            { value: 'product_name', label: 'Produit' },
+            { value: 'supplier', label: 'Fournisseur' },
+            { value: 'lot_code', label: 'Lot' },
+          ]}
+          selected={filters.sortBy}
+          onChange={(value) => onUpdate('sortBy', value)}
+          ariaLabel="Trier par"
+        /></label>
+        <label className="field"><span>Ordre</span><DropdownSelect
+          className="filter-dropdown"
+          options={[{ value: 'desc', label: 'Décroissant' }, { value: 'asc', label: 'Croissant' }]}
+          selected={filters.sortDirection}
+          onChange={(value) => onUpdate('sortDirection', value)}
+          ariaLabel="Ordre"
+        /></label>
       </div>
     </div>
   </section>;
