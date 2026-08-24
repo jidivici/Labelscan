@@ -159,7 +159,7 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
           <span>{fieldCount} information{fieldCount > 1 ? 's' : ''}</span>
         </header>
 
-        <DetailSections sections={detailSections} fields={detail.fields} validation={detail.validation} />
+        <DetailSections sections={detailSections} fields={detail.fields} />
       </>}
     </aside>
     {photoViewerUrl && <ProductPhotoViewer url={photoViewerUrl} rotationDegrees={detail?.photo_rotation_degrees} baseRotationDegrees={detail?.photo_base_rotation_degrees} onClose={() => setPhotoViewerUrl(undefined)} />}
