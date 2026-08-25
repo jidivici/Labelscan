@@ -2,9 +2,12 @@
 
 from datetime import date
 
-from labelscan.business_profiles import trade_profile
-from labelscan.contexts.ingestion.domain.input_validation import validate_human_field_value
 from scripts.seed_demo import ARRIVALS
+
+from labelscan.business_profiles import trade_profile
+from labelscan.contexts.ingestion.domain.input_validation import (
+    validate_human_field_value,
+)
 
 
 def test_every_demo_arrival_is_complete_and_valid_for_profile_v2() -> None:

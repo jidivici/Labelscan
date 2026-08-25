@@ -4,7 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from labelscan.business_profiles import LEGACY_TRADE_PROFILES, TRADE_PROFILES, trade_profile
+from labelscan.business_profiles import (
+    LEGACY_TRADE_PROFILES,
+    TRADE_PROFILES,
+    trade_profile,
+)
 from labelscan.contexts.ingestion.application.override_field import FIELD_NAMES
 from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
