@@ -16,7 +16,6 @@ const PROFILE_FIELDS = [
   'allergens',
   'health_mark',
   'weight',
-  'price',
   'gtin',
   'product_family',
   'manufacturer_name',
@@ -42,13 +41,13 @@ const PORTAL_FILTER_FIELDS = [
 ] as const;
 
 describe('charcuterieTraiteurPortal', () => {
-  it('exposes every field from the 22-field extraction profile exactly once', () => {
+  it('exposes every field from the 21-field V2 extraction profile exactly once', () => {
     const configuredFields = charcuterieTraiteurPortal.detailSections.flatMap((section) =>
       section.fields.map((field) => field.key),
     );
 
-    expect(configuredFields).toHaveLength(22);
-    expect(new Set(configuredFields).size).toBe(22);
+    expect(configuredFields).toHaveLength(21);
+    expect(new Set(configuredFields).size).toBe(21);
     expect([...configuredFields].sort()).toEqual([...PROFILE_FIELDS].sort());
   });
 

@@ -59,7 +59,7 @@ def _review_command(fields: dict[str, str | None]) -> FinalizeReviewCommand:
     )
 
 
-def test_v1_registry_contains_every_requested_trade_field() -> None:
+def test_v2_registry_contains_every_requested_trade_field_without_price() -> None:
     assert {
         "animal_species",
         "cut_name",
@@ -80,6 +80,8 @@ def test_v1_registry_contains_every_requested_trade_field() -> None:
         "ingredients",
         "additives",
     }.issubset(trade_profile("charcuterie_traiteur").specific_fields)
+    assert all("price" not in profile.fields for profile in TRADE_PROFILES.values())
+    assert "price" in trade_profile("poissonnerie", "1").fields
 
 
 @pytest.mark.parametrize("trade_code", ["boucherie", "charcuterie_traiteur"])
@@ -123,7 +125,7 @@ def test_override_allow_list_is_the_profile_union_plus_legacy_names() -> None:
         for field_name in profile.fields
     }
     assert expected.issubset(FIELD_NAMES)
-    assert {"product_name", "supplier_name"}.issubset(FIELD_NAMES)
+    assert {"product_name", "supplier_name", "price"}.issubset(FIELD_NAMES)
 
 
 @pytest.mark.parametrize(
@@ -255,7 +257,7 @@ def test_sql_final_review_persists_the_authoritative_ingestion_profile(
                 "trade_code_snapshot, trade_profile_version, correlation_id, trace_id"
                 ") VALUES ("
                 ":id, :organization_id, 'needs_review', 'sha256://profile', "
-                ":checksum, :trade_code, '1', :correlation_id, :correlation_id)"
+                ":checksum, :trade_code, '2', :correlation_id, :correlation_id)"
             ),
             {
                 "id": ingestion_id,

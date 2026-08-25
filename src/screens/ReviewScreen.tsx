@@ -47,8 +47,6 @@ import {
   formatWeight,
   parseTemp,
   formatTemp,
-  parsePrice,
-  formatPrice,
   validateDate,
   validateTempRange,
   validateWeight,
@@ -86,6 +84,7 @@ import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
 import { validateFinalReviewValues } from '../services/finalReviewValidation';
+import { shouldHighlightReviewField } from '../services/reviewFieldAttention';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import type { RootStackParamList } from '../navigation/RootNavigator';
@@ -97,11 +96,17 @@ type NavProp = StackNavigationProp<RootStackParamList, 'Review'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const FIELD_GROUP_ICON: Record<string, IconName> = {
-  identity: 'food-variant',
-  provenance: 'map-marker-radius-outline',
+  identification: 'food-variant',
+  'fishing-origin': 'map-marker-radius-outline',
+  'meat-identification': 'cow',
+  'meat-origin': 'map-marker-radius-outline',
+  'prepared-product': 'food-outline',
+  'prepared-composition': 'format-list-bulleted',
+  'prepared-conservation': 'clipboard-check-outline',
+  'prepared-traceability': 'shield-check-outline',
   traceability: 'shield-check-outline',
-  haccp: 'clipboard-check-outline',
-  commercial: 'scale-balance',
+  conservation: 'clipboard-check-outline',
+  'prepared-commercial': 'scale-balance',
 };
 
 // Landscape photo height at the top of the review — wide and low so the whole label
@@ -115,7 +120,7 @@ const PHOTO_HEIGHT_LANDSCAPE = 200;
 // deliberately do NOT surface AI confidence or an "à vérifier" flag: manual validation
 // is the single source of truth (CLAUDE.md "Clean UI Radicale", audit §6.2).
 
-// Canonical display order for the 17 fields. The SAME order drives the loading skeleton
+// Canonical profile display order. The SAME order drives the loading skeleton
 // list AND the ready list, so rows never reshuffle when the run lands (audit §2.2 — zero
 // layout shift). Readable HACCP order: identity → method/origin → lot/dates → conservation.
 // FIELD_ORDER now lives in services/fieldOrder.ts — SHARED with ArticleDetailScreen so the
@@ -280,63 +285,13 @@ function TempRangeInput({
   );
 }
 
-/**
- * Price field: numeric input with a currency affix (defaults to € / EUR — the criée
- * standard). Local amount state seeded once from the draft. Emits "amount currency"
- * (e.g. "8.95 EUR"), so the stored value keeps the LLM's canonical price form.
- */
-function PriceInput({
-  draft,
-  onChange,
-  highlighted,
-  onFocus,
-  onBlur,
-}: {
-  draft: string;
-  onChange: (text: string) => void;
-  highlighted: boolean;
-  onFocus: () => void;
-  onBlur: () => void;
-}) {
-  const seed = parsePrice(draft);
-  const [amount, setAmount] = useState(seed.amount);
-  const currency = seed.currency; // follows the extracted value; shown as a static affix
-
-  return (
-    <View style={styles.affixRow}>
-      <TextInput
-        value={amount}
-        onChangeText={(t) => {
-          if (notCommunicatedSuggestion(t)) {
-            setAmount(t);
-            onChange(t);
-            return;
-          }
-          const v = t.replace(/[^0-9.,]/g, '');
-          setAmount(v);
-          onChange(formatPrice(v, currency));
-        }}
-        onFocus={onFocus}
-        onBlur={onBlur}
-        keyboardType="default"
-        placeholder="0.00"
-        placeholderTextColor={colors.onSurfaceVariant}
-        style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
-        accessibilityLabel="Prix"
-      />
-      <Text style={[typography.labelLarge, styles.affixUnitText]}>
-        {currency === 'EUR' ? '€' : currency}
-      </Text>
-    </View>
-  );
-}
-
 const EditableFieldRow = React.memo(function EditableFieldRow({
   field,
   draft,
   onChange,
   suggestion,
   history,
+  edited,
 }: {
   field: ExtractionField;
   draft: string;
@@ -346,6 +301,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   suggestion?: string | null;
   /** Per-field autocomplete history (workflow v2.1) — STABLE reference, built once. */
   history?: FieldHistory | null;
+  edited: boolean;
 }) {
   // "À compléter" highlight is REACTIVE to the live draft (not the server value): an
   // empty field is highlighted with the brand tint, which vanishes as soon as it is filled.
@@ -353,9 +309,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // A questionable extraction is deliberately styled like an empty field: same calm
   // green cue, never an alarming error colour. We do not expose raw provider text;
   // the usual field suggestions remain the only assistance under the input.
-  const needsCorrection = ['ambiguous', 'unnormalizable', 'invalid'].includes(
-    field.validation_status,
-  );
+  const highlighted = shouldHighlightReviewField(draft, field.validation_status, edited);
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
   const showSuggestion = !!suggestion && empty;
@@ -406,7 +360,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           <Text style={[typography.labelSmall, styles.attentionTag]}>À compléter</Text>
         ) : null}
       </View>
-      {isNotCommunicated && ['weight', 'storage_temperature', 'price'].includes(field.field_name) ? (
+      {isNotCommunicated && ['weight', 'storage_temperature'].includes(field.field_name) ? (
         <TextInput
           value={draft}
           onChangeText={emit}
@@ -434,14 +388,6 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         />
-      ) : field.field_name === 'price' ? (
-        <PriceInput
-          draft={draft}
-          onChange={emit}
-          highlighted={empty}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-        />
       ) : (
         <TextInput
           value={draft}
@@ -455,7 +401,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           style={[
             typography.bodyMedium,
             styles.input,
-            empty || needsCorrection ? styles.inputHighlighted : null,
+            highlighted ? styles.inputHighlighted : null,
           ]}
           autoCapitalize={isHealthMark ? 'characters' : 'words'}
           autoCorrect={false}
@@ -531,7 +477,7 @@ export function ReviewScreen() {
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
   // partially-filled arrivage is restored on re-open (the scan stays "en cours" until
-  // all 17 fields are filled and validated). Lazy init — the queue is already hydrated
+  // all profile fields are filled and validated). Lazy init — the queue is already hydrated
   // by the time this screen is reached (it also redirects home when the scan is gone).
   const [edits, setEdits] = useState<Record<string, string>>(() => scan?.edits ?? {});
   // Persist the latest edits ONCE when leaving the screen (not on every keystroke).
@@ -627,7 +573,7 @@ export function ReviewScreen() {
 
   // Effective value of each canonical field = the operator's draft if present, else the
   // display-formatted extracted value. This is exactly what handleSave will persist, so
-  // it drives the 17/17 completeness gate (workflow v2) AND seeds each editable row (no
+  // it drives the profile completeness gate AND seeds each editable row (no
   // divergence between the count and what's on screen).
   const effectiveValues = useMemo(() => {
     const out: Record<string, string> = {};
@@ -642,8 +588,7 @@ export function ReviewScreen() {
     }
     return out;
   }, [fieldsByName, edits, fieldOrder]);
-  // How many of the 17 fields are filled (non-blank). "Enregistrer l'arrivage" unlocks
-  // only at 17/17 — until then the arrivage stays "en cours" and is never counted.
+  // "Enregistrer l'arrivage" unlocks only when every active profile field is non-blank.
   const filledCount = useMemo(
     () => filledCountFromValues(effectiveValues, reviewProfile.code),
     [effectiveValues, reviewProfile.code],
@@ -714,7 +659,7 @@ export function ReviewScreen() {
       });
 
       // Persist the complete final review operation BEFORE the scan can leave the
-      // queue. The stable key survives a kill/restart and the server commits all 17
+      // queue. The stable key survives a kill/restart and the server commits all profile
       // values + confirmation atomically.
       let operation = scan.finalizeOpId
         ? await getOperation(scan.finalizeOpId)
@@ -859,9 +804,9 @@ export function ReviewScreen() {
       navigation,
   ]);
 
-  // Save is gated on 17/17 (workflow v2): the arrivage is only recorded — and counted —
+  // Save is gated on full profile completion: the arrivage is only recorded — and counted —
   // once every field is filled. Below that the button stays disabled and reads "Compléter
-  // (n/17)"; the modifications made so far are still persisted on leave.
+  // (n/total)"; the modifications made so far are still persisted on leave.
   const complete = filledCount === fieldOrder.length;
   const waitingForSync = scan?.reviewSyncStatus === 'pending';
   const canSave =
@@ -1028,6 +973,7 @@ export function ReviewScreen() {
                             onChange={handleFieldChange}
                             suggestion={name === 'allergens' ? allergenSuggestion : undefined}
                             history={fieldHistory}
+                            edited={Object.prototype.hasOwnProperty.call(edits, name)}
                           />
                         );
                       }

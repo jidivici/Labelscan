@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from labelscan.business_profiles import TRADE_PROFILES, trade_profile
+from labelscan.business_profiles import LEGACY_TRADE_PROFILES, TRADE_PROFILES, trade_profile
 from labelscan.contexts.ingestion.application.override_field import FIELD_NAMES
 from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
@@ -81,7 +81,10 @@ class FinalizeReview:
         if command.photo_base_rotation_degrees not in (-90, 0):
             raise ValueError("photo base rotation must be -90 or 0 degrees")
         submitted = set(command.fields)
-        contracts = [set(profile.fields) for profile in TRADE_PROFILES.values()]
+        contracts = [
+            set(profile.fields)
+            for profile in (*TRADE_PROFILES.values(), *LEGACY_TRADE_PROFILES.values())
+        ]
         if submitted not in contracts:
             # Report the closest versioned contract. This preserves the useful
             # missing/unknown response before a DB lookup while allowing every

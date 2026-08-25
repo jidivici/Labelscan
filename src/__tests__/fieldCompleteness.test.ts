@@ -1,5 +1,5 @@
 /**
- * fieldCompleteness — the /17 score + "product name known" probe powering the home
+ * fieldCompleteness — the profile score + "product name known" probe powering the home
  * screen's "En cours" cards. Pure, framework-free.
  */
 
@@ -55,10 +55,10 @@ describe('fieldCompleteness', () => {
     expect(notCommunicatedSuggestion('')).toBeNull();
     expect(notCommunicatedSuggestion('na')).toBeNull();
   });
-  it('CANONICAL_FIELD_COUNT is 17 (the closed LLM field set)', () => {
-    expect(CANONICAL_FIELD_COUNT).toBe(17);
-    expect(canonicalFieldCount('boucherie')).toBe(22);
-    expect(canonicalFieldCount('charcuterie_traiteur')).toBe(22);
+  it('uses the V2 profile-specific field counts', () => {
+    expect(CANONICAL_FIELD_COUNT).toBe(16);
+    expect(canonicalFieldCount('boucherie')).toBe(21);
+    expect(canonicalFieldCount('charcuterie_traiteur')).toBe(21);
   });
 
   it('filledCountFromRun counts only canonical, present, non-blank fields', () => {
@@ -67,7 +67,7 @@ describe('fieldCompleteness', () => {
       field('scientific_name'),
       field('batch_number'),
       field('gtin', { value: '' }), // blank → not filled
-      field('price', { validation_status: 'missing' }), // missing → not filled
+      field('price'), // retired field → ignored
       field('not_a_canonical_field'), // outside the closed set → ignored
     ];
     expect(filledCountFromRun(fields)).toBe(3);
@@ -110,22 +110,22 @@ describe('fieldCompleteness', () => {
     expect(isProductNameKnownFromInterim(null)).toBe(false);
   });
 
-  it('filledCountFromValues drives the Review 17/17 save gate on effective drafts', () => {
+  it('filledCountFromValues drives the Review 16/16 save gate on effective drafts', () => {
     const allNames = [
       'commercial_designation', 'scientific_name', 'producer_name', 'reseller_brand',
       'production_method', 'fishing_gear_or_farming_method', 'FAO_area', 'origin_country',
       'health_mark', 'batch_number', 'expiry_date', 'packaging_date',
-      'storage_temperature', 'weight', 'allergens', 'price', 'gtin',
+      'storage_temperature', 'weight', 'allergens', 'gtin',
     ];
-    // 16/17 filled (gtin blank) → gate CLOSED.
+    // 15/16 filled (gtin blank) → gate CLOSED.
     const near: Record<string, string> = {};
     for (const n of allNames) near[n] = n === 'gtin' ? '   ' : 'v';
-    expect(filledCountFromValues(near)).toBe(16);
+    expect(filledCountFromValues(near)).toBe(15);
     expect(filledCountFromValues(near) === CANONICAL_FIELD_COUNT).toBe(false);
 
-    // Fill the last one → gate OPEN (17/17). Non-canonical keys never count.
+    // Fill the last one → gate OPEN (16/16). Non-canonical keys never count.
     const full = { ...near, gtin: '03400000000000', extra_key: 'ignored' };
-    expect(filledCountFromValues(full)).toBe(17);
+    expect(filledCountFromValues(full)).toBe(16);
   });
 
   it('the review draft (edits) overlays the run count in both directions', () => {
@@ -143,7 +143,7 @@ describe('fieldCompleteness', () => {
   });
 
   it('the review draft overlays the interim count and the name probe', () => {
-    expect(filledCountFromInterim({ price: '8.95 EUR' }, { weight: '5 kg' })).toBe(2);
+    expect(filledCountFromInterim({ price: '8.95 EUR' }, { weight: '5 kg' })).toBe(1);
     expect(filledCountFromInterim({ price: '8.95 EUR' }, { price: '' })).toBe(0);
     expect(isProductNameKnownFromRun([], { commercial_designation: 'Cabillaud' })).toBe(true);
     expect(
@@ -158,29 +158,29 @@ describe('fieldCompleteness', () => {
     expect(filledCountFromValues(undefined)).toBe(0);
   });
 
-  it('a run can reach the full /17 when every canonical field is present', () => {
-    // Build all 17 canonical fields as present — the score caps at 17.
+  it('a run can reach the full /16 when every canonical field is present', () => {
+    // Build all 16 canonical fields as present — the score caps at 16.
     const fields = [
       'commercial_designation', 'scientific_name', 'producer_name', 'reseller_brand',
       'production_method', 'fishing_gear_or_farming_method', 'FAO_area', 'origin_country',
       'health_mark', 'batch_number', 'expiry_date', 'packaging_date',
-      'storage_temperature', 'weight', 'allergens', 'price', 'gtin',
+      'storage_temperature', 'weight', 'allergens', 'gtin',
     ].map((n) => field(n));
-    expect(filledCountFromRun(fields)).toBe(17);
+    expect(filledCountFromRun(fields)).toBe(16);
   });
 
-  it('scores non-fish profiles against their own closed 22-field contract', () => {
+  it('scores non-fish profiles against their own closed 21-field contract', () => {
     const boucherieFields = [
       'commercial_designation', 'animal_species', 'animal_category', 'cut_name',
       'producer_name', 'reseller_brand', 'origin_country', 'birth_country',
       'rearing_country', 'slaughter_country', 'cutting_country', 'batch_number',
       'health_mark', 'slaughterhouse_approval', 'cutting_plant_approval', 'gtin',
-      'packaging_date', 'expiry_date', 'storage_temperature', 'allergens', 'weight', 'price',
+      'packaging_date', 'expiry_date', 'storage_temperature', 'allergens', 'weight',
     ].map((name) => field(name));
-    expect(filledCountFromRun(boucherieFields, undefined, 'boucherie')).toBe(22);
+    expect(filledCountFromRun(boucherieFields, undefined, 'boucherie')).toBe(21);
     // Fish-only fields do not inflate another trade's score.
     expect(
       filledCountFromRun([...boucherieFields, field('scientific_name')], undefined, 'boucherie'),
-    ).toBe(22);
+    ).toBe(21);
   });
 });

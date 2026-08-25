@@ -90,7 +90,7 @@ export function ArticleListScreen() {
   // the scan queue. Rendered as the FlatList's header so there's one scroll surface;
   // its MEASURED height (not hardcoded) keeps getItemLayout exact for the articles
   // below it (audit §7.1 — O(1) scroll). The full snapshot (results + interim) drives
-  // the "n/17 champs" text + the "name known" highlight on each card.
+  // the profile-completeness text + the "name known" highlight on each card.
   const { scans: pendingScans, results: scanResults, interim: scanInterim } = useScanQueue();
   const visiblePendingScans = useMemo(
     () =>
@@ -166,8 +166,8 @@ export function ArticleListScreen() {
           </Pressable>
         )}
         {!pendingSectionCollapsed && visiblePendingScans.map((scan) => {
-          // /17 score + name-known probe: prefer the FINAL run when ready, else the
-          // Tier-3 interim preview (while extracting); submitting scans show 0/17.
+          // Profile score + name-known probe: prefer the FINAL run when ready, else the
+          // Tier-3 interim preview (while extracting); submitting scans show zero.
           // The scan's persisted review draft (edits) OVERLAYS both, so the gauge
           // advances live as the operator fills fields across review sessions.
           const result = scanResults[scan.id];

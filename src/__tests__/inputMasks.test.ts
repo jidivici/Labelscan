@@ -6,8 +6,6 @@ import {
   formatWeight,
   parseTemp,
   formatTemp,
-  parsePrice,
-  formatPrice,
   toIsoDate,
   validateDate,
   validateTempRange,
@@ -140,25 +138,6 @@ describe('parseTemp / formatTemp', () => {
   it('round-trips a clean range', () => {
     const { min, max } = parseTemp('0-4 C');
     expect(formatTemp(min, max)).toBe('0 - 4 °C');
-  });
-});
-
-describe('parsePrice / formatPrice', () => {
-  it('splits amount + currency, defaulting to EUR', () => {
-    expect(parsePrice('8.95 EUR')).toEqual({ amount: '8.95', currency: 'EUR' });
-    expect(parsePrice('8,95 €')).toEqual({ amount: '8.95', currency: 'EUR' });
-    expect(parsePrice('12')).toEqual({ amount: '12', currency: 'EUR' });
-    expect(parsePrice('')).toEqual({ amount: '', currency: 'EUR' });
-  });
-
-  it('keeps an explicit ISO-4217 code', () => {
-    expect(parsePrice('9.50 USD')).toEqual({ amount: '9.50', currency: 'USD' });
-  });
-
-  it('rebuilds "amount currency" (empty amount → empty)', () => {
-    expect(formatPrice('8.95', 'EUR')).toBe('8.95 EUR');
-    expect(formatPrice('', 'EUR')).toBe('');
-    expect(formatPrice('9,50', 'USD')).toBe('9.50 USD');
   });
 });
 

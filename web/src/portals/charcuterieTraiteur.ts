@@ -56,7 +56,6 @@ export const charcuterieTraiteurPortal = {
       title: 'Données commerciales',
       fields: [
         { key: 'weight', label: 'Poids' },
-        { key: 'price', label: 'Prix' },
       ],
     },
   ],

@@ -24,7 +24,6 @@ const CANONICAL_FIELDS = [
   'storage_temperature',
   'allergens',
   'weight',
-  'price',
 ] as const;
 
 const LEGACY_FIELDS = ['product_name', 'supplier_name'] as const;
@@ -49,7 +48,7 @@ describe('poissonneriePortal', () => {
     expect(poissonneriePortal.labels.emptyDescription).toContain('filtres actifs');
   });
 
-  it('keeps the 17 canonical métier fields unique and complete', () => {
+  it('keeps the 16 canonical métier fields unique, complete and ordered like mobile', () => {
     const configuredFields = poissonneriePortal.detailSections.flatMap(({ fields }) =>
       fields.map(({ key }) => key),
     );
@@ -57,9 +56,8 @@ describe('poissonneriePortal', () => {
       (CANONICAL_FIELDS as readonly string[]).includes(field),
     );
 
-    expect(canonicalConfiguredFields).toHaveLength(17);
-    expect(new Set(canonicalConfiguredFields).size).toBe(17);
-    expect(canonicalConfiguredFields).toEqual(expect.arrayContaining([...CANONICAL_FIELDS]));
+    expect(canonicalConfiguredFields).toEqual([...CANONICAL_FIELDS]);
+    expect(new Set(canonicalConfiguredFields).size).toBe(16);
   });
 
   it('renders historical designation and supplier values from legacy records', () => {

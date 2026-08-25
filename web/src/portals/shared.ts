@@ -30,6 +30,5 @@ export const COMMON_CONSERVATION_SECTION: PortalDetailSection = {
     { key: 'storage_temperature', label: 'Température', format: 'temperature' },
     { key: 'allergens', label: 'Allergènes' },
     { key: 'weight', label: 'Poids' },
-    { key: 'price', label: 'Prix' },
   ],
 };

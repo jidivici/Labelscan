@@ -11,7 +11,7 @@
  * A transient failure leaves the op pending for a later drain; a non-retryable one
  * dead-letters. Best-effort: it never throws, so a sync hiccup never blocks the save.
  *
- * Workflow v1: the operator stays in charge of all 17 fields, including GS1-owned ones
+ * The operator stays in charge of all active profile fields, including GS1-owned ones
  * (lot/DLC/weight/GTIN/packaging) — those are sent with the explicit `force_gs1` flag so
  * the server records the override under a dedicated, auditable action instead of
  * rejecting it (server override_field.py). Without the flag those fields still 409.

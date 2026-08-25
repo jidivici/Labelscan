@@ -54,7 +54,7 @@ class LlmExtractor(Protocol):
         known_field_names: tuple[str, ...] = (),
         *,
         trade_code: str = "poissonnerie",
-        trade_profile_version: str = "1",
+        trade_profile_version: str = "2",
     ) -> LlmResult: ...
 
     @property

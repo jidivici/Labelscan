@@ -17,6 +17,7 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from labelscan.business_profiles import trade_profile
 from labelscan.contexts.identity.domain.password import hash_password, validate_password
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.engine import make_engine
@@ -86,83 +87,83 @@ class DemoArrival:
 ARRIVALS = (
     DemoArrival("grondin", "NICE", "grondin-rouge.jpg", {
         "commercial_designation": "Grondin rouge", "scientific_name": "Aspitrigla cuculus",
-        "producer_name": "Coopérative U Vendargues", "reseller_brand": None,
-        "batch_number": "15426", "origin_country": "France", "expiry_date": None,
+        "producer_name": "Coopérative U Vendargues", "reseller_brand": "U Enseigne Vendargues",
+        "batch_number": "15426", "origin_country": "France", "expiry_date": "2026-06-07",
         "packaging_date": "2026-06-03", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "FR 35.177.014 CE", "weight": "2,00 kg",
-        "price": None, "gtin": None, "FAO_area": "FAO 27.VII",
+        "gtin": "3700161210016", "FAO_area": "FAO 27.VII",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Chalut",
     }, True),
     DemoArrival("merlan", "FREJUS", "merlan-filet.jpg", {
         "commercial_designation": "Filet de merlan sans peau", "scientific_name": "Merlangius merlangus",
         "producer_name": "G & J Jack Seafoods", "reseller_brand": "Mericq",
-        "batch_number": "F 12P", "origin_country": "Royaume-Uni", "expiry_date": None,
+        "batch_number": "F 12P", "origin_country": "Royaume-Uni", "expiry_date": "2026-06-15",
         "packaging_date": "2026-06-12", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "GB BB004", "weight": "3 kg",
-        "price": None, "gtin": None, "FAO_area": "FAO 27.IVa",
+        "gtin": "3700161210023", "FAO_area": "FAO 27.IVa",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Chaluts",
     }),
     DemoArrival("julienne", "NICE", "dos-julienne.jpg", {
         "commercial_designation": "Dos de julienne", "scientific_name": "Molva molva",
         "producer_name": "Whitelink Seafoods Ltd", "reseller_brand": "SAS Mericq Agen",
-        "batch_number": "400111", "origin_country": "Écosse", "expiry_date": None,
+        "batch_number": "400111", "origin_country": "Écosse", "expiry_date": "2026-06-20",
         "packaging_date": "2026-06-17", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "GB BB027", "weight": "3 kg",
-        "price": None, "gtin": None, "FAO_area": "FAO 27",
+        "gtin": "3700161210030", "FAO_area": "FAO 27",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Chaluts de fond à panneaux (OTB)",
     }),
     DemoArrival("truite", "CANNES", "truite.jpg", {
         "commercial_designation": "Truite arc-en-ciel PAC", "scientific_name": "Oncorhynchus mykiss",
         "producer_name": "Truite de l'Ardèche", "reseller_brand": "Coopérative U Enseigne",
-        "batch_number": "TRUITE-190626", "origin_country": "France", "expiry_date": None,
+        "batch_number": "TRUITE-190626", "origin_country": "France", "expiry_date": "2026-06-23",
         "packaging_date": "2026-06-19", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "FR 07.019.003 UE", "weight": "2 kg",
-        "price": None, "gtin": None, "FAO_area": None,
+        "gtin": "3700161210047", "FAO_area": "NC",
         "production_method": "farmed", "fishing_gear_or_farming_method": "Aquaculture",
     }),
     DemoArrival("maquereau", "CANNES", "maquereau.jpg", {
         "commercial_designation": "Maquereau 300/500", "scientific_name": "Scomber scombrus",
         "producer_name": "Mericq La Rochelle", "reseller_brand": "Pavillon France",
-        "batch_number": "256541", "origin_country": "France", "expiry_date": None,
+        "batch_number": "256541", "origin_country": "France", "expiry_date": "2026-06-18",
         "packaging_date": "2026-06-15", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "FR 17-300-147 CE", "weight": "3 kg",
-        "price": None, "gtin": "3700161210847", "FAO_area": "Atlantique Nord-Est",
+        "gtin": "3700161210054", "FAO_area": "Atlantique Nord-Est",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Chalut",
     }),
     DemoArrival("cabillaud", "MARSEILLE", "cabillaud.jpg", {
         "commercial_designation": "Dos de cabillaud sans peau", "scientific_name": "Gadus morhua",
-        "producer_name": "Icelandic Seafood", "reseller_brand": None,
-        "batch_number": "L-6152", "origin_country": "Islande", "expiry_date": None,
+        "producer_name": "Icelandic Seafood", "reseller_brand": "Icelandic Seafood France",
+        "batch_number": "L-6152", "origin_country": "Islande", "expiry_date": "2026-06-08",
         "packaging_date": "2026-06-04", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "IS A-003 EFTA", "weight": "3 kg",
-        "price": None, "gtin": None, "FAO_area": "FAO 27",
+        "gtin": "3700161210061", "FAO_area": "FAO 27",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Lignes et hameçons",
     }),
     DemoArrival("espadon", "MARSEILLE", "espadon-longe.jpg", {
         "commercial_designation": "Longe d'espadon", "scientific_name": "Xiphias gladius",
-        "producer_name": "Médi-Pêche Set", "reseller_brand": None,
-        "batch_number": "107083-21526", "origin_country": None, "expiry_date": "2026-08-12",
+        "producer_name": "Médi-Pêche Set", "reseller_brand": "Médi-Pêche Distribution",
+        "batch_number": "107083-21526", "origin_country": "France", "expiry_date": "2026-08-12",
         "packaging_date": "2026-08-03", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "FR 34-108-593 CE", "weight": "4,500 kg",
-        "price": None, "gtin": "93000502900206", "FAO_area": "FAO 27.VIII",
+        "gtin": "3700161210078", "FAO_area": "FAO 27.VIII",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Palangres calées",
     }),
     DemoArrival("encornet", "MARSEILLE", "encornet-rouge.jpg", {
         "commercial_designation": "Encornet rouge", "scientific_name": "Illex coindetii",
         "producer_name": "Michel Marée", "reseller_brand": "U Enseigne Vendargues",
-        "batch_number": "MM215", "origin_country": None, "expiry_date": None,
-        "packaging_date": None, "storage_temperature": "0 à 2 °C",
+        "batch_number": "MM215", "origin_country": "France", "expiry_date": "2026-08-10",
+        "packaging_date": "2026-08-03", "storage_temperature": "0 à 2 °C",
         "allergens": "Mollusques", "health_mark": "FR 34.108.534 CE", "weight": "3,000 kg",
-        "price": None, "gtin": None, "FAO_area": "FAO 37.1",
+        "gtin": "3700161210085", "FAO_area": "FAO 37.1",
         "production_method": "wild_caught", "fishing_gear_or_farming_method": "Chaluts de fond à panneaux OTB",
     }),
     DemoArrival("saumon", "FREJUS", "saumon.jpg", {
         "commercial_designation": "Saumon fjord 4/5", "scientific_name": "Salmo salar",
         "producer_name": "Salmo Salar", "reseller_brand": "Coopérative U Vendargues",
-        "batch_number": "26167", "origin_country": "Norvège", "expiry_date": None,
+        "batch_number": "26167", "origin_country": "Norvège", "expiry_date": "2026-06-14",
         "packaging_date": "2026-06-10", "storage_temperature": "0 à 2 °C",
         "allergens": "Poisson", "health_mark": "FR 85.001.002 CE", "weight": "8,830 kg",
-        "price": None, "gtin": None, "FAO_area": None,
+        "gtin": "3700161210092", "FAO_area": "NC",
         "production_method": "farmed", "fishing_gear_or_farming_method": "Élevage en Norvège",
     }),
 )
@@ -200,7 +201,14 @@ def seed() -> None:
     demo_passwords = load_demo_passwords()
     image_dir = Path(os.environ.get("LABELSCAN_DEMO_IMAGE_DIR", "/app/demo/images"))
     image_content: dict[str, tuple[str, bytes]] = {}
+    demo_contract = set(trade_profile("poissonnerie").fields)
     for arrival in ARRIVALS:
+        if set(arrival.fields) != demo_contract or any(
+            value is None or not str(value).strip() for value in arrival.fields.values()
+        ):
+            raise RuntimeError(
+                f"demo arrival {arrival.key} must contain all {len(demo_contract)} V2 fields"
+            )
         content = (image_dir / arrival.image).read_bytes()
         checksum = hashlib.sha256(content).hexdigest()
         image_content[arrival.key] = (checksum, content)
@@ -301,10 +309,19 @@ def seed() -> None:
                      photo_rotation_degrees, photo_base_rotation_degrees)
                 VALUES (:id, 'confirmed', :image_ref, :checksum, :recorded_at,
                         :correlation, :correlation, :code, :org, :store_id, :portal_id,
-                        'poissonnerie', '1', :actor_id, 0, :photo_base_rotation_degrees)
+                        'poissonnerie', '2', :actor_id, 0, :photo_base_rotation_degrees)
                 ON CONFLICT (id) DO UPDATE SET
+                    status='confirmed',
                     image_ref=excluded.image_ref,
                     checksum_sha256=excluded.checksum_sha256,
+                    client_captured_at=excluded.client_captured_at,
+                    store_code=excluded.store_code,
+                    organization_id=excluded.organization_id,
+                    store_id=excluded.store_id,
+                    business_portal_id=excluded.business_portal_id,
+                    trade_code_snapshot=excluded.trade_code_snapshot,
+                    trade_profile_version=excluded.trade_profile_version,
+                    captured_by_user_id=excluded.captured_by_user_id,
                     photo_rotation_degrees=excluded.photo_rotation_degrees,
                     photo_base_rotation_degrees=excluded.photo_base_rotation_degrees
             """), {"id": ingestion_id, "image_ref": image_ref, "checksum": checksum,
@@ -339,8 +356,23 @@ def seed() -> None:
                      business_portal_id, trade_code_snapshot, trade_profile_version, captured_by_user_id)
                 VALUES (:id, :lot, :scientific, :fao, :method, CAST(:use_by AS date), CAST(:packaging AS date),
                         :status, :ingestion_id, :run_id, :correlation, :correlation, :recorded_at,
-                        :code, :org, :store_id, :portal_id, 'poissonnerie', '1', :actor_id)
-                ON CONFLICT (id) DO NOTHING
+                        :code, :org, :store_id, :portal_id, 'poissonnerie', '2', :actor_id)
+                ON CONFLICT (id) DO UPDATE SET
+                    lot_code=excluded.lot_code,
+                    species_scientific=excluded.species_scientific,
+                    fao_area_code=excluded.fao_area_code,
+                    production_method=excluded.production_method,
+                    use_by=excluded.use_by,
+                    packaging_date=excluded.packaging_date,
+                    status=excluded.status,
+                    source_extraction_run_id=excluded.source_extraction_run_id,
+                    store_code=excluded.store_code,
+                    organization_id=excluded.organization_id,
+                    store_id=excluded.store_id,
+                    business_portal_id=excluded.business_portal_id,
+                    trade_code_snapshot=excluded.trade_code_snapshot,
+                    trade_profile_version=excluded.trade_profile_version,
+                    captured_by_user_id=excluded.captured_by_user_id
             """), {"id": batch_id, "lot": fields["batch_number"], "scientific": fields["scientific_name"],
                     "fao": fields["FAO_area"], "method": fields["production_method"], "use_by": fields["expiry_date"],
                     "packaging": fields["packaging_date"], "status": "flagged" if arrival.flagged else "registered",
@@ -355,7 +387,7 @@ def seed() -> None:
                      trade_profile_version, captured_by_user_id)
                 VALUES (:batch_id, :org, :store_id, :code, :ingestion_id, :run_id, 1,
                         CAST(:fields AS jsonb), :image_ref, :checksum, :recorded_at, :recorded_at,
-                        :portal_id, 'poissonnerie', '1', :actor_id)
+                        :portal_id, 'poissonnerie', '2', :actor_id)
             """), {"batch_id": batch_id, "org": organization_id, "store_id": store_id,
                     "code": code, "ingestion_id": ingestion_id, "run_id": run_id,
                     "fields": json.dumps(fields, ensure_ascii=False), "image_ref": image_ref,

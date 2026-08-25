@@ -16,7 +16,6 @@ const COMMON_FIELDS = [
   'allergens',
   'health_mark',
   'weight',
-  'price',
   'gtin',
 ] as const;
 
@@ -53,11 +52,11 @@ const POISSONNERIE_FIELDS = [
 ] as const;
 
 describe('boucherie portal', () => {
-  it('exposes the complete version 1 detail contract for the trade', () => {
+  it('exposes the complete version 2 detail contract for the trade', () => {
     const fields = boucheriePortal.detailSections.flatMap((section) => section.fields.map((field) => field.key));
 
-    expect(fields).toHaveLength(22);
-    expect(new Set(fields).size).toBe(22);
+    expect(fields).toHaveLength(21);
+    expect(new Set(fields).size).toBe(21);
     expect(new Set(fields)).toEqual(new Set([...COMMON_FIELDS, ...BOUCHERIE_FIELDS]));
     expect(fields).not.toEqual(expect.arrayContaining([...POISSONNERIE_FIELDS]));
   });

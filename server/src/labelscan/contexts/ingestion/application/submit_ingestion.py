@@ -51,7 +51,7 @@ class SubmitIngestionCommand:
     store_id: str | None = None
     business_portal_id: str | None = None
     trade_code_snapshot: str = "poissonnerie"
-    trade_profile_version: str = "1"
+    trade_profile_version: str = "2"
 
 
 @dataclass(frozen=True)

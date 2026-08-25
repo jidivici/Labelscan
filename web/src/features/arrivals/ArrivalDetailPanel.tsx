@@ -106,7 +106,7 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
     const configured = detailPortal?.detailSections ?? [];
     const knownFields = new Set(configured.flatMap((section) => section.fields.map((field) => field.key)));
     const additionalFields = Object.keys(detail.fields)
-      .filter((key) => !knownFields.has(key) && Boolean(detail.fields[key]?.trim()))
+      .filter((key) => key !== 'price' && !knownFields.has(key) && Boolean(detail.fields[key]?.trim()))
       .sort((left, right) => left.localeCompare(right, 'fr'))
       .map((key) => ({ key, label: fieldLabel(key), format: 'text' as const }));
     return additionalFields.length > 0

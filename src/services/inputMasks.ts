@@ -103,27 +103,6 @@ export function formatTemp(min: string, max: string): string {
   return '';
 }
 
-// ── Price: "8.95 EUR" ⇄ { amount, currency } ─────────────────────────────────────
-
-/**
- * Split a price string into a numeric amount + ISO-4217 currency. Defaults to EUR (the
- * criée standard) when none is printed; keeps an explicit 3-letter code if present. Never
- * invents a price — an empty input yields an empty amount.
- */
-export function parsePrice(value: string): { amount: string; currency: string } {
-  const v = (value || '').trim();
-  const num = /-?\d+(?:[.,]\d+)?/.exec(v);
-  const amount = num ? num[0].replace(',', '.') : '';
-  const code = /\b([A-Z]{3})\b/.exec(v);
-  return { amount, currency: code ? code[1] : 'EUR' };
-}
-
-/** Rebuild "amount currency" (e.g. "8.95 EUR"); an empty amount → "". */
-export function formatPrice(amount: string, currency: string): string {
-  const a = amount.trim().replace(',', '.');
-  return a === '' ? '' : `${a} ${currency}`;
-}
-
 // ── Health mark ("estampille sanitaire"): always UPPERCASE ───────────────────────
 // The official EU sanitary mark is stamped in uppercase, e.g. "FR 34.108.504 CE",
 // "ES 12.932470 UE", "GB BB004" — country code + establishment number + CE/UE suffix.

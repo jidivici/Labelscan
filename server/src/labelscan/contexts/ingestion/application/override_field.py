@@ -38,7 +38,7 @@ _ACTION_GS1 = "ingestion.gs1_field_overridden"
 # unknown field is rejected before the DB is ever touched. The v2 prompt emits
 # producer_name / reseller_brand / health_mark and no longer product_name / supplier_name,
 # but the latter two stay accepted so a reviewer can still correct an immutable v1 run.
-_LEGACY_FIELD_NAMES = frozenset({"product_name", "supplier_name"})
+_LEGACY_FIELD_NAMES = frozenset({"product_name", "supplier_name", "price"})
 FIELD_NAMES: frozenset[str] = (
     frozenset(
         field_name
@@ -50,7 +50,7 @@ FIELD_NAMES: frozenset[str] = (
 
 # GS1-owned fields are read from the barcode symbology (mathematically exact), never
 # from OCR/LLM. A human may override them only under the EXPLICIT ``force_gs1`` flag
-# (workflow v1: the operator stays in charge of all 17 fields): without the flag the
+# (the operator stays in charge of all active profile fields): without the flag the
 # request is rejected (409), with it the override is append-only, ``source='human'``
 # and audited under a dedicated action (mirrors extraction_consumer._GS1_OWNED_FIELDS
 # + the reconciliation doctrine where GS1 wins on lot/DLC/weight/GTIN/packaging).

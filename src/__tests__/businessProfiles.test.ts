@@ -7,18 +7,44 @@ import {
 import { FIELD_ORDER, fieldOrderForTrade } from '../services/fieldOrder';
 import { fieldLabelFr } from '../services/fieldLabels';
 
-describe('V1 business profiles', () => {
+describe('V2 business profiles', () => {
   it.each([
-    ['poissonnerie', 17],
-    ['boucherie', 22],
-    ['charcuterie_traiteur', 22],
+    ['poissonnerie', 16],
+    ['boucherie', 21],
+    ['charcuterie_traiteur', 21],
   ] as const)('%s exposes one closed, duplicate-free contract of %i fields', (code, count) => {
     const profile = BUSINESS_PROFILES[code];
-    expect(profile.version).toBe('1');
+    expect(profile.version).toBe('2');
     expect(profile.fields).toHaveLength(count);
     expect(new Set(profile.fields).size).toBe(count);
     expect(profile.groups.flatMap((group) => group.fields)).toEqual(profile.fields);
     expect(profile.requiredFields.every((field) => profile.fields.includes(field))).toBe(true);
+    expect(profile.fields).not.toContain('price');
+  });
+
+  it('matches the web detail order for poissonnerie', () => {
+    expect(BUSINESS_PROFILES.poissonnerie.groups).toEqual([
+      {
+        id: 'identification',
+        title: 'Identification du produit',
+        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
+      },
+      {
+        id: 'fishing-origin',
+        title: 'Provenance et production',
+        fields: ['scientific_name', 'FAO_area', 'production_method', 'fishing_gear_or_farming_method'],
+      },
+      {
+        id: 'traceability',
+        title: 'Traçabilité réglementaire',
+        fields: ['batch_number', 'origin_country', 'health_mark', 'packaging_date', 'expiry_date'],
+      },
+      {
+        id: 'conservation',
+        title: 'Conservation et données commerciales',
+        fields: ['storage_temperature', 'allergens', 'weight'],
+      },
+    ]);
   });
 
   it('keeps the historical FIELD_ORDER export as poissonnerie compatibility', () => {
@@ -26,7 +52,7 @@ describe('V1 business profiles', () => {
     expect(fieldOrderForTrade('boucherie')).toEqual(BUSINESS_PROFILES.boucherie.fields);
   });
 
-  it('contains the V1 boucherie and charcuterie-specific review fields', () => {
+  it('contains the V2 boucherie and charcuterie-specific review fields', () => {
     expect(BUSINESS_PROFILES.boucherie.fields).toEqual(
       expect.arrayContaining([
         'animal_species',

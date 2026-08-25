@@ -16,11 +16,11 @@
 > The DDL is the companion file [`schema.sql`](./schema.sql); illustrative migrations are in
 > [`migrations/`](./migrations/). Keep all three in sync.
 
-**A note on field count (prompt v2.0.0).** The runtime LLM emits **16 substantive label fields** —
+**A note on field count (trade profile V2 / prompt v3.0.0).** The runtime LLM emits **16 fields** —
 `commercial_designation`, `scientific_name`, `producer_name`, `reseller_brand`, `batch_number`,
 `origin_country`, `FAO_area`, `production_method`, `fishing_gear_or_farming_method`, `expiry_date`,
-`packaging_date`, `storage_temperature`, `allergens`, `health_mark`, `weight`, `price` — plus `gtin`
-(set from GS1 AI 01) for **17 emitted fields**. v2 dropped `product_name` (`commercial_designation`
+`packaging_date`, `storage_temperature`, `allergens`, `health_mark`, `weight`, plus `gtin`
+(set from GS1 AI 01). Profile V2 retires `price`; V1 remains readable for immutable history. v2 dropped `product_name` (`commercial_designation`
 is now THE designation), split `supplier_name` into `producer_name`/`reseller_brand`, and added
 `health_mark` (estampille sanitaire). The `extracted_field.field_name` CHECK is a **SUPERSET**
 (migration 0011): it still also allows the legacy `product_name`/`supplier_name` so the append-only

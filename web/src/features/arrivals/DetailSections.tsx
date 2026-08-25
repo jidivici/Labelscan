@@ -21,7 +21,12 @@ export function DetailSections({ sections, fields }: {
   fields: Record<string, string | null>;
 }) {
   const visibleSections = sections
-    .map((section) => ({ ...section, fields: section.fields.filter((field) => Boolean(fields[field.key]?.trim())) }))
+    .map((section) => ({
+      ...section,
+      fields: section.fields.filter(
+        (field) => field.key !== 'price' && Boolean(fields[field.key]?.trim()),
+      ),
+    }))
     .filter((section) => section.fields.length > 0);
 
   if (visibleSections.length === 0) return null;

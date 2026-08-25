@@ -11,7 +11,7 @@
  * in every state (a bad shot can be dropped mid-extraction). Confirm mentions the
  * draft when one exists.
  *
- * Layout: [uniform thumbnail] · [état + hint text] · [circular n/17 gauge]. The gauge
+ * Layout: [uniform thumbnail] · [état + hint text] · [profile completeness gauge].
  * carries the live score; color signals state (accent=en cours, vert=à valider,
  * rouge=erreur). Sober by design — no progress bar, no confidence.
  */
@@ -78,7 +78,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
   const ready = scan.status === 'ready';
   const requiresRecapture = scan.status === 'recapture_required';
   const waitingForSync = scan.reviewSyncStatus === 'pending';
-  // Workflow v2: a "ready" scan is only truly "à valider" once all 17 fields are filled.
+  // A "ready" scan is only truly "à valider" once all profile fields are filled.
   // Below that it stays "en cours" and reads "À compléter" — it is NOT an article yet.
   const complete = ready && filledCount === totalFieldCount;
   const displayLabel = waitingForSync
@@ -88,7 +88,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
       : activeLabel;
   // Highlight the active label (accent) while the product name is still unknown.
   const highlightLabel = extracting && !nameKnown;
-  // The gauge is the live "n/17" cue: it waves while extracting, settles when ready.
+  // The gauge is the live profile-completeness cue.
   const showGauge = extracting || ready;
 
   const translateX = useSharedValue(0);

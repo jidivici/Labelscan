@@ -23,7 +23,6 @@ const FIELD_LABELS_FR: Record<string, string> = {
   allergens: 'Allergènes',
   health_mark: 'Estampille sanitaire',
   weight: 'Poids',
-  price: 'Prix',
   gtin: 'Code-barres (GTIN)',
   // Boucherie V1
   animal_species: 'Espèce animale',
@@ -49,8 +48,8 @@ const FIELD_LABELS_FR: Record<string, string> = {
   reheating_instructions: 'Instructions de réchauffage',
   raw_warnings: 'Observations',
   // legacy v1 keys, kept so historical records still render a French label
-  product_name: 'Nom du produit',
-  supplier_name: 'Fournisseur',
+  product_name: 'Désignation historique',
+  supplier_name: 'Fournisseur historique',
 };
 
 /** French label for a field key (falls back to the raw key if unmapped). */

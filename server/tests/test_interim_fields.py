@@ -2,7 +2,7 @@
 
 No DB, no providers. The invariants under test:
   * emit ONLY on an explicitly-labelled, unambiguous match (no bare dates);
-  * canonical value forms match the LLM contract (ISO date, "0-4 C", "8.95 EUR");
+  * canonical value forms match the LLM contract (ISO date, "0-4 C");
   * several DISTINCT candidates for one field -> field NOT emitted;
   * order-ambiguous numeric dates (both components <=12) are never guessed.
 """
@@ -86,29 +86,6 @@ def test_temperature_negative_range():
     assert got["storage_temperature"] == "-18--15 C"
 
 
-# ── price ─────────────────────────────────────────────────────────────────────
-
-
-def test_price_symbol_after_amount():
-    assert _as_dict("PRIX 8,95 €")["price"] == "8.95 EUR"
-
-
-def test_price_eur_code_before_amount():
-    assert _as_dict("EUR 12.50")["price"] == "12.50 EUR"
-
-
-def test_price_per_kg_excluded():
-    assert "price" not in _as_dict("14,90 €/kg")
-
-
-def test_two_distinct_prices_emit_nothing():
-    assert "price" not in _as_dict("8,95 € — au lieu de 10,95 €")
-
-
-def test_bare_decimal_is_not_a_price():
-    assert "price" not in _as_dict("Poids net 0.320")
-
-
 # ── batch number ──────────────────────────────────────────────────────────────
 
 
@@ -141,4 +118,3 @@ def test_fixture_ocr_text_yields_expected_wave2():
     assert got["packaging_date"] == "2026-06-10"
     assert got["batch_number"] == "L24-0917"
     assert "storage_temperature" not in got  # "Keep below 4C" is not a franc range
-    assert "price" not in got
