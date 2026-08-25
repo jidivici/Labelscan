@@ -16,6 +16,20 @@ branch_labels = None
 depends_on = None
 
 
+def _set_audit_context(action: str) -> None:
+    """Attribute the intentional workflow backfill to this migration."""
+
+    op.execute(
+        "SELECT set_config('labelscan.actor_id', "
+        "'00000000-0000-0000-0000-000000000000', true)"
+    )
+    op.execute(f"SELECT set_config('labelscan.action', '{action}', true)")
+    op.execute(
+        "SELECT set_config('labelscan.correlation_id', 'migration-0033', true)"
+    )
+    op.execute("SELECT set_config('labelscan.trace_id', 'migration-0033', true)")
+
+
 def upgrade() -> None:
     op.execute(
         "ALTER TABLE ingestion.ingestion "
@@ -29,6 +43,7 @@ def upgrade() -> None:
         "ALTER TABLE traceability.arrival_projection "
         "ALTER COLUMN trade_profile_version SET DEFAULT '2'"
     )
+    _set_audit_context("ingestion.trade_profile_v2_activated")
     op.execute(
         """
         UPDATE ingestion.ingestion
@@ -52,6 +67,7 @@ def downgrade() -> None:
         "ALTER TABLE traceability.arrival_projection "
         "ALTER COLUMN trade_profile_version SET DEFAULT '1'"
     )
+    _set_audit_context("ingestion.trade_profile_v2_reverted")
     op.execute(
         """
         UPDATE ingestion.ingestion
