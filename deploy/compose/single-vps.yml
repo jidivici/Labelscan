@@ -67,9 +67,11 @@ services:
     <<: *app
     environment:
       <<: *production-environment
-      DATABASE_URL_FILE: /run/secrets/database_url
+      # The guarded reset recreates and reseeds projections, identities and batches.
+      # Those maintenance writes are intentionally forbidden to the runtime role.
+      DATABASE_URL_FILE: /run/secrets/database_admin_url
       LABELSCAN_DEMO_CREDENTIALS_FILE: /run/secrets/demo_credentials
-    secrets: [database_url, demo_credentials]
+    secrets: [database_admin_url, demo_credentials]
     command: ["demo"]
     volumes:
       - raw_data:/app/data/raw

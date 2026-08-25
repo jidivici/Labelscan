@@ -163,6 +163,23 @@ def test_vps_healthcheck_uses_the_allowed_production_host() -> None:
     assert "headers={'Host': 'label-scan.fr'}" in compose
 
 
+def test_guarded_demo_reset_uses_the_maintenance_database_role() -> None:
+    compose = (
+        Path(__file__).resolve().parents[2]
+        / "deploy"
+        / "compose"
+        / "single-vps.yml"
+    ).read_text(encoding="utf-8")
+    demo_service = compose.split("\n  demo:\n", 1)[1].split(
+        "\n  secure_demo_credentials:\n", 1
+    )[0]
+
+    assert "profiles: [demo-reset]" in demo_service
+    assert "DATABASE_URL_FILE: /run/secrets/database_admin_url" in demo_service
+    assert "secrets: [database_admin_url, demo_credentials]" in demo_service
+    assert "DATABASE_URL_FILE: /run/secrets/database_url" not in demo_service
+
+
 def test_runtime_role_is_neither_elevated_nor_application_owner(engine) -> None:
     with engine.connect() as conn:
         role = conn.execute(
