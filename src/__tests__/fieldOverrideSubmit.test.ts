@@ -47,7 +47,7 @@ describe('isGs1OwnedField', () => {
   });
 
   it('does not flag free-text / LLM fields', () => {
-    for (const f of ['FAO_area', 'supplier_name', 'scientific_name', 'allergens', 'price']) {
+    for (const f of ['FAO_area', 'supplier_name', 'scientific_name', 'allergens']) {
       expect(isGs1OwnedField(f)).toBe(false);
     }
   });
@@ -121,7 +121,7 @@ describe('submitFieldOverrides', () => {
   it('never throws — a sync failure does not surface to the caller', async () => {
     mockOverride.mockRejectedValue(new Error('boom'));
     await expect(
-      submitFieldOverrides({ ingestionId: 'i9', fields: [{ field_name: 'price', value: '8.95 EUR' }] }),
+      submitFieldOverrides({ ingestionId: 'i9', fields: [{ field_name: 'manufacturer_name', value: 'Maison Démo' }] }),
     ).resolves.toEqual({ submitted: 0, pending: 1 });
   });
 });

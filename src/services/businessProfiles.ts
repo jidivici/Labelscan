@@ -9,7 +9,18 @@
 export type TradeCode = 'poissonnerie' | 'boucherie' | 'charcuterie_traiteur';
 
 export interface FieldGroup {
-  id: 'identity' | 'provenance' | 'traceability' | 'haccp' | 'commercial';
+  id:
+    | 'identification'
+    | 'fishing-origin'
+    | 'meat-identification'
+    | 'meat-origin'
+    | 'prepared-product'
+    | 'prepared-composition'
+    | 'prepared-conservation'
+    | 'prepared-traceability'
+    | 'traceability'
+    | 'conservation'
+    | 'prepared-commercial';
   title: string;
   fields: readonly string[];
 }
@@ -17,7 +28,7 @@ export interface FieldGroup {
 export interface BusinessProfile {
   code: TradeCode;
   displayName: string;
-  version: '1';
+  version: '2';
   groups: readonly FieldGroup[];
   fields: readonly string[];
   requiredFields: readonly string[];
@@ -32,7 +43,7 @@ function profile(
   return {
     code,
     displayName,
-    version: '1',
+    version: '2',
     groups,
     fields: groups.flatMap((group) => group.fields),
     requiredFields,
@@ -45,29 +56,24 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
     'Poissonnerie',
     [
       {
-        id: 'identity',
+        id: 'identification',
         title: 'Identification du produit',
-        fields: ['commercial_designation', 'scientific_name', 'producer_name', 'reseller_brand'],
+        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
       },
       {
-        id: 'provenance',
+        id: 'fishing-origin',
         title: 'Provenance et production',
-        fields: ['origin_country', 'FAO_area', 'production_method', 'fishing_gear_or_farming_method'],
+        fields: ['scientific_name', 'FAO_area', 'production_method', 'fishing_gear_or_farming_method'],
       },
       {
         id: 'traceability',
         title: 'Traçabilité réglementaire',
-        fields: ['batch_number', 'health_mark', 'gtin'],
+        fields: ['batch_number', 'origin_country', 'health_mark', 'packaging_date', 'expiry_date'],
       },
       {
-        id: 'haccp',
-        title: 'HACCP, dates et conservation',
-        fields: ['packaging_date', 'expiry_date', 'storage_temperature', 'allergens'],
-      },
-      {
-        id: 'commercial',
-        title: 'Données commerciales',
-        fields: ['weight', 'price'],
+        id: 'conservation',
+        title: 'Conservation et données commerciales',
+        fields: ['storage_temperature', 'allergens', 'weight'],
       },
     ],
     ['scientific_name', 'expiry_date', 'production_method'],
@@ -77,48 +83,36 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
     'Boucherie',
     [
       {
-        id: 'identity',
-        title: 'Identification de la viande',
-        fields: [
-          'commercial_designation',
-          'animal_species',
-          'animal_category',
-          'cut_name',
-          'producer_name',
-          'reseller_brand',
-        ],
+        id: 'identification',
+        title: 'Identification du produit',
+        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
       },
       {
-        id: 'provenance',
-        title: 'Origine et parcours de l’animal',
+        id: 'meat-identification',
+        title: 'Animal et découpe',
+        fields: ['animal_species', 'animal_category', 'cut_name'],
+      },
+      {
+        id: 'meat-origin',
+        title: 'Élevage, abattage et transformation',
         fields: [
-          'origin_country',
           'birth_country',
           'rearing_country',
           'slaughter_country',
           'cutting_country',
+          'slaughterhouse_approval',
+          'cutting_plant_approval',
         ],
       },
       {
         id: 'traceability',
         title: 'Traçabilité réglementaire',
-        fields: [
-          'batch_number',
-          'health_mark',
-          'slaughterhouse_approval',
-          'cutting_plant_approval',
-          'gtin',
-        ],
+        fields: ['batch_number', 'origin_country', 'health_mark', 'packaging_date', 'expiry_date'],
       },
       {
-        id: 'haccp',
-        title: 'HACCP, dates et conservation',
-        fields: ['packaging_date', 'expiry_date', 'storage_temperature', 'allergens'],
-      },
-      {
-        id: 'commercial',
-        title: 'Données commerciales',
-        fields: ['weight', 'price'],
+        id: 'conservation',
+        title: 'Conservation et données commerciales',
+        fields: ['storage_temperature', 'allergens', 'weight'],
       },
     ],
     ['animal_species', 'cut_name', 'expiry_date'],
@@ -128,47 +122,40 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
     'Charcuterie / Traiteur',
     [
       {
-        id: 'identity',
+        id: 'identification',
         title: 'Identification du produit',
+        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
+      },
+      {
+        id: 'prepared-product',
+        title: 'Famille et fabrication',
+        fields: ['product_family', 'manufacturer_name', 'preparation_date'],
+      },
+      {
+        id: 'prepared-composition',
+        title: 'Composition, allergènes et utilisation',
+        fields: ['ingredients', 'additives', 'allergens', 'use_instructions', 'reheating_instructions'],
+      },
+      {
+        id: 'prepared-conservation',
+        title: 'Conditionnement et conservation',
         fields: [
-          'commercial_designation',
-          'product_family',
-          'manufacturer_name',
-          'producer_name',
-          'reseller_brand',
-        ],
-      },
-      {
-        id: 'provenance',
-        title: 'Origine',
-        fields: ['origin_country'],
-      },
-      {
-        id: 'traceability',
-        title: 'Traçabilité réglementaire',
-        fields: ['batch_number', 'health_mark', 'gtin'],
-      },
-      {
-        id: 'haccp',
-        title: 'Composition, préparation et conservation',
-        fields: [
-          'ingredients',
-          'additives',
-          'allergens',
-          'preparation_date',
-          'packaging_date',
-          'expiry_date',
           'conditioning_type',
           'storage_mode',
           'storage_temperature',
-          'use_instructions',
-          'reheating_instructions',
+          'packaging_date',
+          'expiry_date',
         ],
       },
       {
-        id: 'commercial',
+        id: 'prepared-traceability',
+        title: 'Traçabilité sanitaire',
+        fields: ['batch_number', 'origin_country', 'health_mark'],
+      },
+      {
+        id: 'prepared-commercial',
         title: 'Données commerciales',
-        fields: ['weight', 'price'],
+        fields: ['weight'],
       },
     ],
     ['commercial_designation', 'expiry_date', 'ingredients'],

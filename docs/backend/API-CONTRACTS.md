@@ -279,13 +279,14 @@ paths:
 ## 3. Atomic review — `POST /v1/ingestions/{id}/reviews` (Capability 4)
 
 The mobile production flow submits the final review in one transaction. The
-request contains `fields`, whose keys must be exactly the 17 canonical fields,
+request contains `fields`, whose keys must match the ingestion's versioned trade profile
+(16 fields for poissonnerie V2, 21 for the other V2 profiles),
 and requires a durable `Idempotency-Key`.
 
 The transaction:
 
 1. locks the ingestion and validates tenant/store ownership;
-2. appends a human extraction revision and its 17 fields;
+2. appends a human extraction revision with the complete versioned profile;
 3. confirms the ingestion;
 4. records the idempotency response and request hash;
 5. publishes `catalog.review_finalized` through the transactional outbox.
@@ -313,8 +314,8 @@ review operation.
             schema: { type: string, enum: [commercial_designation, scientific_name, producer_name,
                       reseller_brand, batch_number, origin_country, FAO_area, production_method,
                       fishing_gear_or_farming_method, expiry_date, packaging_date,
-                      storage_temperature, allergens, health_mark, weight, price, gtin,
-                      product_name, supplier_name] } }   # D1: v2 names (prompt v2.0.0) + legacy (migration 0011 superset)
+                      storage_temperature, allergens, health_mark, weight, gtin,
+                      product_name, supplier_name, price] } }   # active V2 names + historical V1 compatibility
         - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
       requestBody:
         required: true

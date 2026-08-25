@@ -11,7 +11,7 @@ côté backend, celui-ci comble le manque.
 - Expo SDK 54 / React Native 0.81.
 - Android minimum : **Android 13, API 33**, sur un appareil recevant encore les correctifs
   de son fabricant, avec le même parcours métier qu'iOS
-  (connexion, capture, file hors ligne, revue 17/17, catalogue et déconnexion).
+  (connexion, capture, file hors ligne, revue 16/16, catalogue et déconnexion).
 - Les builds preview et production refusent le trafic HTTP en clair et embarquent
   obligatoirement `https://label-scan.fr` comme origine API.
 - Les releases Android assemblées localement (hors EAS) utilisent la même origine
@@ -51,10 +51,10 @@ qu'un test du parcours complet n'a pas réussi sur un appareil ou émulateur API
   voir l'ADR historique dans `CLAUDE.md` §P0. Le flux est : recadrage au cadre → capture enchaînée
   (file de scans) → `POST /v1/ingestions` → extraction asynchrone (worker) → écran de vérification
   éditable → finalisation durable côté backend et cache local de consultation.
-- **Contrat d'extraction v2 — 17 champs** (prompt v2.0.0) : `commercial_designation`,
+- **Contrat poissonnerie V2 — 16 champs** (prompt v3.0.0) : `commercial_designation`,
   `scientific_name`, `producer_name`, `reseller_brand`, `production_method`,
   `fishing_gear_or_farming_method`, `FAO_area`, `origin_country`, `health_mark`, `batch_number`,
-  `expiry_date`, `packaging_date`, `storage_temperature`, `weight`, `allergens`, `price`, `gtin`
+  `expiry_date`, `packaging_date`, `storage_temperature`, `weight`, `allergens`, `gtin`
   ([`services/fieldOrder.ts`](../../src/services/fieldOrder.ts) — ordre HACCP partagé Revue ⇄ Détail).
 - **Stockage local** : articles sauvegardés en AsyncStorage indexé par clé
   ([`services/storage.ts`](../../src/services/storage.ts)), file d'attente de transport (outbox,
@@ -161,13 +161,13 @@ soit un nouveau cycle de sondage (`retryScan` sur `extract_error`).
 ## 4. Accueil : compteur 3 étapes et validation
 
 > **Workflow v2 — un scan « en cours » n'est JAMAIS un article.** Chaque scan reste dans la zone
-> « En cours » tant que ses **17 champs ne sont pas tous remplis** ; il n'entre dans la liste des
-> articles (et n'incrémente le comptage) qu'à l'**enregistrement 17/17** (§5). Plusieurs scans
+> « En cours » tant que ses **16 champs ne sont pas tous remplis** ; il n'entre dans la liste des
+> articles (et n'incrémente le comptage) qu'à l'**enregistrement 16/16** (§5). Plusieurs scans
 > peuvent coexister « en cours » (empilement inchangé). Sur la carte, quand un scan est `ready`
-> mais `< 17/17`, l'étape 3 lit **« À compléter »** (bleu) au lieu de « À valider » (vert) —
+> mais `< 16/16`, l'étape 3 lit **« À compléter »** (bleu) au lieu de « À valider » (vert) —
 > `PendingScanCard` compare `filledCount` à `CANONICAL_FIELD_COUNT`.
 >
-> **Jauge vivante** : le score `n/17` de la carte est calculé run/interim **+ overlay du brouillon
+> **Jauge vivante** : le score `n/16` de la carte est calculé run/interim **+ overlay du brouillon
 > persistant** (`scan.edits`) — les fonctions de `fieldCompleteness.ts` prennent un paramètre
 > `edits` optionnel qui prime dans les deux sens (une saisie remplit, un champ vidé dé-remplit).
 > La jauge avance donc à chaque retour de revue, au fil de la session de saisie.
@@ -227,21 +227,21 @@ deux panneaux.
   `ExtractionProgress` + `CascadeReveal`, vague GS1 → vague 2 déterministe → LLM) ; si déjà `ready`,
   tout s'affiche directement, sans saut. Si le scan a disparu de la file pendant que l'écran était
   ouvert (validé/supprimé ailleurs), retour silencieux à l'accueil.
-- **Les 17 champs sont éditables**, y compris les champs issus du code-barres (GS1 : lot, DLC,
+- **Les 16 champs sont éditables**, y compris les champs issus du code-barres (GS1 : lot, DLC,
   poids, GTIN, date d'emballage). Au save, `submitFieldOverrides` tague automatiquement l'override
   d'un champ GS1 avec `force_gs1` — le serveur l'accepte alors sous une action d'audit dédiée
   (`ingestion.gs1_field_overridden`, append-only, jamais un écrasement — voir
   [`API-CONTRACTS.md`](../backend/API-CONTRACTS.md) §3). Sans le flag, le champ reste 409
   `FIELD_NOT_EDITABLE` (rétrocompatibilité totale avec un serveur non redéployé).
-- **Verrou 17/17 (workflow v2)** : « Enregistrer l'arrivage » n'est **actif qu'à 17/17**. Le
+- **Verrou 16/16 (profil V2)** : « Enregistrer l'arrivage » n'est **actif qu'à 16/16**. Le
   compteur de complétude est calculé sur les **valeurs effectives** (brouillon prioritaire sur la
   valeur extraite) via `filledCountFromValues` ([`services/fieldCompleteness.ts`](../../src/services/fieldCompleteness.ts)) —
   même map que celle affichée, donc zéro divergence compteur ⇄ écran. En dessous, le bouton lit
-  **« Compléter (n/17) »** (désactivé).
+  **« Compléter (n/16) »** (désactivé).
 - **Brouillon persistant (« session »)** : l'état d'édition est **seedé depuis `scan.edits`** et
   **ré-écrit une seule fois** au départ de l'écran (`saveScanEdits`, effet de nettoyage sur unmount).
   Quitter puis rouvrir une revue partielle **restaure les modifications** ; le scan reste « en cours »
-  tant qu'il n'est pas validé à 17/17. `saveScanEdits` est un no-op si le scan a été validé/supprimé.
+  tant qu'il n'est pas validé à 16/16. `saveScanEdits` est un no-op si le scan a été validé/supprimé.
 - **Visionneuse plein écran** (`PhotoViewerModal.tsx`) : pinch-to-zoom (bornes ×1–5), pan, double-tap
   pour zoomer/dézoomer, fermeture par bouton. Aucune dépendance nouvelle (`react-native-gesture-handler`
   + `react-native-reanimated` déjà utilisés par `ArticleCard`) ; le `Modal` RN a sa propre racine
@@ -290,7 +290,7 @@ d'une criée (espèces, producteurs, zones FAO, marques sanitaires…) se resais
   l'occurrence la plus récente, tri **fréquence puis récence**.
 - **9 champs concernés** (`HISTORY_FIELDS`) : désignation commerciale, nom scientifique,
   producteur, marque revendeur, méthode de production, engin/méthode d'élevage, zone FAO, pays
-  d'origine, marque sanitaire. **Exclus** : lot/dates/GTIN (uniques par arrivage), poids/temp/prix
+  d'origine, marque sanitaire. **Exclus** : lot/dates/GTIN (uniques par arrivage), poids/température
   (inputs à affixe), allergènes (suggestion conformité Annexe II dédiée, inchangée).
 - **UX** : jusqu'à 3 **chips neutres** (icône horloge) sous le champ, uniquement quand il est
   **focalisé** ; champ vide → top 3, sinon complétion **préfixe puis substring** ; la valeur déjà
@@ -322,7 +322,7 @@ retouchée côté client (garde l'invariant « valeur affichée == valeur persis
   (`batch_number` → « N° de lot », `FAO_area` → « Zone de pêche (FAO) »…).
 - **Poids** : champ numérique + affixe d'unité **kg ⇄ g** (tap), aucune conversion automatique.
 - **Température de conservation** : deux champs **[min] – [max] °C**.
-- **Prix** : clavier décimal + affixe devise (€ par défaut).
+- Le champ **Prix** est retiré du contrat actif V2 et masqué pour les anciennes fiches V1.
 - **Omni-recherche** (liste Articles) : filtre sur tous les champs + code-barres, insensible aux
   accents/casse — [`hooks/useArticleSearch.ts`](../../src/hooks/useArticleSearch.ts) /
   [`services/articleSearch.ts`](../../src/services/articleSearch.ts).
@@ -369,7 +369,7 @@ retirée avec ce chemin — audit §7.3.)
 notables : `scanQueue` (transitions, cap de sondages, hydratation/réconciliation, dédoublonnage,
 nettoyage photo, **`saveScanEdits` persiste + ré-hydrate le brouillon**), `ingestionResult`,
 `scanSteps` (mapping 5 statuts × `ocrDone`), `fieldCompleteness` (**`filledCountFromValues` = verrou
-17/17**), `fieldOverrideSubmit` (force_gs1). Vérification de types : `npx tsc --noEmit`.
+16/16**), `fieldOverrideSubmit` (force_gs1). Vérification de types : `npx tsc --noEmit`.
 
 ---
 

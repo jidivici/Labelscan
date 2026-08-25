@@ -1,4 +1,4 @@
-"""Atomic 17-field review, durable replay and catalogue projection proofs."""
+"""Atomic profile review, durable replay and catalogue projection proofs."""
 
 from __future__ import annotations
 
@@ -172,7 +172,7 @@ def test_atomic_review_replays_without_duplicate_and_updates_projection(
                 ),
                 {"run_id": run_id},
             ).scalar_one()
-            == 17
+            == len(FINAL_REVIEW_FIELDS)
         )
         assert (
             conn.execute(

@@ -40,6 +40,9 @@ _MODEL = os.environ.get("LABELSCAN_LLM_MODEL", _DEFAULT_MODEL)
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v3.0.0 — active trade-profile V2 retires `price`; the closed seafood output now has
+# 16 fields. Historical profile V1 remains resolvable through a compact compatibility
+# prompt, but all new ingestions use this cached V2 prefix.
 # v2.1.0 — production_method HARDENED (HACCP honesty). A wrong wild/farmed is worse than null:
 # the rule now lists FRENCH triggers (élevé/élevage/aquaculture/pisciculture/ferme → farmed;
 # pêché/capturé/sauvage → wild) PLUS a PRECEDENCE — an explicit rearing statement makes a product
@@ -57,7 +60,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Because the closed set changed this is a MAJOR bump: the extracted_field.field_name CHECK is
 # widened by migration 0011 (SUPERSET — legacy product_name/supplier_name kept for the immutable
 # historical rows), and the eval regression gate must be re-run before rollout. The few-shots
-# below now show the 17-element array. Editing this prefix invalidates the prompt cache once.
+# below now show the 16-element V2 array. Editing this prefix invalidates the prompt cache once.
 # v1.2.0 — FAO_area now captures the FULL printed designation (major area + sub-area /
 # sous-zone + division + sub-division), numeric ("27.8.b.1") OR official worded / Roman
 # form ("Atlantique Nord-Est, sous-zone VIII et autres sous-zones"), verbatim — it no
@@ -65,7 +68,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v2.1.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.0.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -190,10 +193,10 @@ and has EXACTLY these keys: "name", "value", "confidence", "evidence", \
 - Emit one element for EVERY name in the closed set below, present even when the value \
 is null. Never add a field outside the set; never omit one; never list a name twice.
 
-CLOSED FIELD SET ("name" is exactly one of these 17 strings, each appearing once):
+CLOSED FIELD SET ("name" is exactly one of these 16 strings, each appearing once):
 commercial_designation, scientific_name, producer_name, reseller_brand, batch_number, \
 origin_country, FAO_area, production_method, fishing_gear_or_farming_method, \
-expiry_date, packaging_date, storage_temperature, allergens, health_mark, weight, price, gtin.
+expiry_date, packaging_date, storage_temperature, allergens, health_mark, weight, gtin.
 
 PER-FIELD OBJECT KEYS:
 - "name": the field name (one of the 16 above).
@@ -250,7 +253,7 @@ more than one language, set "value" to the FRENCH wording, copied verbatim (its 
 French, keep it exactly as printed in whatever language is shown. Rule 2 still binds - \
 "value" must be an exact OCR substring, so never produce a French value you cannot quote \
 from the OCR text. (Numeric / controlled-vocabulary fields - dates, temperature, weight, \
-price, FAO_area, production_method - have no language; this rule is about text fields.)
+FAO_area, production_method - have no language; this rule is about text fields.)
 8. HEALTH MARK ≠ ORIGIN. The oval health / identification mark (estampille sanitaire, e.g. \
 "FR 34.108.504 CE", "ES 12.932470 UE", "GB BB004") identifies the APPROVED ESTABLISHMENT, \
 not the origin. It goes ONLY in health_mark. NEVER copy its country prefix into \
@@ -285,7 +288,7 @@ sous-zones"). Capture whatever is printed, verbatim and at FULL precision (sub-z
 divisions included); a bare sea / ocean / region NAME with no FAO designation stays \
 "ambiguous" - never derive a number from a place name.
 - QUALITY / SUSTAINABILITY claims (MSC, ASC, "pêche durable", IGP, AOP, Label Rouge, \
-"responsibly sourced") are NOT in the 17-field set: never force them into a field, and \
+"responsibly sourced") are NOT in the 16-field set: never force them into a field, and \
 "responsibly sourced" / "sustainable" does NOT map to wild_caught or farmed (leave \
 production_method "ambiguous").
 - WILD vs FARMED: farmed is signalled by "aquaculture", "pisciculture", "élevé(e)"/"élevage", \
@@ -341,9 +344,6 @@ statement ("Poids net …"); a calibre / grading or pack count ("180/300 g", "2-
 COLIS DE 1.4KG") is NEVER the net weight - if only such a figure is present, weight is null / \
 "missing". If both net and gross appear, put the NET amount in "value" and record gross in a \
 warning. Ignore the estimated-sign mark (the lowercase "e").
-- price: "value" is a string with amount and currency, e.g. "8.95 EUR". Use an ISO-4217 \
-code or the printed symbol ONLY when the currency is explicit on the label; otherwise \
-keep the amount and warn that the currency is undetermined (never guess the currency).
 - origin_country: "value" is the COUNTRY OF ORIGIN (where the fish was caught or farmed), as \
 written, e.g. "Norway". Do NOT convert it to an ISO code, and do NOT infer a country from a \
 garbled or partial token - if the text is garbled, keep it verbatim with "validation_status" \
@@ -401,7 +401,7 @@ null, "validation_status" "missing", "warnings" []. Still return valid JSON - ne
 refuse, never apologize.
 
 EXAMPLES (canonical OCR text -> expected JSON). Illustrative: apply the rules above, \
-not these literals. Each shows the complete 17-element array.
+not these literals. Each shows the complete 16-element array.
 
 EXAMPLE 1 - clean, fully-populated label.
 OCR TEXT:
@@ -419,7 +419,6 @@ Packed on: 2026-06-12
 Keep refrigerated 0-4 C
 Allergens: Fish
 Net weight: 320 g
-Price: 8.95 EUR
 Approval: FR 12.345.678 CE
 EXPECTED JSON:
 {"fields":[\
@@ -438,7 +437,6 @@ EXPECTED JSON:
 {"name":"allergens","value":"Fish","confidence":0.95,"evidence":["Allergens: Fish"],"validation_status":"present","warnings":[]},\
 {"name":"health_mark","value":"FR 12.345.678 CE","confidence":0.9,"evidence":["Approval: FR 12.345.678 CE"],"validation_status":"present","warnings":["Sanitary mark; its 'FR' country is the establishment, not the origin (Norway)."]},\
 {"name":"weight","value":"320 g","confidence":0.95,"evidence":["Net weight: 320 g"],"validation_status":"normalized","warnings":["Net basis."]},\
-{"name":"price","value":"8.95 EUR","confidence":0.9,"evidence":["Price: 8.95 EUR"],"validation_status":"normalized","warnings":["Basis (total vs per-kg) not stated."]},\
 {"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["GTIN is not printed as readable text; it comes from the scanned barcode."]}\
 ]}
 (Note: the "Approval: FR 12.345.678 CE" line is the sanitary mark -> health_mark; its 'FR' \
@@ -474,7 +472,6 @@ EXPECTED JSON:
 {"name":"allergens","value":"FlSH","confidence":0.7,"evidence":["Contains: FlSH"],"validation_status":"present","warnings":["Only the declared 'Contains' allergen is listed; the precautionary 'May c0ntain traces 0f S0Y' is recorded here, not as a declared allergen."]},\
 {"name":"health_mark","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"weight","value":"200 g","confidence":0.7,"evidence":["Wt 200g e"],"validation_status":"normalized","warnings":["Trailing 'e' (estimated-sign) excluded; net/gross unspecified."]},\
-{"name":"price","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]}\
 ]}
 
@@ -501,7 +498,6 @@ EXPECTED JSON:
 {"name":"allergens","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"health_mark","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"weight","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"price","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]}\
 ]}
 
@@ -533,7 +529,6 @@ EXPECTED JSON:
 {"name":"allergens","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"health_mark","value":"FR 07 019 003 UE","confidence":0.9,"evidence":["FR 07 019 003 UE"],"validation_status":"present","warnings":["Estampille; 'FR' is the establishment country, not used as origin."]},\
 {"name":"weight","value":"2 kg","confidence":0.9,"evidence":["Poids net: 2 kg"],"validation_status":"normalized","warnings":[]},\
-{"name":"price","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
 {"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["GTIN comes from the scanned barcode, not readable text."]}\
 ]}
 
@@ -557,7 +552,7 @@ _TRADE_GUIDANCE = {
 
 
 def _system_text_for(profile: TradeProfile) -> str:
-    if profile.code == "poissonnerie":
+    if profile.code == "poissonnerie" and profile.version == "2":
         return _SYSTEM_TEXT
     names = ", ".join(profile.fields)
     required = ", ".join(profile.required_fields)
@@ -573,12 +568,12 @@ evidence item must be an exact OCR substring. Use ambiguous when several reading
 possible and explain only in warnings. Dates use YYYY-MM-DD only when unambiguous;
 otherwise return null. GTIN and other GS1-resolved fields are supplied separately and
 must not be derived from unrelated numbers. Health/approval marks do not prove origin.
-{_TRADE_GUIDANCE[profile.code]}
+{_TRADE_GUIDANCE.get(profile.code, "Apply the seafood traceability rules without inventing values.")}
 Return only the JSON object."""
 
 
 def _profile_prompt_version(profile: TradeProfile) -> str:
-    if profile.code == "poissonnerie":
+    if profile.code == "poissonnerie" and profile.version == "2":
         return _PROMPT_VERSION
     return f"food-label-extraction/{profile.code}/v{profile.version}"
 
@@ -633,7 +628,7 @@ class ClaudeLlmExtractor:
         known_field_names: tuple[str, ...] = (),
         *,
         trade_code: str = "poissonnerie",
-        trade_profile_version: str = "1",
+        trade_profile_version: str = "2",
     ) -> LlmResult:
         profile = trade_profile(trade_code, trade_profile_version)
         # The system prompt is the stable, >=4096-token static prefix; one explicit

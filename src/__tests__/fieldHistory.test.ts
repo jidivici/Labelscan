@@ -34,7 +34,7 @@ describe('fieldHistory', () => {
     expect(HISTORY_FIELDS).toContain('commercial_designation');
     expect(HISTORY_FIELDS).toContain('producer_name');
     expect(HISTORY_FIELDS).toContain('FAO_area');
-    for (const excluded of ['batch_number', 'expiry_date', 'gtin', 'weight', 'price', 'allergens']) {
+    for (const excluded of ['batch_number', 'expiry_date', 'gtin', 'weight', 'allergens']) {
       expect(HISTORY_FIELDS).not.toContain(excluded);
     }
   });

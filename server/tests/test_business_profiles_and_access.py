@@ -55,20 +55,22 @@ def test_three_versioned_trade_profiles_share_the_common_contract() -> None:
         "boucherie",
         "charcuterie_traiteur",
     }
-    assert {profile.version for profile in TRADE_PROFILES.values()} == {"1"}
+    assert {profile.version for profile in TRADE_PROFILES.values()} == {"2"}
     assert all(
         profile.fields[: len(COMMON_FIELDS)] == COMMON_FIELDS
         for profile in TRADE_PROFILES.values()
     )
     assert {code: len(profile.fields) for code, profile in TRADE_PROFILES.items()} == {
-        "poissonnerie": 17,
-        "boucherie": 22,
-        "charcuterie_traiteur": 22,
+        "poissonnerie": 16,
+        "boucherie": 21,
+        "charcuterie_traiteur": 21,
     }
     assert all(profile.required_fields for profile in TRADE_PROFILES.values())
     assert "FAO_area" in trade_profile("poissonnerie").specific_fields
     assert "slaughter_country" in trade_profile("boucherie").specific_fields
     assert "ingredients" in trade_profile("charcuterie_traiteur").specific_fields
+    assert "price" not in trade_profile("poissonnerie").fields
+    assert "price" in trade_profile("poissonnerie", "1").fields
 
 
 def test_portal_scope_never_grants_another_portal_or_organization() -> None:

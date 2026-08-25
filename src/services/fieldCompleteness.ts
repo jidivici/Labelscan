@@ -1,12 +1,11 @@
 /**
  * Field-completeness scoring for the home screen's "En cours" cards (workflow v1).
  *
- * The backend extracts a CLOSED set of 17 fields (services/fieldOrder.ts FIELD_ORDER).
+ * The backend extracts a closed, profile-specific V2 field set.
  * This module derives, from EITHER the final run's ExtractionField[] OR the Tier-3
  * interim preview (Record<field_name, value>), two presentational signals:
  *
- *  - filledCount (/17): how many of the canonical fields already carry a usable value.
- *    Rendered as plain "n/17 champs" text on the "En cours" card as OCR/LLM land.
+ *  - filledCount: how many canonical profile fields already carry a usable value.
  *  - isProductNameKnown: whether `commercial_designation` is filled. The home card
  *    keeps the "Extraction" step highlighted until the operator can see a NAME — the
  *    single most identifying field — so the wait never feels information-free.
@@ -17,7 +16,7 @@
 import { fieldOrderForTrade } from './fieldOrder';
 import type { ExtractionField } from '../types/api';
 
-/** The closed field set length — the "/17" denominator shown in the UI. */
+/** The active poissonnerie V2 denominator shown in the UI. */
 export const CANONICAL_FIELD_COUNT = fieldOrderForTrade('poissonnerie').length;
 export const NOT_COMMUNICATED_VALUE = 'NC';
 
@@ -49,7 +48,7 @@ function isFilledValue(value: string | null | undefined): boolean {
 /**
  * Count filled canonical fields from a FINAL extraction run's field list.
  * A field with validation_status 'missing' never counts, even if it carries a
- * stray value. Fields outside the canonical set are ignored (the /17 is closed).
+ * stray value. Fields outside the canonical profile set are ignored.
  *
  * `edits` (workflow v2, optional) is the scan's persisted review draft: where a key
  * exists it OVERRIDES the run value — a typed value fills the field, a blanked draft
@@ -93,7 +92,7 @@ export function filledCountFromInterim(
 
 /**
  * Count filled canonical fields from a plain map of EFFECTIVE values (field_name →
- * string). Used by the Review screen's 17/17 save gate (workflow v2): the map holds
+ * string). Used by the Review screen's profile-completeness save gate: the map holds
  * each field's live draft (operator edit taking priority over the extracted value), so
  * the count reflects exactly what will be saved. A blank/whitespace value never counts.
  */

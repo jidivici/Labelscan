@@ -6,7 +6,7 @@ LLM so the client can render a preview ~seconds before the run lands. The rules:
   * Emit ONLY on an unambiguous, explicitly-labelled match (never a bare date or
     number without its label key) — consistent with the no-fabrication gate.
   * Emit the SAME canonical string form the LLM contract produces ("YYYY-MM-DD",
-    "0-4 C", "8.95 EUR", verbatim lot) so the final run confirms rather than
+    "0-4 C", verbatim lot) so the final run confirms rather than
     flickers the preview.
   * When several DISTINCT candidates match one field, emit NOTHING for it —
     ambiguity is the LLM's job, not a coin flip.
@@ -128,23 +128,6 @@ def _temperatures(norm_text: str) -> set[str]:
     return found
 
 
-# ── price ─────────────────────────────────────────────────────────────────────
-
-# Amount with an EXPLICIT euro marker adjacent (symbol or code) — a bare number is
-# never a price. Per-kg figures ("€/kg") are excluded: the contract keeps the TOTAL.
-_PRICE_RX = re.compile(
-    r"(?:(?:€|eur)\s*(\d{1,5}[.,]\d{2})|(\d{1,5}[.,]\d{2})\s*(?:€|eur))(?!\s*/\s*kg)",
-)
-
-
-def _prices(norm_text: str) -> set[str]:
-    found: set[str] = set()
-    for m in _PRICE_RX.finditer(norm_text):
-        amount = (m.group(1) or m.group(2)).replace(",", ".")
-        found.add(f"{amount} EUR")
-    return found
-
-
 # ── batch number ──────────────────────────────────────────────────────────────
 
 # Explicit lot key, then the identifier (must contain a digit, length >= 3). Runs
@@ -181,7 +164,6 @@ def extract_interim_fields(full_text: str) -> tuple[InterimField, ...]:
         "expiry_date": _dates_after_keys(norm, _EXPIRY_KEYS),
         "packaging_date": _dates_after_keys(norm, _PACKAGING_KEYS),
         "storage_temperature": _temperatures(norm),
-        "price": _prices(norm),
         "batch_number": _batches(full_text),
     }
     return tuple(

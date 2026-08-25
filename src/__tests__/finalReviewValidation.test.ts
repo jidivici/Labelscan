@@ -7,7 +7,7 @@ describe('validateFinalReviewValues', () => {
       packaging_date: '2026-08',
       production_method: 'wild_caught',
       gtin: '3017620422003',
-      price: 'NC',
+      weight: 'NC',
     })).toEqual([]);
   });
 
@@ -17,13 +17,13 @@ describe('validateFinalReviewValues', () => {
       packaging_date: '2026-02-31',
       production_method: 'Pêche sauvage',
       gtin: '1234567',
-      price: '  ',
+      weight: '  ',
     })).toEqual(expect.arrayContaining([
       expect.objectContaining({ fieldName: 'expiry_date' }),
       expect.objectContaining({ fieldName: 'packaging_date' }),
       expect.objectContaining({ fieldName: 'production_method' }),
       expect.objectContaining({ fieldName: 'gtin' }),
-      expect.objectContaining({ fieldName: 'price' }),
+      expect.objectContaining({ fieldName: 'weight' }),
     ]));
   });
 

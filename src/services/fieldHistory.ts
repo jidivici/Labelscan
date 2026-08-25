@@ -2,7 +2,7 @@
  * fieldHistory — per-field autocomplete from the operator's OWN history (workflow v2.1).
  *
  * A criée re-enters the same species, producers and FAO areas day after day; with the
- * 17/17 save gate, retyping them is the main drag toward validation. This module builds,
+ * complete-profile save gate, retyping them is the main drag toward validation. This module builds,
  * from the SAVED articles (validated truth — never machine guesses), a per-field ranked
  * value list, and suggests up to 3 completions for the field being typed.
  *
@@ -19,7 +19,7 @@ import type { Article } from '../types/Article';
 
 /**
  * The fields whose values recur across arrivages. Excluded: batch/dates/gtin (unique
- * per lot), weight/temperature/price (affix inputs, per-lot numerics), allergens
+ * per lot), weight/temperature (affix inputs, per-lot numerics), allergens
  * (dedicated compliance suggestion).
  */
 export const HISTORY_FIELDS: readonly string[] = [

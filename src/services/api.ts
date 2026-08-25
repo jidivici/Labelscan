@@ -381,7 +381,7 @@ export interface FinalizeReviewResponse {
   replayed: boolean;
 }
 
-/** Persist all 17 final values and confirmation in one idempotent server commit. */
+/** Persist the complete versioned profile and confirmation in one idempotent server commit. */
 export function finalizeReview(
   ingestionId: string,
   fields: Record<string, string | null>,

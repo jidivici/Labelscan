@@ -47,7 +47,7 @@ via l’outbox. Les adaptateurs de stockage partagés vivent dans `platform`.
 2. L’extraction crée des runs et champs append-only.
 3. La validation mobile enregistre d’abord une opération locale
    `finalize_review`.
-4. `POST /v1/ingestions/{id}/reviews` écrit les 17 champs, confirme
+4. `POST /v1/ingestions/{id}/reviews` écrit le profil V2 complet (16 champs en poissonnerie), confirme
    l’ingestion et publie `review.finalized` dans une transaction unique.
 5. La clé d’idempotence est liée au SHA-256 canonique de la requête. Un rejeu
    identique retourne le même run ; une réutilisation différente retourne

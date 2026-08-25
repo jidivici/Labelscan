@@ -1,13 +1,13 @@
 /**
- * CompletenessGauge — compact circular gauge showing the running n/17 field score.
+ * CompletenessGauge — compact circular gauge showing the profile field score.
  *
  * A ring whose interior fills with an animated WATER LEVEL as fields land (OCR + LLM);
- * the `n/17` score sits in the center. While `loading` the level gently waves (a sober
+ * the `n/total` score sits in the center. While `loading` the level gently waves (a sober
  * "still working" cue — never a spinner); when loading ends it settles at the final
  * ratio. Lives in a home "En cours" card's trailing slot; the whole card is tappable
  * (including while extracting), so the gauge doubles as an "open the review" affordance.
  *
- * One accent color, no percentages beyond /17, no confidence — sober by design.
+ * One accent color, no percentage and no confidence — sober by design.
  */
 
 import React, { useEffect, useMemo, useRef } from 'react';
@@ -19,7 +19,7 @@ import { colors, typography } from '../theme';
 export interface CompletenessGaugeProps {
   /** Number of canonical fields already filled (0..CANONICAL_FIELD_COUNT). */
   filled: number;
-  /** Profile-specific denominator (17 poissonnerie, 22 other V1 profiles). */
+  /** Profile-specific V2 denominator (16 poissonnerie, 21 for the other profiles). */
   total?: number;
   /** While the extraction is still running the water level gently waves. */
   loading?: boolean;

@@ -4,7 +4,7 @@
  * Reads in the SAME field order as the registration screen (services/fieldOrder.ts) so the
  * app is consistent end-to-end. Sober identity header (lot + when/who), then a modern card
  * list of every field. Fields are editable IN PLACE (pencil → edit state) — workflow v1:
- * ALL 17 fields, including GS1-exact ones (lot/DLC/weight/GTIN/packaging); the operator
+ * All active profile fields, including GS1-exact ones (lot/DLC/weight/GTIN/packaging); the operator
  * stays in charge. Saving an edit writes the human override to the authoritative
  * backend (source='human', force_gs1 tagged automatically for barcode-derived fields),
  * then refreshes the shared catalogue.
@@ -48,8 +48,6 @@ import {
   parseTemp,
   formatTemp,
   validateTempRange,
-  parsePrice,
-  formatPrice,
 } from '../services/inputMasks';
 import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
 import { queryClient } from '../services/queryClient';
@@ -85,7 +83,6 @@ const FIELD_ICON: Record<string, IconName> = {
   storage_temperature: 'thermometer',
   weight: 'scale-balance',
   allergens: 'alert-circle-outline',
-  price: 'currency-eur',
   gtin: 'barcode',
   animal_species: 'cow',
   animal_category: 'shape-outline',
@@ -121,11 +118,18 @@ const LONG_FORM_FIELDS = new Set([
 ]);
 
 const FIELD_GROUP_ICON: Record<string, IconName> = {
-  identity: 'food-variant',
-  provenance: 'map-marker-radius-outline',
+  identification: 'food-variant',
+  'fishing-origin': 'map-marker-radius-outline',
+  'meat-identification': 'cow',
+  'meat-origin': 'map-marker-radius-outline',
+  'prepared-product': 'food-outline',
+  'prepared-composition': 'format-list-bulleted',
+  'prepared-conservation': 'clipboard-check-outline',
+  'prepared-traceability': 'shield-check-outline',
   traceability: 'shield-check-outline',
-  haccp: 'clipboard-check-outline',
-  commercial: 'scale-balance',
+  conservation: 'clipboard-check-outline',
+  'prepared-commercial': 'scale-balance',
+  historical: 'history',
   other: 'dots-horizontal-circle-outline',
 };
 
@@ -141,7 +145,7 @@ interface DisplayFieldGroup {
 
 /** Group saved fields by shared business logic; unexpected legacy fields stay visible. */
 function groupFields(fields: ArticleField[], fieldGroups: readonly FieldGroup[]): DisplayFieldGroup[] {
-  const byName = new Map(fields.map((f) => [f.field_name, f]));
+  const byName = new Map(fields.filter((field) => field.field_name !== 'price').map((f) => [f.field_name, f]));
   const groups: DisplayFieldGroup[] = [];
 
   for (const group of fieldGroups) {
@@ -156,6 +160,18 @@ function groupFields(fields: ArticleField[], fieldGroups: readonly FieldGroup[])
     if (groupItems.length > 0) {
       groups.push({ id: group.id, title: group.title, fields: groupItems });
     }
+  }
+
+  const historicalFields = ['product_name', 'supplier_name']
+    .map((name) => byName.get(name))
+    .filter((field): field is ArticleField => field != null);
+  for (const field of historicalFields) byName.delete(field.field_name);
+  if (historicalFields.length > 0) {
+    groups.push({
+      id: 'historical',
+      title: 'Informations historiques',
+      fields: historicalFields,
+    });
   }
 
   const extraFields = [...byName.values()];
@@ -208,30 +224,6 @@ function TempRangeEditor({ draft, onChange }: { draft: string; onChange: (t: str
   );
 }
 
-function PriceEditor({ draft, onChange }: { draft: string; onChange: (t: string) => void }) {
-  const seed = parsePrice(draft);
-  const [amount, setAmount] = useState(seed.amount);
-  const currency = seed.currency;
-  return (
-    <View style={styles.affixRow}>
-      <TextInput
-        value={amount}
-        onChangeText={(t) => {
-          const v = t.replace(/[^0-9.,]/g, '');
-          setAmount(v);
-          onChange(formatPrice(v, currency));
-        }}
-        keyboardType="decimal-pad"
-        placeholder="0.00"
-        placeholderTextColor={colors.onSurfaceVariant}
-        style={[typography.bodyLarge, styles.editInput, styles.affixInput]}
-        accessibilityLabel="Prix"
-      />
-      <Text style={[typography.labelLarge, styles.affixUnit]}>{currency === 'EUR' ? '€' : currency}</Text>
-    </View>
-  );
-}
-
 function FieldCard({
   field,
   editing,
@@ -264,8 +256,6 @@ function FieldCard({
         {editable ? (
           name === 'storage_temperature' ? (
             <TempRangeEditor draft={draft} onChange={emit} />
-          ) : name === 'price' ? (
-            <PriceEditor draft={draft} onChange={emit} />
           ) : (
             <TextInput
               value={draft}

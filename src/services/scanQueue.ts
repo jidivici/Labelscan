@@ -82,7 +82,7 @@ export interface PendingScan {
   /**
    * Persisted review draft (workflow v2 — "session"): the operator's per-field edits,
    * keyed by field_name. Saved when leaving the Review screen so a partially-filled
-   * arrivage survives navigating away; the scan stays "en cours" until all 17 fields
+   * arrivage survives navigating away; the scan stays "en cours" until all profile fields
    * are filled and it is validated (then completeScan drops it). Undefined = untouched.
    */
   edits?: Record<string, string>;
