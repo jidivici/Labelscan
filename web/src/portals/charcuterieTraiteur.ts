@@ -1,4 +1,4 @@
-import { COMMON_IDENTIFICATION_SECTION } from './shared';
+import { COMMON_COMMERCIAL_SECTION } from './shared';
 import type { PortalDefinition } from './types';
 
 export const charcuterieTraiteurPortal = {
@@ -10,14 +10,15 @@ export const charcuterieTraiteurPortal = {
   initials: 'CT',
   featureFlag: 'portal.charcuterie-traiteur',
   detailSections: [
-    COMMON_IDENTIFICATION_SECTION,
     {
-      id: 'prepared-product',
-      title: 'Famille et fabrication',
+      id: 'identification',
+      title: 'Identification du produit',
       fields: [
+        { key: 'commercial_designation', label: 'Désignation commerciale' },
         { key: 'product_family', label: 'Famille : charcuterie ou traiteur' },
         { key: 'manufacturer_name', label: 'Fabricant' },
-        { key: 'preparation_date', label: 'Date de préparation', format: 'date' },
+        { key: 'producer_name', label: 'Producteur' },
+        { key: 'reseller_brand', label: 'Fournisseur / marque' },
       ],
     },
     {
@@ -32,32 +33,28 @@ export const charcuterieTraiteurPortal = {
       ],
     },
     {
-      id: 'prepared-conservation',
-      title: 'Conditionnement et conservation',
-      fields: [
-        { key: 'conditioning_type', label: 'Conditionnement' },
-        { key: 'storage_mode', label: 'Chaîne de conservation' },
-        { key: 'storage_temperature', label: 'Température de conservation', format: 'temperature' },
-        { key: 'packaging_date', label: 'Date de conditionnement', format: 'date' },
-        { key: 'expiry_date', label: 'DLC / DDM', format: 'date' },
-      ],
-    },
-    {
-      id: 'prepared-traceability',
+      id: 'traceability',
       title: 'Traçabilité sanitaire',
       fields: [
         { key: 'batch_number', label: 'Numéro de lot' },
         { key: 'origin_country', label: 'Pays d’origine' },
         { key: 'health_mark', label: 'Estampille sanitaire' },
+        { key: 'gtin', label: 'Code-barres (GTIN)' },
       ],
     },
     {
-      id: 'prepared-commercial',
-      title: 'Données commerciales',
+      id: 'dates-conservation',
+      title: 'Dates, conditionnement et conservation',
       fields: [
-        { key: 'weight', label: 'Poids' },
+        { key: 'preparation_date', label: 'Date de préparation', format: 'date' },
+        { key: 'packaging_date', label: 'Date de conditionnement', format: 'date' },
+        { key: 'expiry_date', label: 'DLC / DDM', format: 'date' },
+        { key: 'conditioning_type', label: 'Conditionnement' },
+        { key: 'storage_mode', label: 'Chaîne de conservation' },
+        { key: 'storage_temperature', label: 'Température de conservation', format: 'temperature' },
       ],
     },
+    COMMON_COMMERCIAL_SECTION,
   ],
   fieldFilters: [
     {

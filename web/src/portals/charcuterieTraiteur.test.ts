@@ -6,26 +6,26 @@ import { charcuterieTraiteurPortal } from './charcuterieTraiteur';
 
 const PROFILE_FIELDS = [
   'commercial_designation',
-  'producer_name',
-  'reseller_brand',
-  'batch_number',
-  'origin_country',
-  'expiry_date',
-  'packaging_date',
-  'storage_temperature',
-  'allergens',
-  'health_mark',
-  'weight',
-  'gtin',
   'product_family',
   'manufacturer_name',
+  'producer_name',
+  'reseller_brand',
   'ingredients',
   'additives',
-  'preparation_date',
-  'conditioning_type',
-  'storage_mode',
+  'allergens',
   'use_instructions',
   'reheating_instructions',
+  'batch_number',
+  'origin_country',
+  'health_mark',
+  'gtin',
+  'preparation_date',
+  'packaging_date',
+  'expiry_date',
+  'conditioning_type',
+  'storage_mode',
+  'storage_temperature',
+  'weight',
 ] as const;
 
 const PORTAL_FILTER_FIELDS = [
@@ -48,7 +48,7 @@ describe('charcuterieTraiteurPortal', () => {
 
     expect(configuredFields).toHaveLength(21);
     expect(new Set(configuredFields).size).toBe(21);
-    expect([...configuredFields].sort()).toEqual([...PROFILE_FIELDS].sort());
+    expect(configuredFields).toEqual(PROFILE_FIELDS);
   });
 
   it('offers the professional server filters without duplicating common supplier or DLC controls', () => {

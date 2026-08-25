@@ -1,4 +1,8 @@
-import { COMMON_CONSERVATION_SECTION, COMMON_IDENTIFICATION_SECTION, COMMON_TRACEABILITY_SECTION } from './shared';
+import {
+  COMMON_COMMERCIAL_SECTION,
+  COMMON_DATES_CONSERVATION_SECTION,
+  COMMON_TRACEABILITY_SECTION,
+} from './shared';
 import type { PortalDefinition } from './types';
 
 export const poissonneriePortal = {
@@ -10,19 +14,29 @@ export const poissonneriePortal = {
   initials: 'PO',
   featureFlag: 'portal.poissonnerie',
   detailSections: [
-    COMMON_IDENTIFICATION_SECTION,
+    {
+      id: 'identification',
+      title: 'Identification du produit',
+      fields: [
+        { key: 'commercial_designation', label: 'Désignation commerciale' },
+        { key: 'scientific_name', label: 'Nom scientifique' },
+        { key: 'producer_name', label: 'Producteur' },
+        { key: 'reseller_brand', label: 'Fournisseur / marque' },
+      ],
+    },
     {
       id: 'fishing-origin',
       title: 'Provenance et production',
       fields: [
-        { key: 'scientific_name', label: 'Nom scientifique' },
+        { key: 'origin_country', label: 'Pays d’origine' },
         { key: 'FAO_area', label: 'Zone FAO' },
         { key: 'production_method', label: 'Mode de production', format: 'production_method' },
         { key: 'fishing_gear_or_farming_method', label: 'Engin de pêche / élevage' },
       ],
     },
     COMMON_TRACEABILITY_SECTION,
-    COMMON_CONSERVATION_SECTION,
+    COMMON_DATES_CONSERVATION_SECTION,
+    COMMON_COMMERCIAL_SECTION,
     {
       id: 'historical-data',
       title: 'Informations historiques',
