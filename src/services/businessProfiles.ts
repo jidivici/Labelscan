@@ -12,15 +12,11 @@ export interface FieldGroup {
   id:
     | 'identification'
     | 'fishing-origin'
-    | 'meat-identification'
     | 'meat-origin'
-    | 'prepared-product'
     | 'prepared-composition'
-    | 'prepared-conservation'
-    | 'prepared-traceability'
     | 'traceability'
-    | 'conservation'
-    | 'prepared-commercial';
+    | 'dates-conservation'
+    | 'commercial';
   title: string;
   fields: readonly string[];
 }
@@ -58,22 +54,27 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
       {
         id: 'identification',
         title: 'Identification du produit',
-        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
+        fields: ['commercial_designation', 'scientific_name', 'producer_name', 'reseller_brand'],
       },
       {
         id: 'fishing-origin',
         title: 'Provenance et production',
-        fields: ['scientific_name', 'FAO_area', 'production_method', 'fishing_gear_or_farming_method'],
+        fields: ['origin_country', 'FAO_area', 'production_method', 'fishing_gear_or_farming_method'],
       },
       {
         id: 'traceability',
         title: 'Traçabilité réglementaire',
-        fields: ['batch_number', 'origin_country', 'health_mark', 'packaging_date', 'expiry_date'],
+        fields: ['batch_number', 'health_mark', 'gtin'],
       },
       {
-        id: 'conservation',
-        title: 'Conservation et données commerciales',
-        fields: ['storage_temperature', 'allergens', 'weight'],
+        id: 'dates-conservation',
+        title: 'Dates et conservation',
+        fields: ['packaging_date', 'expiry_date', 'storage_temperature', 'allergens'],
+      },
+      {
+        id: 'commercial',
+        title: 'Données commerciales',
+        fields: ['weight'],
       },
     ],
     ['scientific_name', 'expiry_date', 'production_method'],
@@ -85,34 +86,46 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
       {
         id: 'identification',
         title: 'Identification du produit',
-        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
-      },
-      {
-        id: 'meat-identification',
-        title: 'Animal et découpe',
-        fields: ['animal_species', 'animal_category', 'cut_name'],
+        fields: [
+          'commercial_designation',
+          'animal_species',
+          'animal_category',
+          'cut_name',
+          'producer_name',
+          'reseller_brand',
+        ],
       },
       {
         id: 'meat-origin',
-        title: 'Élevage, abattage et transformation',
+        title: 'Origine et parcours de l’animal',
         fields: [
+          'origin_country',
           'birth_country',
           'rearing_country',
           'slaughter_country',
           'cutting_country',
-          'slaughterhouse_approval',
-          'cutting_plant_approval',
         ],
       },
       {
         id: 'traceability',
         title: 'Traçabilité réglementaire',
-        fields: ['batch_number', 'origin_country', 'health_mark', 'packaging_date', 'expiry_date'],
+        fields: [
+          'batch_number',
+          'health_mark',
+          'slaughterhouse_approval',
+          'cutting_plant_approval',
+          'gtin',
+        ],
       },
       {
-        id: 'conservation',
-        title: 'Conservation et données commerciales',
-        fields: ['storage_temperature', 'allergens', 'weight'],
+        id: 'dates-conservation',
+        title: 'Dates et conservation',
+        fields: ['packaging_date', 'expiry_date', 'storage_temperature', 'allergens'],
+      },
+      {
+        id: 'commercial',
+        title: 'Données commerciales',
+        fields: ['weight'],
       },
     ],
     ['animal_species', 'cut_name', 'expiry_date'],
@@ -124,12 +137,13 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
       {
         id: 'identification',
         title: 'Identification du produit',
-        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
-      },
-      {
-        id: 'prepared-product',
-        title: 'Famille et fabrication',
-        fields: ['product_family', 'manufacturer_name', 'preparation_date'],
+        fields: [
+          'commercial_designation',
+          'product_family',
+          'manufacturer_name',
+          'producer_name',
+          'reseller_brand',
+        ],
       },
       {
         id: 'prepared-composition',
@@ -137,23 +151,24 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
         fields: ['ingredients', 'additives', 'allergens', 'use_instructions', 'reheating_instructions'],
       },
       {
-        id: 'prepared-conservation',
-        title: 'Conditionnement et conservation',
+        id: 'traceability',
+        title: 'Traçabilité sanitaire',
+        fields: ['batch_number', 'origin_country', 'health_mark', 'gtin'],
+      },
+      {
+        id: 'dates-conservation',
+        title: 'Dates, conditionnement et conservation',
         fields: [
+          'preparation_date',
+          'packaging_date',
+          'expiry_date',
           'conditioning_type',
           'storage_mode',
           'storage_temperature',
-          'packaging_date',
-          'expiry_date',
         ],
       },
       {
-        id: 'prepared-traceability',
-        title: 'Traçabilité sanitaire',
-        fields: ['batch_number', 'origin_country', 'health_mark'],
-      },
-      {
-        id: 'prepared-commercial',
+        id: 'commercial',
         title: 'Données commerciales',
         fields: ['weight'],
       },

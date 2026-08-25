@@ -120,15 +120,11 @@ const LONG_FORM_FIELDS = new Set([
 const FIELD_GROUP_ICON: Record<string, IconName> = {
   identification: 'food-variant',
   'fishing-origin': 'map-marker-radius-outline',
-  'meat-identification': 'cow',
   'meat-origin': 'map-marker-radius-outline',
-  'prepared-product': 'food-outline',
   'prepared-composition': 'format-list-bulleted',
-  'prepared-conservation': 'clipboard-check-outline',
-  'prepared-traceability': 'shield-check-outline',
   traceability: 'shield-check-outline',
-  conservation: 'clipboard-check-outline',
-  'prepared-commercial': 'scale-balance',
+  'dates-conservation': 'clipboard-check-outline',
+  commercial: 'scale-balance',
   historical: 'history',
   other: 'dots-horizontal-circle-outline',
 };

@@ -27,22 +27,27 @@ describe('V2 business profiles', () => {
       {
         id: 'identification',
         title: 'Identification du produit',
-        fields: ['commercial_designation', 'producer_name', 'reseller_brand', 'gtin'],
+        fields: ['commercial_designation', 'scientific_name', 'producer_name', 'reseller_brand'],
       },
       {
         id: 'fishing-origin',
         title: 'Provenance et production',
-        fields: ['scientific_name', 'FAO_area', 'production_method', 'fishing_gear_or_farming_method'],
+        fields: ['origin_country', 'FAO_area', 'production_method', 'fishing_gear_or_farming_method'],
       },
       {
         id: 'traceability',
         title: 'Traçabilité réglementaire',
-        fields: ['batch_number', 'origin_country', 'health_mark', 'packaging_date', 'expiry_date'],
+        fields: ['batch_number', 'health_mark', 'gtin'],
       },
       {
-        id: 'conservation',
-        title: 'Conservation et données commerciales',
-        fields: ['storage_temperature', 'allergens', 'weight'],
+        id: 'dates-conservation',
+        title: 'Dates et conservation',
+        fields: ['packaging_date', 'expiry_date', 'storage_temperature', 'allergens'],
+      },
+      {
+        id: 'commercial',
+        title: 'Données commerciales',
+        fields: ['weight'],
       },
     ]);
   });

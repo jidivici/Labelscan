@@ -31,6 +31,30 @@ const BOUCHERIE_FIELDS = [
   'cutting_plant_approval',
 ] as const;
 
+const ORDERED_FIELDS = [
+  'commercial_designation',
+  'animal_species',
+  'animal_category',
+  'cut_name',
+  'producer_name',
+  'reseller_brand',
+  'origin_country',
+  'birth_country',
+  'rearing_country',
+  'slaughter_country',
+  'cutting_country',
+  'batch_number',
+  'health_mark',
+  'slaughterhouse_approval',
+  'cutting_plant_approval',
+  'gtin',
+  'packaging_date',
+  'expiry_date',
+  'storage_temperature',
+  'allergens',
+  'weight',
+] as const;
+
 const BOUCHERIE_FILTERS = [
   'animal_species',
   'animal_category',
@@ -57,6 +81,7 @@ describe('boucherie portal', () => {
 
     expect(fields).toHaveLength(21);
     expect(new Set(fields).size).toBe(21);
+    expect(fields).toEqual(ORDERED_FIELDS);
     expect(new Set(fields)).toEqual(new Set([...COMMON_FIELDS, ...BOUCHERIE_FIELDS]));
     expect(fields).not.toEqual(expect.arrayContaining([...POISSONNERIE_FIELDS]));
   });
