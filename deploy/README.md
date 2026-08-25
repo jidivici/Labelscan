@@ -35,6 +35,9 @@ database hostname `db` and the exact mounted image path `/app/data/raw`.
 The Hostinger deployment script backs up both PostgreSQL and the raw-image volume before
 installing this contract. Demo seed data and images are preserved during normal updates;
 they are replaced only when the separately guarded `--reset-demo` option is used.
+That one-shot reset service receives the migration-owner database secret because it must
+recreate projections and seed identities after the database replacement; API and worker
+containers continue to receive only the restricted runtime secret.
 
 Before the first hardened release, the script separates the historical PostgreSQL role.
 When `labelscan_app` is PostgreSQL's immutable bootstrap superuser, that internal role is
