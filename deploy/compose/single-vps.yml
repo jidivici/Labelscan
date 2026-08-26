@@ -32,11 +32,6 @@ x-app: &app
 services:
   db:
     image: labelscan-postgres:${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
-    build:
-      context: /opt/labelscan/source
-      dockerfile: deploy/postgres/Dockerfile
-      args:
-        LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
     user: "70:70"
     restart: unless-stopped
     read_only: true
@@ -66,11 +61,6 @@ services:
 
   migrate:
     <<: *app
-    build:
-      context: /opt/labelscan/source
-      dockerfile: server/Dockerfile
-      args:
-        LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
     environment:
       DATABASE_URL_FILE: /run/secrets/database_admin_url
     secrets: [database_admin_url]
@@ -163,11 +153,6 @@ services:
 
   caddy:
     image: labelscan-caddy:${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
-    build:
-      context: /opt/labelscan/source
-      dockerfile: deploy/caddy/Dockerfile
-      args:
-        LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
     user: "10002:10002"
     restart: unless-stopped
     ports:

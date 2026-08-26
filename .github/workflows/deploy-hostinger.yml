@@ -128,7 +128,10 @@ jobs:
             -v "$GITHUB_WORKSPACE/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" \
             "labelscan-caddy:${GITHUB_SHA}" \
             validate --config /etc/caddy/Caddyfile --adapter caddyfile
-          LABELSCAN_VERSION="$GITHUB_SHA" docker compose -f deploy/compose/single-vps.yml config --quiet
+          LABELSCAN_VERSION="$GITHUB_SHA" docker compose \
+            -f deploy/compose/single-vps.yml \
+            -f deploy/compose/single-vps.build.yml \
+            config --quiet
           bash -n deploy/hostinger/deploy.sh
 
   deploy:
