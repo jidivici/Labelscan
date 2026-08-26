@@ -13,6 +13,7 @@ readonly TARGET_VOLUME="labelscan-pg-target-${suffix}"
 readonly TEST_PASSWORD="temporary-compatibility-test-only"
 readonly TEST_ADMIN="labelscan_db_admin"
 readonly TEST_RUNTIME="labelscan_app"
+readonly TEST_AUDITOR="labelscan_auditor"
 
 cleanup() {
   docker rm -f "$SOURCE_CONTAINER" "$TARGET_CONTAINER" >/dev/null 2>&1 || true
@@ -62,9 +63,10 @@ wait_for_postgres "$SOURCE_CONTAINER"
 
 docker exec "$SOURCE_CONTAINER" psql -U "$TEST_ADMIN" -d compatibility -v ON_ERROR_STOP=1 \
   -c "CREATE ROLE ${TEST_RUNTIME} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;" \
+  -c "CREATE ROLE ${TEST_AUDITOR} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS;" \
   -c 'CREATE TABLE compatibility_probe (id integer PRIMARY KEY, payload text NOT NULL);' \
   -c "INSERT INTO compatibility_probe VALUES (1, 'étiquette sûre');" \
-  -c "GRANT SELECT ON compatibility_probe TO ${TEST_RUNTIME};" >/dev/null
+  -c "GRANT SELECT ON compatibility_probe TO ${TEST_RUNTIME}, ${TEST_AUDITOR};" >/dev/null
 source_counts="$(capture_row_counts "$SOURCE_CONTAINER")"
 
 docker run -d --name "$TARGET_CONTAINER" \
@@ -76,6 +78,8 @@ docker run -d --name "$TARGET_CONTAINER" \
 wait_for_postgres "$TARGET_CONTAINER"
 
 printf '%s\n' \
+  "SELECT 'CREATE ROLE ${TEST_AUDITOR} NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TEST_AUDITOR}');" \
+  '\gexec' \
   "SELECT format('CREATE ROLE ${TEST_RUNTIME} LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD %L', :'app_password') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${TEST_RUNTIME}');" \
   '\gexec' \
   "ALTER ROLE ${TEST_RUNTIME} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'app_password';" \

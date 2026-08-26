@@ -323,12 +323,14 @@ migrate_postgres_to_hardened_volume() {
     || die "runtime database password has an unexpected format"
 
   printf '%s\n' \
+    "SELECT 'CREATE ROLE labelscan_auditor NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'labelscan_auditor');" \
+    '\gexec' \
     "SELECT format('CREATE ROLE labelscan_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD %L', :'app_password') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'labelscan_app');" \
     '\gexec' \
     "ALTER ROLE labelscan_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'app_password';" \
     | docker compose -f "$COMPOSE_FILE" exec -T db \
         psql -U labelscan_db_admin -d labelscan -v ON_ERROR_STOP=1 \
-          -v "app_password=${runtime_password}"
+          -v "app_password=${runtime_password}" >/dev/null
 
   docker compose -f "$COMPOSE_FILE" exec -T db \
     pg_restore -U labelscan_db_admin -d labelscan \
