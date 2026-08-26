@@ -491,7 +491,8 @@ docker run --rm --network none --user 10002:10002 --read-only \
 
 printf '==> Assigning Caddy state volumes to its non-root runtime identity\n'
 docker compose -f "$COMPOSE_FILE" stop caddy
-docker compose -f "$COMPOSE_FILE" run --rm --no-deps --user 0:0 --cap-add CHOWN \
+docker compose -f "$COMPOSE_FILE" run --rm --no-deps --user 0:0 \
+  --cap-add CHOWN --cap-add DAC_OVERRIDE \
   --entrypoint /bin/sh caddy -c 'chown -R 10002:10002 /data /config'
 
 prepare_consistent_hardened_migration_backup
