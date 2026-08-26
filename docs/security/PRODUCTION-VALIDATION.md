@@ -42,18 +42,10 @@ contrôle de santé et l'intégralité de `npm run security:production`.
 
 ## Dépendances npm
 
-L'audit du mobile signale **9 vulnérabilités élevées** dans les outils de
-compilation Expo/Metro (`image-size` et `postcss`). Elles ne sont pas exécutées dans
-l'application Android livrée et ne traitent, pendant le build, que les ressources
-contrôlées du dépôt. Les avis connus sont documentés dans
-`security/npm-audit-allowlist.json`, avec responsable, justification et expiration au
-**2 septembre 2026**. Le contrôle CI refuse automatiquement tout nouvel avis élevé ou
-critique, ainsi que toute exception expirée.
-
-Le correctif proposé par npm force Expo 57 et casserait la contrainte Expo SDK 54 : il
-n'est donc pas appliqué sans migration testée. La dépendance directe `uuid` a en
-revanche été mise à jour vers sa version corrigée. Le portail web affiche
-**0 vulnérabilité**.
+L'audit npm du mobile et celui du portail web exigent **0 vulnérabilité**, sans
+exception temporaire. Expo reste épinglé au SDK 54 : les dépendances transitives
+vulnérables sont remplacées par des versions corrigées compatibles et verrouillées
+dans `package-lock.json`.
 
 ## Preuves de mise en production
 

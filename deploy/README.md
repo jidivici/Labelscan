@@ -47,3 +47,22 @@ URLs are distinct root-only files. Legacy provider keys are split into worker-on
 files, the JWT signing key is rotated once, and known demo-account passwords are replaced
 once without reseeding or deleting the demo images/arrivals. Rotation details are in
 `docs/security/SECRET-ROTATION.md`.
+
+The single-VPS profile now uses three distinct Docker networks: Caddy can reach only the
+API on `edge`, PostgreSQL remains on the internal `backend` network, and workers obtain
+outbound provider access through `egress`. Caddy's reviewed configuration lives in
+`deploy/caddy/Caddyfile`; the deployment installs it verbatim, validates it under the
+same reduced capabilities as production, rejects unknown HTTP hosts, and enforces an
+11 MiB multipart envelope limit for the application's 10 MiB image limit.
+
+Application images are tagged with the exact 40-character Git commit and carry the same
+revision as an OCI label. The deployment refuses a dirty checkout, a mismatching image
+label, a downgraded backoffice redirect, duplicate security headers, or an oversized
+anonymous upload. The production workflow reruns mobile, web, browser, backend,
+migration, dependency-audit, image-build, Compose and Caddy gates before the VPS runner
+is allowed to deploy that revision.
+
+The SSH and fail2ban policies applied to the VPS are versioned in
+`deploy/hostinger/sshd-hardening.conf` and
+`deploy/hostinger/fail2ban-labelscan.conf`. SSH accepts public keys only; root
+password login, forwarding, tunnelling, and X11 forwarding are disabled.

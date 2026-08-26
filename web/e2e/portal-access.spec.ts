@@ -144,7 +144,7 @@ test('admin can aggregate every profession and use the HBntory-style arrival car
   await expect(page.getByText(/Complétude/)).toHaveCount(0);
   await expect(page.getByText('Marion Poisson')).toBeVisible();
   await expect(page.getByText(/Révision/)).toHaveCount(0);
-  await expect(page.getByText('étiquette · Validé')).toBeVisible();
+  await expect(page.getByText('Poissonnerie · produit enregistré')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page).toHaveURL(/\/portails\/tous\/arrivages$/);
   await expect(page.locator('.arrival-card')).toHaveCount(1);
@@ -203,6 +203,7 @@ test('super-admin can see administrators and the single combined Charcuterie–T
   await expect(professionMenu.getByRole('option', { name: /^Traiteur$/ })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(professionMenu).toHaveCount(0);
+  await openSidebarIfNeeded(page);
   await page.getByRole('button', { name: /^Magasin/ }).click();
   await expect(page.getByRole('listbox', { name: 'Magasin' })).toBeVisible();
   await expect(page.locator('.scope-selectors select')).toHaveCount(0);

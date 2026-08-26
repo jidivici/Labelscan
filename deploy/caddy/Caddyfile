@@ -1,0 +1,62 @@
+{
+	auto_https disable_redirects
+	admin off
+	servers {
+		timeouts {
+			read_body 30s
+			read_header 10s
+			write 30s
+			idle 2m
+		}
+		max_header_size 32KB
+		strict_sni_host on
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+http://label-scan.fr, http://www.label-scan.fr {
+	redir https://label-scan.fr{uri} permanent
+}
+
+http:// {
+	respond 421
+}
+
+https://www.label-scan.fr {
+	import security_headers
+	redir https://label-scan.fr{uri} permanent
+}
+
+https://label-scan.fr {
+	import security_headers
+	encode zstd gzip
+
+	@root path /
+	redir @root /backoffice/o/labelscan/ permanent
+
+	@backoffice_without_slash path /backoffice
+	redir @backoffice_without_slash /backoffice/ permanent
+
+	# The application accepts a 10 MiB label image. The extra MiB covers the
+	# multipart envelope while rejecting oversized unauthenticated uploads at
+	# the edge before they consume API resources.
+	request_body {
+		max_size 11MiB
+	}
+
+	reverse_proxy api:8000 {
+		# The edge owns these headers on every HTTPS response, including local
+		# redirects. Remove application copies before setting the canonical value.
+		header_down -Strict-Transport-Security
+		header_down -X-Content-Type-Options
+		header_down -Referrer-Policy
+	}
+}
