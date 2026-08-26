@@ -91,4 +91,4 @@ jobs:
       - name: Validate Hostinger single-VPS contract
         env:
           LABELSCAN_VERSION: ci-test-sha
-        run: docker compose -f deploy/compose/single-vps.yml config --quiet
+        run: docker compose -f deploy/compose/single-vps.yml -f deploy/compose/single-vps.build.yml config --quiet

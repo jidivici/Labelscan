@@ -1,0 +1,21 @@
+services:
+  db:
+    build:
+      context: ../..
+      dockerfile: deploy/postgres/Dockerfile
+      args:
+        LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
+
+  migrate:
+    build:
+      context: ../..
+      dockerfile: server/Dockerfile
+      args:
+        LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
+
+  caddy:
+    build:
+      context: ../..
+      dockerfile: deploy/caddy/Dockerfile
+      args:
+        LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}

@@ -8,6 +8,7 @@ readonly CADDY_FILE="${APP_ROOT}/config/Caddyfile"
 readonly ROLLBACK_COMPOSE_FILE="${APP_ROOT}/config/compose.rollback.yml"
 readonly ROLLBACK_CADDY_FILE="${APP_ROOT}/config/Caddyfile.rollback"
 readonly REPOSITORY_COMPOSE="deploy/compose/single-vps.yml"
+readonly REPOSITORY_BUILD_COMPOSE="deploy/compose/single-vps.build.yml"
 readonly REPOSITORY_CADDY="deploy/caddy/Caddyfile"
 readonly BACKUP_ROOT="${APP_ROOT}/backups"
 readonly SECRETS_ROOT="${APP_ROOT}/secrets"
@@ -58,6 +59,7 @@ checkout_head="$(git -c safe.directory="$checkout_root" -C "$checkout_root" rev-
 [[ -f "${checkout_root}/deploy/postgres/Dockerfile" ]] || die "PostgreSQL Dockerfile is missing"
 [[ -f "${checkout_root}/web/package-lock.json" ]] || die "web lockfile is missing"
 [[ -f "${checkout_root}/${REPOSITORY_COMPOSE}" ]] || die "single-VPS Compose file is missing"
+[[ -f "${checkout_root}/${REPOSITORY_BUILD_COMPOSE}" ]] || die "single-VPS build Compose file is missing"
 [[ -f "${checkout_root}/${REPOSITORY_CADDY}" ]] || die "Caddyfile is missing"
 [[ -f "$COMPOSE_FILE" ]] || die "VPS Compose file is missing"
 
@@ -484,7 +486,10 @@ ensure_demo_credentials
 rotate_jwt_once
 
 printf '==> Building the private production images on the VPS\n'
-docker compose -f "${checkout_root}/${REPOSITORY_COMPOSE}" build --pull --no-cache migrate caddy db
+docker compose \
+  -f "${checkout_root}/${REPOSITORY_COMPOSE}" \
+  -f "${checkout_root}/${REPOSITORY_BUILD_COMPOSE}" \
+  build --pull --no-cache migrate caddy db
 for image_name in labelscan-local labelscan-caddy labelscan-postgres; do
   image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
     "${image_name}:${commit_sha}")"
