@@ -24,7 +24,8 @@ wait_for_postgres() {
   local container="$1"
   local attempt
   for attempt in $(seq 1 60); do
-    if docker exec "$container" pg_isready -U "$TEST_ADMIN" -d compatibility >/dev/null 2>&1; then
+    if [[ "$(docker exec "$container" psql -U "$TEST_ADMIN" -d compatibility -Atc \
+      'SELECT 1;' 2>/dev/null || true)" == "1" ]]; then
       return
     fi
     sleep 1
