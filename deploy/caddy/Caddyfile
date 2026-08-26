@@ -22,6 +22,12 @@
 	}
 }
 
+# Container-local health endpoint. It is bound to loopback only and is not
+# published by Compose or reachable from another container.
+http://127.0.0.1:2018 {
+	respond /health 200
+}
+
 http://label-scan.fr, http://www.label-scan.fr {
 	redir https://label-scan.fr{uri} permanent
 }

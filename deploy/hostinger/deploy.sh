@@ -5,6 +5,8 @@ readonly APP_ROOT="/opt/labelscan"
 readonly SOURCE_ROOT="${APP_ROOT}/source"
 readonly COMPOSE_FILE="${APP_ROOT}/config/compose.yml"
 readonly CADDY_FILE="${APP_ROOT}/config/Caddyfile"
+readonly ROLLBACK_COMPOSE_FILE="${APP_ROOT}/config/compose.rollback.yml"
+readonly ROLLBACK_CADDY_FILE="${APP_ROOT}/config/Caddyfile.rollback"
 readonly REPOSITORY_COMPOSE="deploy/compose/single-vps.yml"
 readonly REPOSITORY_CADDY="deploy/caddy/Caddyfile"
 readonly BACKUP_ROOT="${APP_ROOT}/backups"
@@ -13,6 +15,7 @@ readonly APP_SECRET_GID="10001"
 readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v4"
 readonly DEMO_CREDENTIALS_MARKER="${APP_ROOT}/.demo-credentials-secured"
 readonly JWT_ROTATION_MARKER="${APP_ROOT}/.jwt-secret-v2"
+readonly POSTGRES_HARDENED_VOLUME_MARKER="${APP_ROOT}/.postgres-hardened-volume-v1"
 readonly LOCK_FILE="/var/lock/labelscan-deploy.lock"
 readonly HEALTH_URL="https://label-scan.fr/v1/health/ready"
 
@@ -23,6 +26,11 @@ die() {
 
 reset_demo=0
 reset_started=0
+postgres_volume_migrated=0
+consistent_dump_file=""
+consistent_raw_backup_file=""
+source_counts_file=""
+restored_counts_file=""
 case $# in
   2) ;;
   3)
@@ -45,6 +53,8 @@ checkout_head="$(git -c safe.directory="$checkout_root" -C "$checkout_root" rev-
 [[ -z "$(git -c safe.directory="$checkout_root" -C "$checkout_root" status --porcelain --untracked-files=all)" ]] \
   || die "deployment checkout contains changes outside the requested commit"
 [[ -f "${checkout_root}/server/Dockerfile" ]] || die "server Dockerfile is missing"
+[[ -f "${checkout_root}/deploy/caddy/Dockerfile" ]] || die "Caddy Dockerfile is missing"
+[[ -f "${checkout_root}/deploy/postgres/Dockerfile" ]] || die "PostgreSQL Dockerfile is missing"
 [[ -f "${checkout_root}/web/package-lock.json" ]] || die "web lockfile is missing"
 [[ -f "${checkout_root}/${REPOSITORY_COMPOSE}" ]] || die "single-VPS Compose file is missing"
 [[ -f "${checkout_root}/${REPOSITORY_CADDY}" ]] || die "Caddyfile is missing"
@@ -62,15 +72,29 @@ export LABELSCAN_VERSION="$commit_sha"
 exec 9>"$LOCK_FILE"
 flock -n 9 || die "another deployment is already running"
 
-# One-time transition from the former mutable `current` tag: preserve the
-# image that is actually serving the previous recorded revision so rollback
-# remains possible during the first commit-addressed deployment.
-if [[ -n "$previous_version" ]] \
-  && ! docker image inspect "labelscan-local:${previous_version}" >/dev/null 2>&1; then
-  previous_api_container="$(docker compose -f "$COMPOSE_FILE" ps -q api)"
-  [[ -n "$previous_api_container" ]] || die "cannot identify the running API image for rollback"
-  previous_api_image="$(docker inspect --format '{{.Image}}' "$previous_api_container")"
-  docker tag "$previous_api_image" "labelscan-local:${previous_version}"
+# Preserve both the previous contract and the exact images that are serving
+# it. This also makes the one-time transition from upstream Caddy/PostgreSQL
+# images to LabelScan-built images safely reversible.
+install -m 600 "$COMPOSE_FILE" "$ROLLBACK_COMPOSE_FILE"
+if [[ -f "$CADDY_FILE" ]]; then
+  install -m 600 "$CADDY_FILE" "$ROLLBACK_CADDY_FILE"
+fi
+
+preserve_running_image() {
+  local service="$1"
+  local target="$2"
+  local container image
+  docker image inspect "$target" >/dev/null 2>&1 && return
+  container="$(docker compose -f "$COMPOSE_FILE" ps -q "$service")"
+  [[ -n "$container" ]] || die "cannot identify the running ${service} image for rollback"
+  image="$(docker inspect --format '{{.Image}}' "$container")"
+  docker tag "$image" "$target"
+}
+
+if [[ -n "$previous_version" ]]; then
+  preserve_running_image api "labelscan-local:${previous_version}"
+  preserve_running_image caddy "labelscan-caddy:${previous_version}"
+  preserve_running_image db "labelscan-postgres:${previous_version}"
 fi
 
 install -d -m 700 "$BACKUP_ROOT"
@@ -100,6 +124,13 @@ grant_application_secret_access() {
     chown root:"$APP_SECRET_GID" "$target"
     chmod 640 "$target"
   done
+}
+
+grant_database_secret_access() {
+  local target="${SECRETS_ROOT}/db_admin_password"
+  [[ -s "$target" ]] || die "required database secret is missing: ${target}"
+  chown root:70 "$target"
+  chmod 640 "$target"
 }
 
 extract_legacy_secret() {
@@ -282,6 +313,90 @@ reset_demo_data() {
   docker compose -f "$COMPOSE_FILE" run --rm --no-deps demo
 }
 
+migrate_postgres_to_hardened_volume() {
+  local runtime_password
+  [[ -f "$POSTGRES_HARDENED_VOLUME_MARKER" ]] && return
+
+  printf '==> Restoring PostgreSQL into the clean hardened volume\n'
+  runtime_password="$(<"${SECRETS_ROOT}/db_runtime_password")"
+  [[ "$runtime_password" =~ ^[0-9a-f]{96}$ ]] \
+    || die "runtime database password has an unexpected format"
+
+  printf '%s\n' \
+    "SELECT format('CREATE ROLE labelscan_app LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD %L', :'app_password') WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'labelscan_app');" \
+    '\gexec' \
+    "ALTER ROLE labelscan_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION NOBYPASSRLS PASSWORD :'app_password';" \
+    | docker compose -f "$COMPOSE_FILE" exec -T db \
+        psql -U labelscan_db_admin -d labelscan -v ON_ERROR_STOP=1 \
+          -v "app_password=${runtime_password}"
+
+  docker compose -f "$COMPOSE_FILE" exec -T db \
+    pg_restore -U labelscan_db_admin -d labelscan \
+      --clean --if-exists --no-owner --exit-on-error <"$backup_file"
+
+  docker compose -f "$COMPOSE_FILE" exec -T db \
+    psql -U labelscan_db_admin -d labelscan -v ON_ERROR_STOP=1 \
+      -c 'REINDEX DATABASE labelscan;' \
+      -c 'ANALYZE;'
+
+  restored_counts_file="$(mktemp "${BACKUP_ROOT}/.restored-counts.XXXXXX")"
+  capture_database_row_counts "$restored_counts_file"
+  if ! cmp -s "$source_counts_file" "$restored_counts_file"; then
+    diff -u "$source_counts_file" "$restored_counts_file" >&2 || true
+    die "restored PostgreSQL table counts do not match the source database"
+  fi
+  printf '==> Verified restored table counts: %s\n' \
+    "$(sha256sum "$restored_counts_file" | cut -d' ' -f1)"
+  rm -f "$source_counts_file" "$restored_counts_file"
+  source_counts_file=""
+  restored_counts_file=""
+
+  install -m 600 /dev/null "$POSTGRES_HARDENED_VOLUME_MARKER"
+  postgres_volume_migrated=1
+}
+
+capture_database_row_counts() {
+  local target="$1"
+  docker compose -f "$COMPOSE_FILE" exec -T db \
+    psql -X -U labelscan_db_admin -d labelscan -At -F '|' <<'SQL' >"$target"
+SELECT format(
+  'SELECT %L, count(*) FROM %I.%I;',
+  schemaname || '.' || tablename,
+  schemaname,
+  tablename
+)
+FROM pg_tables
+WHERE schemaname NOT IN ('pg_catalog', 'information_schema')
+ORDER BY schemaname, tablename;
+\gexec
+SQL
+  chmod 600 "$target"
+}
+
+prepare_consistent_hardened_migration_backup() {
+  [[ -f "$POSTGRES_HARDENED_VOLUME_MARKER" ]] && return
+
+  printf '==> Quiescing writers for the one-time PostgreSQL volume migration\n'
+  docker compose -f "$COMPOSE_FILE" stop api worker
+
+  consistent_dump_file="$(mktemp "${BACKUP_ROOT}/.consistent-dump.XXXXXX")"
+  docker compose -f "$COMPOSE_FILE" exec -T db \
+    pg_dump -U labelscan_db_admin -d labelscan -Fc >"$consistent_dump_file"
+  chmod 600 "$consistent_dump_file"
+  mv -f "$consistent_dump_file" "$backup_file"
+  consistent_dump_file=""
+
+  consistent_raw_backup_file="$(mktemp "${BACKUP_ROOT}/.consistent-raw.XXXXXX")"
+  docker compose -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint /bin/tar api \
+    -C /app/data/raw -czf - . >"$consistent_raw_backup_file"
+  chmod 600 "$consistent_raw_backup_file"
+  mv -f "$consistent_raw_backup_file" "$raw_backup_file"
+  consistent_raw_backup_file=""
+
+  source_counts_file="$(mktemp "${BACKUP_ROOT}/.source-counts.XXXXXX")"
+  capture_database_row_counts "$source_counts_file"
+}
+
 printf '==> Synchronizing deployable source for %s\n' "$commit_sha"
 install -d -m 700 "$SOURCE_ROOT"
 rsync -a --delete \
@@ -293,6 +408,7 @@ rsync -a --delete \
   --exclude '__pycache__/' \
   --exclude '*.pyc' \
   "${checkout_root}/.dockerignore" \
+  "${checkout_root}/deploy" \
   "${checkout_root}/server" \
   "${checkout_root}/web" \
   "${SOURCE_ROOT}/"
@@ -305,6 +421,18 @@ rollback_image() {
   if [[ -n "${sql_file:-}" && -f "$sql_file" ]]; then
     rm -f "$sql_file"
   fi
+  for temporary in \
+    "$consistent_dump_file" \
+    "$consistent_raw_backup_file" \
+    "$source_counts_file" \
+    "$restored_counts_file"; do
+    if [[ -n "$temporary" && -f "$temporary" ]]; then
+      rm -f "$temporary"
+    fi
+  done
+  if [[ "$postgres_volume_migrated" -eq 1 ]]; then
+    rm -f "$POSTGRES_HARDENED_VOLUME_MARKER"
+  fi
   if [[ "$reset_started" -eq 1 ]]; then
     # A reset replaces both PostgreSQL and raw data. Reverting only the image
     # would combine old code with a new schema/data set; the VPS snapshot is
@@ -314,8 +442,15 @@ rollback_image() {
   fi
   if [[ -n "$previous_version" ]] \
     && docker image inspect "labelscan-local:${previous_version}" >/dev/null 2>&1; then
-    printf '==> Deployment failed; restoring the previous application image\n' >&2
+    printf '==> Deployment failed; restoring the previous production contract\n' >&2
+    install -m 600 "$ROLLBACK_COMPOSE_FILE" "$COMPOSE_FILE"
+    if [[ -f "$ROLLBACK_CADDY_FILE" ]]; then
+      install -m 600 "$ROLLBACK_CADDY_FILE" "$CADDY_FILE"
+    fi
     export LABELSCAN_VERSION="$previous_version"
+    docker compose -f "$COMPOSE_FILE" up -d --no-deps db || true
+    docker compose -f "$COMPOSE_FILE" exec -T db \
+      sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' || true
     docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=2 api worker caddy || true
   fi
   exit "$exit_code"
@@ -326,14 +461,18 @@ ensure_provider_secrets
 ensure_demo_credentials
 rotate_jwt_once
 
-printf '==> Building the private image on the VPS\n'
-docker compose -f "${checkout_root}/${REPOSITORY_COMPOSE}" build migrate
-image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
-  "labelscan-local:${commit_sha}")"
-[[ "$image_revision" == "$commit_sha" ]] || die "built image revision label does not match the requested commit"
+printf '==> Building the private production images on the VPS\n'
+docker compose -f "${checkout_root}/${REPOSITORY_COMPOSE}" build --pull --no-cache migrate caddy db
+for image_name in labelscan-local labelscan-caddy labelscan-postgres; do
+  image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+    "${image_name}:${commit_sha}")"
+  [[ "$image_revision" == "$commit_sha" ]] \
+    || die "${image_name} revision label does not match the requested commit"
+done
 
 printf '==> Separating PostgreSQL owner and runtime roles\n'
 prepare_database_roles
+grant_database_secret_access
 grant_application_secret_access
 
 printf '==> Installing the reviewed single-VPS production contract\n'
@@ -341,15 +480,26 @@ install -m 600 "${checkout_root}/${REPOSITORY_COMPOSE}" "$COMPOSE_FILE"
 install -m 600 "${checkout_root}/${REPOSITORY_CADDY}" "$CADDY_FILE"
 
 printf '==> Validating the reviewed reverse-proxy contract\n'
-docker run --rm --network none \
+docker run --rm --network none --user 10002:10002 --read-only \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=32m \
+  --cap-drop ALL --cap-add NET_BIND_SERVICE --security-opt no-new-privileges \
   -v "${CADDY_FILE}:/etc/caddy/Caddyfile:ro" \
-  caddy:2.11.4@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d \
-  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+  "labelscan-caddy:${commit_sha}" \
+  validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+printf '==> Assigning Caddy state volumes to its non-root runtime identity\n'
+docker compose -f "$COMPOSE_FILE" stop caddy
+docker compose -f "$COMPOSE_FILE" run --rm --no-deps --user 0:0 --cap-add CHOWN \
+  --entrypoint /bin/sh caddy -c 'chown -R 10002:10002 /data /config'
+
+prepare_consistent_hardened_migration_backup
 
 printf '==> Recreating PostgreSQL with the owner-only service identity\n'
 docker compose -f "$COMPOSE_FILE" up -d --no-deps db
 docker compose -f "$COMPOSE_FILE" exec -T db \
   sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done'
+
+migrate_postgres_to_hardened_volume
 
 if [[ "$reset_demo" -eq 1 ]]; then
   reset_demo_data
