@@ -15,7 +15,7 @@ jobs:
         working-directory: server
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16.15@sha256:c1b3783309b6499c795eed7c20135a1a4d25cae1b575c3d52c6f536129a1b109
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -27,8 +27,8 @@ jobs:
     env:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/labelscan_test
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: "3.12"
       - name: Install
@@ -40,6 +40,9 @@ jobs:
         # requirements.lock is a complete, transitively resolved and hashed graph;
         # audit it directly instead of executing pip in a temporary environment.
         run: pip-audit --no-deps --disable-pip -r requirements.lock
+
+      - name: Development dependency audit
+        run: pip-audit --no-deps --disable-pip -r requirements-dev.lock
 
       # G-ARCH — dependency-boundary enforcement (PG-0). Fails the build on any
       # layering / context-independence / domain-purity violation.
@@ -67,7 +70,7 @@ jobs:
   production-artifacts:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Build production image
         run: docker build -f server/Dockerfile -t labelscan:ci .
       - name: Validate production Compose contract

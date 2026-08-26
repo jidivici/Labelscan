@@ -4,7 +4,9 @@ set -Eeuo pipefail
 readonly APP_ROOT="/opt/labelscan"
 readonly SOURCE_ROOT="${APP_ROOT}/source"
 readonly COMPOSE_FILE="${APP_ROOT}/config/compose.yml"
+readonly CADDY_FILE="${APP_ROOT}/config/Caddyfile"
 readonly REPOSITORY_COMPOSE="deploy/compose/single-vps.yml"
+readonly REPOSITORY_CADDY="deploy/caddy/Caddyfile"
 readonly BACKUP_ROOT="${APP_ROOT}/backups"
 readonly SECRETS_ROOT="${APP_ROOT}/secrets"
 readonly APP_SECRET_GID="10001"
@@ -40,15 +42,36 @@ commit_sha="$2"
 checkout_head="$(git -c safe.directory="$checkout_root" -C "$checkout_root" rev-parse --verify HEAD^{commit})" \
   || die "source Git revision cannot be inspected"
 [[ "$checkout_head" == "$commit_sha" ]] || die "checkout does not match requested commit"
+[[ -z "$(git -c safe.directory="$checkout_root" -C "$checkout_root" status --porcelain --untracked-files=all)" ]] \
+  || die "deployment checkout contains changes outside the requested commit"
 [[ -f "${checkout_root}/server/Dockerfile" ]] || die "server Dockerfile is missing"
 [[ -f "${checkout_root}/web/package-lock.json" ]] || die "web lockfile is missing"
 [[ -f "${checkout_root}/${REPOSITORY_COMPOSE}" ]] || die "single-VPS Compose file is missing"
+[[ -f "${checkout_root}/${REPOSITORY_CADDY}" ]] || die "Caddyfile is missing"
 [[ -f "$COMPOSE_FILE" ]] || die "VPS Compose file is missing"
+
+previous_version=""
+if [[ -s "${APP_ROOT}/DEPLOYED_VERSION" ]]; then
+  previous_version="$(awk 'NF >= 2 { print $2; exit }' "${APP_ROOT}/DEPLOYED_VERSION")"
+  [[ -z "$previous_version" || "$previous_version" =~ ^[0-9a-f]{40}$ ]] \
+    || die "previous deployed version marker is invalid"
+fi
 
 export LABELSCAN_VERSION="$commit_sha"
 
 exec 9>"$LOCK_FILE"
 flock -n 9 || die "another deployment is already running"
+
+# One-time transition from the former mutable `current` tag: preserve the
+# image that is actually serving the previous recorded revision so rollback
+# remains possible during the first commit-addressed deployment.
+if [[ -n "$previous_version" ]] \
+  && ! docker image inspect "labelscan-local:${previous_version}" >/dev/null 2>&1; then
+  previous_api_container="$(docker compose -f "$COMPOSE_FILE" ps -q api)"
+  [[ -n "$previous_api_container" ]] || die "cannot identify the running API image for rollback"
+  previous_api_image="$(docker inspect --format '{{.Image}}' "$previous_api_container")"
+  docker tag "$previous_api_image" "labelscan-local:${previous_version}"
+fi
 
 install -d -m 700 "$BACKUP_ROOT"
 install -d -m 700 "$SECRETS_ROOT"
@@ -227,8 +250,8 @@ docker compose -f "$COMPOSE_FILE" exec -T db \
 chmod 600 "$backup_file"
 
 printf '==> Backing up raw label images to %s\n' "$raw_backup_file"
-docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
-  --entrypoint /bin/tar api -C /app/data/raw -czf - . >"$raw_backup_file"
+docker compose -f "$COMPOSE_FILE" exec -T api \
+  /bin/tar -C /app/data/raw -czf - . >"$raw_backup_file"
 chmod 600 "$raw_backup_file"
 
 reset_demo_data() {
@@ -274,13 +297,11 @@ rsync -a --delete \
   "${checkout_root}/web" \
   "${SOURCE_ROOT}/"
 
-if docker image inspect labelscan-local:current >/dev/null 2>&1; then
-  printf '==> Preserving the current application image\n'
-  docker tag labelscan-local:current labelscan-local:previous
-fi
-
 rollback_image() {
   local exit_code=$?
+  if [[ -n "${oversized_probe:-}" && -f "$oversized_probe" ]]; then
+    rm -f "$oversized_probe"
+  fi
   if [[ -n "${sql_file:-}" && -f "$sql_file" ]]; then
     rm -f "$sql_file"
   fi
@@ -291,9 +312,10 @@ rollback_image() {
     printf '==> Reset deployment failed; use the VPS snapshot to recover a coherent pre-reset state\n' >&2
     exit "$exit_code"
   fi
-  if docker image inspect labelscan-local:previous >/dev/null 2>&1; then
+  if [[ -n "$previous_version" ]] \
+    && docker image inspect "labelscan-local:${previous_version}" >/dev/null 2>&1; then
     printf '==> Deployment failed; restoring the previous application image\n' >&2
-    docker tag labelscan-local:previous labelscan-local:current
+    export LABELSCAN_VERSION="$previous_version"
     docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=2 api worker caddy || true
   fi
   exit "$exit_code"
@@ -306,6 +328,9 @@ rotate_jwt_once
 
 printf '==> Building the private image on the VPS\n'
 docker compose -f "${checkout_root}/${REPOSITORY_COMPOSE}" build migrate
+image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+  "labelscan-local:${commit_sha}")"
+[[ "$image_revision" == "$commit_sha" ]] || die "built image revision label does not match the requested commit"
 
 printf '==> Separating PostgreSQL owner and runtime roles\n'
 prepare_database_roles
@@ -313,6 +338,13 @@ grant_application_secret_access
 
 printf '==> Installing the reviewed single-VPS production contract\n'
 install -m 600 "${checkout_root}/${REPOSITORY_COMPOSE}" "$COMPOSE_FILE"
+install -m 600 "${checkout_root}/${REPOSITORY_CADDY}" "$CADDY_FILE"
+
+printf '==> Validating the reviewed reverse-proxy contract\n'
+docker run --rm --network none \
+  -v "${CADDY_FILE}:/etc/caddy/Caddyfile:ro" \
+  caddy:2.11.4@sha256:df7f1c2fb114453b951de51a98efc010db1655a92c2e86be6706714e2417a78d \
+  caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
 
 printf '==> Recreating PostgreSQL with the owner-only service identity\n'
 docker compose -f "$COMPOSE_FILE" up -d --no-deps db
@@ -372,6 +404,38 @@ status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http
   --data '{"username":"production-security-probe","password":"invalid-probe-password"}' \
   "https://label-scan.fr/v1/auth/login")"
 [[ "$status_code" == "403" ]] || die "browser login accepted a foreign Origin"
+
+version_response="$(curl --fail --silent --show-error --max-time 10 \
+  "https://label-scan.fr/v1/version")"
+[[ "$version_response" == *"${commit_sha}"* ]] || die "public version does not match the deployed commit"
+
+redirect_headers="$(curl --silent --show-error --head --max-redirs 0 --max-time 10 \
+  "https://label-scan.fr/backoffice")"
+redirect_location="$(printf '%s\n' "$redirect_headers" \
+  | sed -n 's/^[Ll]ocation:[[:space:]]*//p' | tr -d '\r' | tail -n 1)"
+[[ "$redirect_location" == "/backoffice/" || "$redirect_location" == "https://label-scan.fr/backoffice/" ]] \
+  || die "backoffice slash redirect is not HTTPS-safe: ${redirect_location:-missing}"
+
+status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+  --max-time 10 -H 'Host: evil.example' "http://127.0.0.1/v1/health/live")"
+[[ "$status_code" == "421" ]] || die "unknown HTTP Host was not rejected (HTTP ${status_code})"
+
+security_headers="$(curl --silent --show-error --dump-header - --output /dev/null \
+  --max-time 10 "https://label-scan.fr/v1/health/live")"
+for header_name in strict-transport-security x-content-type-options referrer-policy; do
+  header_count="$(printf '%s\n' "$security_headers" | grep -Eic "^${header_name}:" || true)"
+  [[ "$header_count" == "1" ]] || die "${header_name} is missing or duplicated (${header_count})"
+done
+
+oversized_probe="$(mktemp /tmp/labelscan-oversized-probe.XXXXXX)"
+chmod 600 "$oversized_probe"
+truncate -s 12582912 "$oversized_probe"
+status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
+  --max-time 30 -X POST -F "file=@${oversized_probe};filename=oversized.jpg;type=image/jpeg" \
+  "https://label-scan.fr/v1/ingestions")"
+rm -f "$oversized_probe"
+oversized_probe=""
+[[ "$status_code" == "413" ]] || die "reverse proxy accepted an oversized anonymous upload (HTTP ${status_code})"
 
 trap - ERR
 

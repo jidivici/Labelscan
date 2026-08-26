@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1@sha256:ecfaec9ed6d810b56388c508f4121597bfbba70d41a6dfeee4d8cad5f295fc32
 
 # Tags remain readable while digests make the build input reproducible and
 # reviewable. Dependabot covers Docker base-image updates.
@@ -6,12 +6,13 @@ FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a55
 
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN apk upgrade --no-cache \
+    && npm ci
 COPY web/ ./
 RUN npm run build
 
 
-FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91 AS builder
+FROM python:3.13-alpine@sha256:540c7d91f98ff6880174c40e99067bf5941eb54d818a7a5e094d188b196a934d AS builder
 
 WORKDIR /build
 
@@ -19,11 +20,17 @@ COPY server/pyproject.toml ./
 COPY server/requirements.lock ./
 COPY server/src/ src/
 
-RUN pip install --no-cache-dir --require-hashes --prefix=/install -r requirements.lock \
+RUN apk upgrade --no-cache \
+    && pip install --no-cache-dir --require-hashes --prefix=/install -r requirements.lock \
     && pip install --no-cache-dir --no-deps --prefix=/install .
 
 
-FROM python:3.13-slim@sha256:6771159cd4fa5d9bba1258caf0b82e6b73458c694d178ad97c5e925c2d0e1a91
+FROM python:3.13-alpine@sha256:540c7d91f98ff6880174c40e99067bf5941eb54d818a7a5e094d188b196a934d
+
+ARG LABELSCAN_VERSION=unknown
+LABEL org.opencontainers.image.title="LabelScan API" \
+      org.opencontainers.image.revision="$LABELSCAN_VERSION" \
+      org.opencontainers.image.source="https://github.com/jidivici/Labelscan"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -31,8 +38,12 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-RUN addgroup --system --gid 10001 app \
-    && adduser --system --uid 10001 --ingroup app --no-create-home app
+RUN apk upgrade --no-cache \
+    && python -m pip uninstall --yes pip \
+    && rm -rf /usr/local/lib/python3.13/ensurepip \
+    && test ! -e /usr/local/bin/pip \
+    && addgroup -S -g 10001 app \
+    && adduser -S -D -H -u 10001 -G app app
 
 COPY --from=builder /install /usr/local
 COPY server/alembic.ini ./

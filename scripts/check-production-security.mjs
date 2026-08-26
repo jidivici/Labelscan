@@ -67,6 +67,32 @@ try {
     body: JSON.stringify({ username: 'production-security-probe', password: 'invalid-probe-password' }),
   });
   check('Origine web étrangère refusée', foreignOrigin.response.status === 403, `HTTP ${foreignOrigin.response.status}`);
+
+  const backofficeRedirect = await request('/backoffice', { redirect: 'manual' });
+  const backofficeLocation = backofficeRedirect.response.headers.get('location');
+  check(
+    'Redirection backoffice sans retour HTTP',
+    backofficeRedirect.response.status >= 300
+      && backofficeRedirect.response.status < 400
+      && (backofficeLocation === '/backoffice/' || backofficeLocation === `${baseUrl}/backoffice/`),
+    `${backofficeRedirect.response.status} ${backofficeLocation ?? 'Location absent'}`,
+  );
+
+  const oversizedForm = new FormData();
+  oversizedForm.set(
+    'file',
+    new Blob([new Uint8Array(12 * 1024 * 1024)], { type: 'image/jpeg' }),
+    'oversized.jpg',
+  );
+  const oversizedUpload = await request('/v1/ingestions', {
+    method: 'POST',
+    body: oversizedForm,
+  });
+  check(
+    'Upload anonyme surdimensionné bloqué au proxy',
+    oversizedUpload.response.status === 413,
+    `HTTP ${oversizedUpload.response.status}`,
+  );
 } catch (error) {
   check('Connexion au serveur', false, error instanceof Error ? error.message : String(error));
 }

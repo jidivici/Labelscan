@@ -24,8 +24,7 @@ dev = [
     "import-linter>=2.0",
     "ruff>=0.6",
     "pip-audit>=2.9",
-    "pip-tools>=7.5",
-    "pip<26",  # pip-tools 7.6 imports a pip API removed in pip 26
+    "pip>=26.2.1",  # pip-audit/pip-api need pip; keep the audited toolchain explicit.
 ]
 
 # src layout: the importable package is `labelscan` under src/.
