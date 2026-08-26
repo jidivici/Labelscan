@@ -39,6 +39,10 @@ services:
         LABELSCAN_VERSION: ${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
     user: "70:70"
     restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /run/postgresql:rw,noexec,nosuid,nodev,size=16m
     environment:
       POSTGRES_DB: labelscan
       POSTGRES_USER: labelscan_db_admin
@@ -49,6 +53,7 @@ services:
     networks: [backend]
     security_opt:
       - no-new-privileges:true
+    cap_drop: [ALL]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U labelscan_db_admin -d labelscan"]
       interval: 5s
