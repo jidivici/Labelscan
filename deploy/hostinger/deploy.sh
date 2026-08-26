@@ -477,7 +477,7 @@ grant_application_secret_access
 
 printf '==> Installing the reviewed single-VPS production contract\n'
 install -m 600 "${checkout_root}/${REPOSITORY_COMPOSE}" "$COMPOSE_FILE"
-install -m 600 "${checkout_root}/${REPOSITORY_CADDY}" "$CADDY_FILE"
+install -o root -g 10002 -m 640 "${checkout_root}/${REPOSITORY_CADDY}" "$CADDY_FILE"
 
 printf '==> Validating the reviewed reverse-proxy contract\n'
 docker run --rm --network none --user 10002:10002 --read-only \
