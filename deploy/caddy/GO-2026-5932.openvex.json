@@ -1,0 +1,22 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://label-scan.fr/security/vex/GO-2026-5932/caddy-2.11.4-labelscan.1",
+  "author": "LabelScan Security",
+  "timestamp": "2026-08-26T17:18:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "GO-2026-5932"
+      },
+      "products": [
+        {
+          "@id": "pkg:golang/golang.org/x/crypto@v0.54.0"
+        }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_present",
+      "impact_statement": "The build enumerates the complete linked dependency graph and fails if golang.org/x/crypto/openpgp or any of its subpackages is present. The vulnerable OpenPGP implementation is not linked into this Caddy binary."
+    }
+  ]
+}
