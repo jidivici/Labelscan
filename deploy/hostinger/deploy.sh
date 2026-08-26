@@ -16,6 +16,7 @@ readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v4"
 readonly DEMO_CREDENTIALS_MARKER="${APP_ROOT}/.demo-credentials-secured"
 readonly JWT_ROTATION_MARKER="${APP_ROOT}/.jwt-secret-v2"
 readonly POSTGRES_HARDENED_VOLUME_MARKER="${APP_ROOT}/.postgres-hardened-volume-v1"
+readonly POSTGRES_HARDENED_VOLUME="labelscan-single-vps_postgres_data_v2"
 readonly LOCK_FILE="/var/lock/labelscan-deploy.lock"
 readonly HEALTH_URL="https://label-scan.fr/v1/health/ready"
 
@@ -399,6 +400,25 @@ prepare_consistent_hardened_migration_backup() {
   capture_database_row_counts "$source_counts_file"
 }
 
+reset_incomplete_hardened_postgres_volume() {
+  local project_label volume_label
+  [[ -f "$POSTGRES_HARDENED_VOLUME_MARKER" ]] && return
+
+  printf '==> Recreating the unvalidated PostgreSQL migration volume\n'
+  docker compose -f "$COMPOSE_FILE" stop db
+  docker compose -f "$COMPOSE_FILE" rm -f db
+  if ! docker volume inspect "$POSTGRES_HARDENED_VOLUME" >/dev/null 2>&1; then
+    return
+  fi
+  project_label="$(docker volume inspect --format '{{ index .Labels "com.docker.compose.project" }}' \
+    "$POSTGRES_HARDENED_VOLUME")"
+  volume_label="$(docker volume inspect --format '{{ index .Labels "com.docker.compose.volume" }}' \
+    "$POSTGRES_HARDENED_VOLUME")"
+  [[ "$project_label" == "labelscan-single-vps" && "$volume_label" == "postgres_data_v2" ]] \
+    || die "refusing to replace an unrecognized PostgreSQL volume"
+  docker volume rm "$POSTGRES_HARDENED_VOLUME" >/dev/null
+}
+
 printf '==> Synchronizing deployable source for %s\n' "$commit_sha"
 install -d -m 700 "$SOURCE_ROOT"
 rsync -a --delete \
@@ -496,6 +516,7 @@ docker compose -f "$COMPOSE_FILE" run --rm --no-deps --user 0:0 \
   --entrypoint /bin/sh caddy -c 'chown -R 10002:10002 /data /config'
 
 prepare_consistent_hardened_migration_backup
+reset_incomplete_hardened_postgres_volume
 
 printf '==> Recreating PostgreSQL with the owner-only service identity\n'
 docker compose -f "$COMPOSE_FILE" up -d --no-deps db
