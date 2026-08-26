@@ -2,7 +2,7 @@
 
 # Tags remain readable while digests make the build input reproducible and
 # reviewable. Dependabot covers Docker base-image updates.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS web-builder
+FROM node:26-alpine@sha256:aadf416b2cdce311a8811ba3f0608a61b77dbf997500e2eafe781b51f6a0b019 AS web-builder
 
 WORKDIR /web
 COPY web/package.json web/package-lock.json ./
