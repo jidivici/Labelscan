@@ -12,7 +12,7 @@ COPY web/ ./
 RUN npm run build
 
 
-FROM python:3.13-alpine@sha256:540c7d91f98ff6880174c40e99067bf5941eb54d818a7a5e094d188b196a934d AS builder
+FROM python:3.14-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc AS builder
 
 WORKDIR /build
 
@@ -25,7 +25,7 @@ RUN apk upgrade --no-cache \
     && pip install --no-cache-dir --no-deps --prefix=/install .
 
 
-FROM python:3.13-alpine@sha256:540c7d91f98ff6880174c40e99067bf5941eb54d818a7a5e094d188b196a934d
+FROM python:3.14-alpine@sha256:05b2b8b732ecd268fee8727a369f936f022d1321b59befd13c30ede22769dcdc
 
 ARG LABELSCAN_VERSION=unknown
 LABEL org.opencontainers.image.title="LabelScan API" \
