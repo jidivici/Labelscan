@@ -1,5 +1,8 @@
 # Synthèse v0011 — Refonte capture (C) + couverture OCR (D) + suggestions allergènes (B) + audit latence (A)
 
+> **Archived:** Historical delivery snapshot, not current development guidance. See the
+> [archive index](README.md) and [living documentation](../README.md).
+
 **Date :** 2026-06-20
 **Périmètre :** `src/` (app mobile Expo) en majorité + **un** point `server/` (adaptateur OCR Google Vision).
 **Aucune migration de base de données.** Aucun nouveau drapeau (la sélection du chemin reste
@@ -16,12 +19,12 @@
 
 | Chantier | Quoi | Statut | Fichiers principaux |
 |---|---|---|---|
-| **C — Flux** | Pile unique (Articles = accueil, plus d'onglet) ; FAB de capture bas-droite ; boucle de capture continue | **Livré + vérifié** | [`RootNavigator.tsx`](../src/navigation/RootNavigator.tsx), [`CaptureFab.tsx`](../src/components/CaptureFab.tsx), [`CameraScreen.tsx`](../src/screens/CameraScreen.tsx), [`ArticleListScreen.tsx`](../src/screens/ArticleListScreen.tsx) |
-| **D — Couverture OCR** | Cadre ≈ toute la zone utile + marge de sécurité au recadrage ; capture pleine fidélité ; backend `DOCUMENT_TEXT_DETECTION` + `languageHints` fr/en | **Livré + vérifié** | [`CameraScreen.tsx`](../src/screens/CameraScreen.tsx), [`FrameOverlay.tsx`](../src/components/FrameOverlay.tsx), [`google_vision_ocr.py`](../server/src/labelscan/contexts/ingestion/adapters/google_vision_ocr.py) |
-| **B — Suggestions allergènes** | Suggestion espèce→famille (Annexe II UE), confirmée par l'humain (`source='human'`), jamais auto-stockée | **Livré + vérifié** (finalisé dans cette synthèse) | [`allergenSuggestions.ts`](../src/services/allergenSuggestions.ts), [`ReviewScreen.tsx`](../src/screens/ReviewScreen.tsx), [`allergenSuggestions.test.ts`](../src/__tests__/allergenSuggestions.test.ts) |
-| **A — Latence** | Audit ; correctifs sûrs uniquement ; gains LLM **proposés** (prompt caché ⇒ MINOR) | **Audit / proposé** | — (voir [`ai-pipeline/AI-PIPELINE.md`](./ai-pipeline/AI-PIPELINE.md) §1.5–1.6, [`0010-SYNTHESIS.md`](./0010-SYNTHESIS.md)) |
+| **C — Flux** | Pile unique (Articles = accueil, plus d'onglet) ; FAB de capture bas-droite ; boucle de capture continue | **Livré + vérifié** | [`RootNavigator.tsx`](../../src/navigation/RootNavigator.tsx), [`CaptureFab.tsx`](../../src/components/CaptureFab.tsx), [`CameraScreen.tsx`](../../src/screens/CameraScreen.tsx), [`ArticleListScreen.tsx`](../../src/screens/ArticleListScreen.tsx) |
+| **D — Couverture OCR** | Cadre ≈ toute la zone utile + marge de sécurité au recadrage ; capture pleine fidélité ; backend `DOCUMENT_TEXT_DETECTION` + `languageHints` fr/en | **Livré + vérifié** | [`CameraScreen.tsx`](../../src/screens/CameraScreen.tsx), [`FrameOverlay.tsx`](../../src/components/FrameOverlay.tsx), [`google_vision_ocr.py`](../../server/src/labelscan/contexts/ingestion/adapters/google_vision_ocr.py) |
+| **B — Suggestions allergènes** | Suggestion espèce→famille (Annexe II UE), confirmée par l'humain (`source='human'`), jamais auto-stockée | **Livré + vérifié** (finalisé dans cette synthèse) | [`allergenSuggestions.ts`](../../src/services/allergenSuggestions.ts), [`ReviewScreen.tsx`](../../src/screens/ReviewScreen.tsx), [`allergenSuggestions.test.ts`](../../src/__tests__/allergenSuggestions.test.ts) |
+| **A — Latence** | Audit ; correctifs sûrs uniquement ; gains LLM **proposés** (prompt caché ⇒ MINOR) | **Audit / proposé** | — (voir [`ai-pipeline/AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §1.5–1.6, [`0010-SYNTHESIS.md`](./0010-SYNTHESIS.md)) |
 
-Détail mobile complet dans le nouveau doc de référence [`mobile/MOBILE-APP.md`](./mobile/MOBILE-APP.md).
+Détail mobile complet dans le nouveau doc de référence [`mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md).
 
 ---
 
@@ -66,7 +69,7 @@ perd les bords.
    et l'**image entière** est envoyée (jamais de perte de données).
 5. **Backend Vision** — l'adaptateur serveur utilise `DOCUMENT_TEXT_DETECTION` + `imageContext.languageHints = ["fr","en"]`
    (aide au rappel sur le FR+EN accentué), et **n'effectue aucun sous-échantillonnage** (l'image part en
-   pleine résolution). Voir [`AI-PIPELINE.md`](./ai-pipeline/AI-PIPELINE.md) §2.5.
+   pleine résolution). Voir [`AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §2.5.
 
 > **Note legacy :** `src/services/ocr.ts` (chemin **opt-out** `EXPO_PUBLIC_BACKEND_FIRST=false`) utilise
 > encore `TEXT_DETECTION` sans `languageHints`. C'est volontairement le chemin secondaire ; le défaut est
@@ -81,7 +84,7 @@ l'**Annexe II UE** — `Poisson` / `Crustacés` / `Mollusques` — dérivée **d
 d'espèce/produit (`scientific_name`, `product_name`, `commercial_designation`).
 
 - **Jamais une fabrication.** Le pipeline d'extraction ne change pas : une valeur non imprimée reste
-  `null` et part en revue (gate anti-fabrication — [`PROMPT-CONTRACT.md`](./extraction/PROMPT-CONTRACT.md)).
+  `null` et part en revue (gate anti-fabrication — [`PROMPT-CONTRACT.md`](../extraction/PROMPT-CONTRACT.md)).
   La suggestion est une **couche mobile** séparée.
 - **Affichée, jamais auto-appliquée.** Le chip n'apparaît **que** sur le champ `allergens` et **que**
   s'il est vide. L'accepter écrit une **valeur humaine** (`edited` → `source='human'` à
@@ -112,7 +115,7 @@ d'espèce/produit (`scientific_name`, `product_name`, `commercial_designation`).
   réelle (rien à paralléliser dans une étiquette). Les vrais gains (borner les `evidence` en sortie,
   alléger les few-shots) **changent le préfixe caché** ⇒ **bump MINOR + grille d'éval** ⇒ **proposés,
   pas appliqués**. Voir [`0010-SYNTHESIS.md`](./0010-SYNTHESIS.md) (cache + escalade) et
-  [`AI-PIPELINE.md`](./ai-pipeline/AI-PIPELINE.md) §1.5–1.6.
+  [`AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §1.5–1.6.
 
 ---
 
@@ -127,13 +130,13 @@ d'espèce/produit (`scientific_name`, `product_name`, `commercial_designation`).
 
 > Le backend n'a **pas** été rejoué dans cette passe (le correctif OCR backend était déjà livré +
 > vérifié par l'agent). `run_local_proofs.sh` exige un PostgreSQL éphémère ; voir
-> [`labelscan-test-suite`](../server/README.md).
+> [`labelscan-test-suite`](../../server/README.md).
 
 ---
 
 ## Écarts & suites possibles (honnêteté)
 
-- **Expo SDK 54 vs v56 :** `package.json` épingle `expo ~54.0.35`, mais [`AGENTS.md`](../AGENTS.md)
+- **Expo SDK 54 vs v56 :** `package.json` épingle `expo ~54.0.35`, mais [`AGENTS.md`](../../AGENTS.md)
   renvoie aux docs **v56**. À réconcilier (migration prévue, ou corriger le pointeur de doc).
 - **Legacy OCR :** `src/services/ocr.ts` (`TEXT_DETECTION`, sans `languageHints`) n'a pas été aligné sur
   le backend — c'est le chemin **opt-out**, pas le défaut.
@@ -145,8 +148,9 @@ d'espèce/produit (`scientific_name`, `product_name`, `commercial_designation`).
 
 ## Liens
 
-- [`mobile/MOBILE-APP.md`](./mobile/MOBILE-APP.md) — référence de l'app mobile (flux, OCR, allergènes).
-- [`ai-pipeline/AI-PIPELINE.md`](./ai-pipeline/AI-PIPELINE.md) §2.5 — config concrète de l'adaptateur Vision.
-- [`extraction/PROMPT-CONTRACT.md`](./extraction/PROMPT-CONTRACT.md) — gate anti-fabrication (inchangé).
+- [`mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md) — référence de l'app mobile (flux, OCR, allergènes).
+- [`ai-pipeline/AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §2.5 — config concrète de l'adaptateur Vision.
+- [`extraction/PROMPT-CONTRACT.md`](../extraction/PROMPT-CONTRACT.md) — gate anti-fabrication (inchangé).
 - [`0010-SYNTHESIS.md`](./0010-SYNTHESIS.md) — cache de prompt + escalade (contexte latence/coût).
-- [`../WORKTREES-GUIDE-DEBUTANT.md`](../WORKTREES-GUIDE-DEBUTANT.md) — guide worktrees pour débutant.
+- `WORKTREES-GUIDE-DEBUTANT.md` — historical beginner worktree guide; the file is not
+  retained in the current repository.

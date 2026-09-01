@@ -13,6 +13,15 @@ from typing import Protocol
 from labelscan.contexts.ingestion.domain.extraction import LlmField
 
 
+class PermanentProviderError(RuntimeError):
+    """A provider/configuration failure that cannot succeed with the same input.
+
+    The worker records one failed extraction attempt but must not spend the normal
+    transient retry budget on rejected parameters, authentication, schema, refusal,
+    or a locally invalid structured response.
+    """
+
+
 @dataclass(frozen=True)
 class OcrResult:
     raw_json: bytes  # the verbatim provider response (stored immutably)

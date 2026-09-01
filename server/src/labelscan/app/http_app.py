@@ -41,10 +41,12 @@ from labelscan.platform.config import (
 from labelscan.platform.http.errors import install_error_handlers
 from labelscan.platform.http.middleware import (
     CorrelationMiddleware,
+    IngestionRequestSizeLimitMiddleware,
     MutationRateLimitMiddleware,
     SecurityHeadersMiddleware,
 )
 from labelscan.platform.http.rate_limit import rate_limits
+from labelscan.platform.http.security import enforce_api_authentication_surface
 from labelscan.platform.http.session_validation import configure_session_validator
 from labelscan.platform.http.spa_static import SpaStaticFiles
 from labelscan.platform.observability import configure_logging
@@ -87,6 +89,7 @@ def create_app() -> FastAPI:
     )
     if production:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
+    app.add_middleware(IngestionRequestSizeLimitMiddleware)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(MutationRateLimitMiddleware)
     app.add_middleware(CorrelationMiddleware)
@@ -105,6 +108,7 @@ def create_app() -> FastAPI:
         alerts_lifecycle_router
     )  # write: POST /v1/alerts/{id}/acknowledge|resolve
     app.include_router(ops_router)  # ops: GET /v1/health/live|ready, /v1/version
+    enforce_api_authentication_surface(app)
     app.mount(
         "/backoffice",
         SpaStaticFiles(directory=_backoffice_static_dir(), html=True),

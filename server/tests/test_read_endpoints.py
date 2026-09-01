@@ -51,6 +51,13 @@ def client(engine, raw_store):
     return TestClient(app)
 
 
+@pytest.fixture
+def validation_client():
+    app = create_app()
+    app.dependency_overrides[get_engine] = lambda: object()
+    return TestClient(app)
+
+
 def _quiesce(engine):
     with engine.begin() as c:
         c.execute(
@@ -287,3 +294,34 @@ def test_read_requires_scope(client, seeded):
     r = client.get(f"/v1/ingestions/{seeded}", headers=bearer("alert:read"))
     assert r.status_code == 403
     assert r.json()["error_code"] == "FORBIDDEN"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/v1/ingestions/{str(uuid.uuid4()).upper()}",
+        f"/v1/extraction-runs/{uuid.uuid4().hex}",
+        f"/v1/batches/{{{uuid.uuid4()}}}",
+        f"/v1/ingestions/{uuid.uuid4()}\u202e",
+    ],
+)
+def test_read_routes_reject_noncanonical_resource_ids(validation_client, path):
+    response = validation_client.get(path, headers=AUTH)
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        f"/v1/ingestions/{uuid.uuid4()}",
+        f"/v1/extraction-runs/{uuid.uuid4()}",
+        f"/v1/batches/{uuid.uuid4()}",
+    ],
+)
+def test_read_routes_reject_unknown_query_parameters(validation_client, path):
+    response = validation_client.get(path, params={"unexpected": "value"}, headers=AUTH)
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"

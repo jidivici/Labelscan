@@ -6,6 +6,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import text
 
 from labelscan.contexts.ingestion.adapters.http.read_router import (
@@ -81,7 +82,7 @@ def test_human_review_accepts_canonical_safety_values_and_nc() -> None:
         validate_human_field_value("production_method", "wild_caught") == "wild_caught"
     )
     assert validate_human_field_value("gtin", "4006381333931") == "4006381333931"
-    assert validate_human_field_value("gtin", "93000502900206") == "93000502900206"
+    assert validate_human_field_value("gtin", "93000502900204") == "93000502900204"
     assert validate_human_field_value("gtin", "nc") == "NC"
 
 
@@ -91,16 +92,15 @@ def test_notes_allow_newlines_but_not_direction_spoofing() -> None:
         validate_note("visible\u202etxt.exe")
 
 
-def _field_view(
-    value: str | None, validation_status: str | None = None
-) -> FieldView:
+def _field_view(value: str | None, validation_status: str | None = None) -> FieldView:
     return FieldView(
         field_name="commercial_designation",
         value=value,
         evidence=None,
         provenance=None,
         source_raw_artifact_id=None,
-        validation_status=validation_status or ("missing" if value is None else "present"),
+        validation_status=validation_status
+        or ("missing" if value is None else "present"),
         warnings=[],
         llm_confidence=0.0,
         ocr_confidence=0.0,
@@ -111,14 +111,37 @@ def _field_view(
     )
 
 
+def test_public_field_view_uses_empty_evidence_array_for_absent_values() -> None:
+    assert _field_view(None).evidence == []
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("value", {"nested": "not-public"}),
+        ("evidence", [{"text": "not-a-string"}]),
+        ("provenance", ["not-an-object"]),
+        ("warnings", {"not": "an-array"}),
+    ],
+)
+def test_public_field_view_rejects_untyped_json_shapes(
+    field: str, value: object
+) -> None:
+    payload = _field_view("Cabillaud").model_dump()
+    payload[field] = value
+
+    with pytest.raises(ValidationError):
+        FieldView.model_validate(payload)
+
+
 def test_zero_extracted_fields_requires_photo_recapture() -> None:
     assert _requires_recapture("needs_review", []) is True
     assert _requires_recapture("ocr_skipped_garbage", [_field_view(None)]) is True
     assert _requires_recapture("needs_review", [_field_view("   ")]) is True
     assert _requires_recapture("needs_review", [_field_view("NC")]) is True
-    assert _requires_recapture(
-        "needs_review", [_field_view("valeur", "invalid")]
-    ) is True
+    assert (
+        _requires_recapture("needs_review", [_field_view("valeur", "invalid")]) is True
+    )
     assert _requires_recapture("needs_review", [_field_view("Cabillaud")]) is False
     assert _requires_recapture("extraction_failed", []) is False
 
@@ -134,7 +157,7 @@ def test_vps_bootstrap_separates_runtime_from_database_owner() -> None:
     assert "REVOKE labelscan_db_admin FROM labelscan_app;" in deploy_script
     assert "FROM pg_auth_members membership" in deploy_script
     assert "psql -U labelscan_db_admin -d labelscan" in deploy_script
-    assert 'up -d --no-deps db' in deploy_script
+    assert "up -d --no-deps db" in deploy_script
     assert 'readonly APP_SECRET_GID="10001"' in deploy_script
     assert "grant_application_secret_access" in deploy_script
     assert 'chown root:"$APP_SECRET_GID" "$target"' in deploy_script
@@ -153,10 +176,7 @@ def test_privileged_deploy_trusts_only_its_checkout_for_git_validation() -> None
 
 def test_vps_healthcheck_uses_the_allowed_production_host() -> None:
     compose = (
-        Path(__file__).resolve().parents[2]
-        / "deploy"
-        / "compose"
-        / "single-vps.yml"
+        Path(__file__).resolve().parents[2] / "deploy" / "compose" / "single-vps.yml"
     ).read_text(encoding="utf-8")
 
     assert "http://127.0.0.1:8000/v1/health/live" in compose
@@ -165,10 +185,7 @@ def test_vps_healthcheck_uses_the_allowed_production_host() -> None:
 
 def test_guarded_demo_reset_uses_the_maintenance_database_role() -> None:
     compose = (
-        Path(__file__).resolve().parents[2]
-        / "deploy"
-        / "compose"
-        / "single-vps.yml"
+        Path(__file__).resolve().parents[2] / "deploy" / "compose" / "single-vps.yml"
     ).read_text(encoding="utf-8")
     demo_service = compose.split("\n  demo:\n", 1)[1].split(
         "\n  secure_demo_credentials:\n", 1

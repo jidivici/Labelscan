@@ -1,5 +1,8 @@
 # LabelScan Security Audit V3 — MVP hardening refresh
 
+> **Archived:** Point-in-time security audit, not the current risk register. See the
+> [archive index](README.md) and [open risks](../security/THREAT-MODEL.md#confirmed-open-risk-register).
+
 > Archivé le 20 août 2026 : photographie du 3 août, remplacée par les preuves de sécurité courantes.
 
 **Date:** 3 August 2026  

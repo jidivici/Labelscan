@@ -13,6 +13,7 @@ import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from labelscan.platform.config import is_production
 from labelscan.platform.http import jwt as jwt_codec
@@ -23,6 +24,158 @@ from labelscan.platform.observability import get_logger
 _log = get_logger("http.security")
 _TRACE_ID = re.compile(r"^[0-9a-f]{32}$")
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_MAX_INGESTION_REQUEST_BYTES = 11 * 1024 * 1024
+_MAX_JSON_REQUEST_BYTES = 256 * 1024
+_MAX_FORM_REQUEST_BYTES = 64 * 1024
+
+
+class IngestionRequestSizeLimitMiddleware:
+    """Bound every request body before FastAPI parses it.
+
+    Image ingestion receives an 11 MiB multipart envelope. JSON and ordinary
+    forms use much smaller limits, including for chunked bodies. Ambiguous HTTP
+    framing is rejected consistently on every body-bearing API method.
+    """
+
+    def __init__(
+        self, app: ASGIApp, max_bytes: int = _MAX_INGESTION_REQUEST_BYTES
+    ) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    def _limit_for(self, scope: Scope, headers: list[tuple[bytes, bytes]]) -> int:
+        content_type = next(
+            (
+                value.decode("latin-1").lower()
+                for name, value in headers
+                if name.lower() == b"content-type"
+            ),
+            "",
+        )
+        media_type = content_type.partition(";")[0].strip()
+        if media_type == "application/json" or media_type.endswith("+json"):
+            return _MAX_JSON_REQUEST_BYTES
+        if (
+            scope.get("path") == "/v1/ingestions"
+            and media_type == "multipart/form-data"
+        ):
+            return self.max_bytes
+        return _MAX_FORM_REQUEST_BYTES
+
+    async def _reject(
+        self,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+        error_code: str,
+        detail: str,
+    ) -> None:
+        response = problem_response(
+            Request(scope),
+            error_code,
+            detail=detail,
+        )
+        await response(scope, receive, send)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or scope.get("method") not in {
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+        }:
+            await self.app(scope, receive, send)
+            return
+
+        headers = scope.get("headers", [])
+        max_bytes = self._limit_for(scope, headers)
+        content_lengths = [
+            value for name, value in headers if name.lower() == b"content-length"
+        ]
+        has_transfer_encoding = any(
+            name.lower() == b"transfer-encoding" for name, _value in headers
+        )
+        if len(content_lengths) > 1 or (content_lengths and has_transfer_encoding):
+            await self._reject(
+                scope,
+                receive,
+                send,
+                "VALIDATION_ERROR",
+                "ambiguous request body framing",
+            )
+            return
+        declared_length: int | None = None
+        if content_lengths:
+            try:
+                declared_length = int(content_lengths[0].decode("ascii"))
+            except (UnicodeDecodeError, ValueError):
+                declared_length = -1
+            if declared_length < 0:
+                await self._reject(
+                    scope,
+                    receive,
+                    send,
+                    "VALIDATION_ERROR",
+                    "invalid Content-Length header",
+                )
+                return
+            if declared_length > max_bytes:
+                await self._reject(
+                    scope,
+                    receive,
+                    send,
+                    "PAYLOAD_TOO_LARGE",
+                    "request body exceeds the configured size limit",
+                )
+                return
+
+        if max_bytes <= 0:
+            await self.app(scope, receive, send)
+            return
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            if message["type"] != "http.request":
+                continue
+            body.extend(message.get("body", b""))
+            if len(body) > max_bytes:
+                await self._reject(
+                    scope,
+                    receive,
+                    send,
+                    "PAYLOAD_TOO_LARGE",
+                    "request body exceeds the configured size limit",
+                )
+                return
+            if not message.get("more_body", False):
+                break
+
+        # Never trust Content-Length as proof of the bytes delivered by the ASGI
+        # server.  Counting the actual stream closes both an under-declared body
+        # bypass and discrepancies introduced by a proxy/server framing bug.
+        if declared_length is not None and declared_length != len(body):
+            await self._reject(
+                scope,
+                receive,
+                send,
+                "VALIDATION_ERROR",
+                "Content-Length does not match the request body",
+            )
+            return
+
+        replayed = False
+
+        async def replay_receive() -> Message:
+            nonlocal replayed
+            if not replayed:
+                replayed = True
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return {"type": "http.disconnect"}
+
+        await self.app(scope, replay_receive, send)
 
 
 def _trace_id_from(traceparent: str | None) -> str:

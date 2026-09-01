@@ -1,170 +1,209 @@
 # LabelScan
 
-Traçabilité HACCP des produits de la mer pour la poissonnerie de grande distribution.
-L'opérateur photographie l'étiquette d'un arrivage ; l'application extrait, vérifie et
-archive les **17 champs réglementaires** (dénomination, nom scientifique, zone FAO, lot,
-DLC, estampille sanitaire, …) avec une doctrine stricte : **jamais de donnée fabriquée**,
-tout est **auditable et immuable** côté serveur.
+**Turn a food-label photo into a traceable record that a human can trust.**
 
-- **Mobile** : Expo / React Native (TypeScript) — capture enchaînée, revue éditable,
-  synchronisation automatique et catalogue serveur avec cache hors ligne.
-- **Backoffice web** : portail React partagé, catalogue photographique pour les
-  opérateurs et gestion des comptes et magasins pour les admins.
-- **Backend** : FastAPI / PostgreSQL (Python 3.11) — monolithe modulaire hexagonal,
-  pipeline hybride GS1 + OCR (Google Vision) + LLM (Claude Haiku, escalade Opus),
-  append-only + audit.
+LabelScan helps fresh-food teams capture incoming product labels, extract the useful
+information, review it, and keep an auditable history. The product currently supports
+three business profiles—fishmonger, butcher, and prepared-food/catering—so each team sees
+the fields and vocabulary that match its work.
 
----
+The guiding rule is simple: **machine-proposed values must carry evidence from the
+label**. Uncertain, inconsistent, missing, or unsupported results go to human review.
 
-## Fonctionnalités
+## The product at a glance
 
-- **Capture enchaînée** : l'envoi part dès le déclencheur (soumission spéculative), on
-  enchaîne les photos ; chaque scan vit dans une file persistante visible sur l'accueil
-  (« En cours », étapes Photo envoyée → Extraction → À valider / À compléter).
-- **Extraction hybride en 3 vagues** : GS1-128 décodé sur l'appareil (T+0, lot/DLC/GTIN/
-  poids exacts), aperçu déterministe regex dès la fin de l'OCR (~2 s), puis LLM. Le
-  code-barres **gagne toujours** sur l'OCR pour les champs qu'il porte.
-- **Revue 17/17** : tous les champs éditables (y compris GS1, sous flag d'audit
-  `force_gs1`), brouillon persistant, autocomplétion depuis l'historique validé,
-  enregistrement possible uniquement à 17/17.
-- **Calendrier des arrivages** (v1.1) : accueil organisé par journée ; vue mensuelle
-  style « GitHub Contributions » (intensité = volume), sélection d'un jour = la liste
-  bascule instantanément, recherche omnisciente qui reste globale.
-- **Validation atomique 17/17** : la révision humaine complète et la confirmation
-  sont enregistrées ensemble, en append-only, avec rejeu idempotent.
-- **Multi-organisation** : JWT tenanté, magasins, RLS PostgreSQL et photos privées
-  isolent chaque groupe.
+1. An operator photographs a label in the mobile app. A GS1 barcode is decoded on the
+   device when one is available.
+2. The server stores the original image before acknowledging the capture, then processes
+   it asynchronously with OCR and a structured LLM extraction.
+3. Deterministic rules reconcile barcode, OCR, and model results. Barcode-derived values
+   take source precedence for the fields they encode; human review still handles an
+   incorrect or inconsistent label.
+4. The operator reviews the profile-specific record and completes any missing values.
+5. LabelScan stores the human-confirmed version as a new, auditable record and publishes
+   it to the authorized store catalogue.
 
-## Architecture (vue d'ensemble)
+| Surface | Who it is for | What it provides |
+|---|---|---|
+| Expo mobile app | Store operators | Fast capture, a persistent retry queue, guided review, and an offline catalogue cache |
+| React back office | Managers and administrators | Arrival search, store administration, and role-based account management |
+| FastAPI server | Mobile and web clients | Authentication, ingestion, extraction orchestration, traceability, HACCP alerts, and audit history |
+| PostgreSQL and private image storage | The platform | Tenant-scoped records, immutable evidence, and durable projections |
+
+## Why teams can trust it
+
+- **Evidence before interpretation.** The original photo and the normalized OCR/LLM
+  artifacts used by the pipeline are retained so extracted values keep provenance. The
+  verbatim provider envelopes are not currently preserved.
+- **Human review stays in control.** Low-confidence, inconsistent, or incomplete results
+  are never silently accepted.
+- **History is preserved.** Extractions and reviews are append-only; a correction creates
+  a new version instead of rewriting the past.
+- **Server retries preserve intent.** Idempotency keys and a transactional outbox prevent
+  duplicate business writes. Committed provider artifacts are reused, although a crash
+  between an external response and its artifact commit can repeat that provider call.
+- **The server enforces organization scope.** Tenant-aware JWTs, store/portal permissions,
+  and bound queries protect business records. PostgreSQL row-level security adds another
+  boundary when the live runtime role is correctly restricted. The managed-topology
+  database credential gap and the mobile ownership gaps remain release blockers below.
+
+## Architecture
 
 ```text
-Mobile (Expo RN)                        Backend (FastAPI + PostgreSQL)
-┌─────────────────────────┐             ┌──────────────────────────────────────┐
-│ Camera → scanQueue      │ POST /v1/   │ ingestion (append-only, idempotent)  │
-│ (file persistante,      │ ingestions  │   └─ outbox transactionnel → worker  │
-│  3 long-polls max)      ├────────────►│        OCR (Vision) → gate qualité   │
-│ Review (17/17, brouillon│  GET status │        → interim regex → LLM (Haiku) │
-│  overrides force_gs1)   │◄────────────┤        → gate no-fab → réconciliation│
-│ Catalogue API + cache   │  long-poll  │ contexts: ingestion/traceability/    │
-│ Outbox finalize_review  │             │ haccp/audit/identity + projection    │
-└─────────────────────────┘             └──────────────────────────────────────┘
+Expo mobile app ── HTTPS/JWT ──┐
+                               ├── FastAPI API ── PostgreSQL
+React back office ─────────────┘                       │
+                                              transactional outbox
+                                                      │
+                                                      ▼
+                                      extraction workers ── private image storage
+                                               │
+                                               └── Google Vision OCR + Anthropic Claude
 ```
 
-Références détaillées : [`docs/README.md`](docs/README.md),
-[`docs/ENTERPRISE-ARCHITECTURE.md`](docs/ENTERPRISE-ARCHITECTURE.md),
-[`docs/architecture/adr/`](docs/architecture/adr/), [`docs/mobile/MOBILE-APP.md`](docs/mobile/MOBILE-APP.md),
-[`docs/backend/API-CONTRACTS.md`](docs/backend/API-CONTRACTS.md),
-et [`docs/security/SECURITY-ARCHITECTURE.md`](docs/security/SECURITY-ARCHITECTURE.md).
+The backend is a modular monolith with hexagonal boundaries. This keeps transactions and
+audit guarantees easy to reason about in the current deployment while leaving clear seams
+for future service extraction. See the [enterprise architecture](docs/ENTERPRISE-ARCHITECTURE.md) and
+[architecture decisions](docs/architecture/adr/README.md) for the reasoning behind the
+design.
 
-## Prérequis
+## Run LabelScan locally
 
-- Node 20+, npm ; app **Expo dev client** (pas Expo Go : caméra + reanimated).
-- Python 3.11+, Docker (PostgreSQL), PostgreSQL 16 en Homebrew pour les tests backend.
-- Clés : `ANTHROPIC_API_KEY`, `LABELSCAN_GOOGLE_VISION_API_KEY` (serveur uniquement —
-  **aucune clé** n'est embarquée dans le bundle mobile).
+### Prerequisites
 
-## Installation & lancement
+- Node.js **22.12 or newer on a supported LTS release** and npm. CI and the container
+  build currently use Node 22; Expo SDK 54 targets React Native 0.81 and React 19.1.
+- Python 3.11 or newer for backend development outside Docker.
+- Docker with Compose for PostgreSQL, the API, demo data, and extraction workers.
+- PostgreSQL 16 command-line binaries when running `server/scripts/run_local_proofs.sh`;
+  on macOS, the script defaults to the Homebrew `postgresql@16` installation path.
+- A Google Vision API key and an Anthropic API key if you want real extraction results.
+  These keys stay on the server and are never included in the mobile bundle.
+- Android Studio or Xcode when building a native development app.
+
+This repository is pinned to Expo SDK 54. Use the
+[versioned Expo SDK 54 documentation](https://docs.expo.dev/versions/v54.0.0/) and keep
+the package versions already recorded in `package.json`.
+
+### 1. Prepare local configuration
 
 ```bash
-# Backend (depuis la racine)
-cp .env.example .env            # renseigner EXPO_PUBLIC_API_BASE_URL (IP LAN)
+cp .env.example .env
+cp server/.env.example server/.env
 cp server/demo/credentials.example.json server/demo/credentials.local.json
-# remplacer les six valeurs du fichier local par des phrases de passe uniques
-docker compose up               # db + api :8000 + 2 workers
-
-# Mobile
-npm install
-npx expo start -c               # Metro ; app dev client sur le device
 ```
 
-Le démarrage local utilise la base dédiée `labelscan_demo` et installe
-automatiquement une démonstration idempotente :
-4 magasins nommés par ville, 1 super-administrateur, 1 administrateur,
-4 managers et 9 arrivages construits à partir de vraies photos d'étiquettes,
-normalisées pour être lues dans le bon sens.
-Les anciennes projections issues des tests ne sont pas affichées.
+Then make these local-only changes:
 
-Les six identifiants sont `super_admin`, `admin`, `manager_p_f`, `manager_p_n`,
-`manager_p_c` et `manager_p_m`. Leurs mots de passe ne sont pas publiés : ils viennent
-uniquement du fichier local ignoré `server/demo/credentials.local.json`.
+- In `.env`, set `EXPO_PUBLIC_API_BASE_URL` to the API address reachable by the phone.
+  Use your computer’s LAN address rather than `localhost` on a physical device.
+- In `server/.env`, replace every placeholder secret, including the PostgreSQL password,
+  JWT secret, provider keys, and initial administrator password.
+- In `server/demo/credentials.local.json`, replace every example password with a unique
+  value. This file is mounted as a local secret and is ignored by Git.
 
-Convention manager : `p` = poissonnerie ; `f`, `n`, `c` et `m` = Fréjus,
-Nice, Cannes et Marseille.
+Values prefixed with `EXPO_PUBLIC_` are compiled into the mobile bundle. Never place a
+private credential in one of them, and restart Metro after changing the mobile API URL.
 
-En production, les éventuels comptes de démonstration reçoivent des secrets uniques
-root-only et toutes leurs anciennes sessions sont révoquées, sans resemer ni supprimer
-les images et arrivages existants.
-
-Connexion mobile : compte manager créé par l’administrateur dans le portail ;
-l’app obtient un JWT via `POST /v1/mobile/auth/login`. Un compte administrateur
-est volontairement refusé sur l’application mobile.
-
-Portail web utilisateurs, magasins et arrivages :
-[http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
-Les administrateurs gèrent les comptes et magasins ; les managers
-accèdent aux arrivages enregistrés pour leur magasin, avec recherche et filtres
-par date. Ces arrivages sont persistés dans PostgreSQL et partagés entre les
-comptes autorisés du magasin.
-
-Pour initialiser ou réinitialiser le compte administrateur défini dans `server/.env` :
+### 2. Start the backend and demo environment
 
 ```bash
-docker compose up -d --build
-docker compose exec server python -m labelscan.contexts.identity.adapters.cli
+docker compose --env-file server/.env up --build
 ```
 
-Ouvrir ensuite `/backoffice/o/labelscan/`, saisir `LABELSCAN_ADMIN_USERNAME` et
-`LABELSCAN_ADMIN_PASSWORD`, créer d'abord les établissements avec
-**Magasins**, puis utiliser les écrans de gestion des accès pour créer les autres
-comptes administrateur ou manager.
+Compose starts PostgreSQL, applies migrations, seeds the local demo idempotently, and then
+starts the API on port `8000` with the extraction workers declared in `docker-compose.yml`.
+The current demo stores, accounts, and sample arrivals are defined in
+`server/scripts/seed_demo.py` and use label photos from `server/demo/images/`.
 
-## Variables d'environnement
+Open the back office at
+[http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
+Use the password you assigned to `admin` or `super_admin` in the local demo credentials.
+The available manager usernames are listed in `server/demo/credentials.example.json`;
+their store assignments come from the seed script.
 
-| Où | Variable | Rôle |
+### 3. Start the mobile app
+
+```bash
+npm install
+npx expo run:android
+# or: npx expo run:ios
+```
+
+The native development build applies the native project configuration used for local
+development. Validate an approved preview or production artifact separately before a
+release. If the development build is already installed, start Metro with a clean cache
+using `npx expo start --clear`.
+
+Mobile sign-in is reserved for manager accounts. Administrators use the web back office,
+where they can create stores and assign managers to the appropriate business portal.
+
+## Everyday commands
+
+| Command | When to use it |
+|---|---|
+| `npm run typecheck` | Check the strict TypeScript contract without producing a build |
+| `npm test` | Run the mobile unit and component tests |
+| `npm run check:android13` | Verify the Android API 33 minimum and release-network safeguards |
+| `bash server/scripts/run_local_proofs.sh` | Create a temporary PostgreSQL 16 environment and run migrations, dependency-boundary checks, and backend tests |
+| `docker compose --env-file server/.env up` | Run the complete local backend stack |
+
+The backend helper installs editable development dependencies into the active Python
+environment and uses port `54329` by default. Activate a disposable virtual environment
+first, and set `PGPORT` to a free port when `54329` is already in use.
+
+The production security probe is intentionally not an everyday command: it sends active
+security requests, including a synthetic login and an oversized anonymous upload. Run it
+only during an authorized release validation, against an explicit reviewed target, as
+described in the [production validation guide](docs/security/PRODUCTION-VALIDATION.md).
+The helper currently falls back to the public production origin when no URL is supplied,
+so never run the command without an explicit argument.
+
+## Configuration guide
+
+The example environment files document the common runtime settings and production
+alternatives. The table below highlights the values most developers need first.
+
+| Location | Variable | Why it exists |
 |---|---|---|
-| Mobile (`.env`) | `EXPO_PUBLIC_API_BASE_URL` | Base URL du backend (IP LAN pour un device). **Inlinée au build** — redémarrer Metro après changement. |
-| Serveur (`server/.env`) | `DATABASE_URL` | PostgreSQL (`postgresql+psycopg://…`) |
-| | `ANTHROPIC_API_KEY` | LLM d'extraction (Claude) |
-| | `LABELSCAN_GOOGLE_VISION_API_KEY` | OCR Google Vision |
-| | `LABELSCAN_JWT_SECRET`, `LABELSCAN_JWT_TTL_SECONDS` | Auth JWT |
-| | `LABELSCAN_ADMIN_USERNAME`, `LABELSCAN_ADMIN_PASSWORD` | Compte opérateur |
-| | `LABELSCAN_LLM_MODEL`, `LABELSCAN_LLM_ESCALATION_*` | Modèle Haiku + escalade Opus |
-| | `LABELSCAN_OCR_*` | Provider, feature, gate qualité OCR |
-| | `LABELSCAN_RAW_STORE_DIR`, `LABELSCAN_OUTBOX_MAX_RETRIES`, `LABELSCAN_LOG_LEVEL`, … | Voir `server/README.md` |
+| `.env` | `EXPO_PUBLIC_API_BASE_URL` | Tells the compiled mobile app which API to contact |
+| `server/.env` | `DATABASE_URL` | Connects standalone backend commands to PostgreSQL; Compose supplies its own service URL |
+| `server/.env` | `LABELSCAN_DEPLOYMENT_TOPOLOGY` | Selects the `managed` default or the explicitly documented `single-vps` production checks |
+| `server/.env` | `LABELSCAN_GOOGLE_VISION_API_KEY` | Authorizes server-side OCR |
+| `server/.env` | `ANTHROPIC_API_KEY` | Authorizes structured LLM extraction |
+| `server/.env` | `LABELSCAN_JWT_SECRET` | Signs local access and refresh sessions |
+| `server/.env` | `LABELSCAN_OBJECT_STORE` | Selects local filesystem storage or the production S3 adapter |
+| `server/.env` | `LABELSCAN_ADMIN_USERNAME`, `LABELSCAN_ADMIN_PASSWORD` | Provisions or resets the initial administrator through the identity CLI |
 
-Les `.env` sont git-ignorés et vérifiés absents de tout l'historique.
+For the full runtime contract, read the [server guide](server/README.md). For hardened
+environments, follow the [deployment guide](deploy/README.md) instead of copying local
+defaults into production.
 
-## Commandes
+## Documentation map
 
-| Commande | Effet |
+| If you want to… | Start here |
 |---|---|
-| `npm run typecheck` | TypeScript strict, 0 erreur attendu |
-| `npm test` | Suite Jest mobile |
-| `npm run check:android13` | Vérifie le plancher API 33 et les garde-fous réseau de la release Android |
-| `npm run security:production -- https://label-scan.fr` | Refuse une cible publique qui n'applique pas les garde-fous de production |
-| `bash server/scripts/run_local_proofs.sh` | PostgreSQL éphémère, migrations, contrats d’architecture et tests backend |
-| `docker compose up` | Stack locale (db + api + 2 workers) |
-| `npx expo run:ios` / `run:android` | Build dev client |
+| Understand the system | [Documentation home](docs/README.md) and [enterprise architecture](docs/ENTERPRISE-ARCHITECTURE.md) |
+| Contribute safely | [Developer guide](docs/DEVELOPER-GUIDE.md) |
+| Work on the mobile app | [Mobile application reference](docs/mobile/MOBILE-APP.md) |
+| Work on the React back office | [Back-office reference](docs/mobile/MOBILE-APP.md#react-back-office) |
+| Integrate with the API | [API contracts](docs/backend/API-CONTRACTS.md) and [OpenAPI specification](docs/backend/openapi.v1.yaml) |
+| Change persistence | [Database reference](docs/database/DATABASE.md) and `server/migrations/` |
+| Understand extraction | [Pipeline architecture](docs/pipeline/PIPELINE-ARCHITECTURE.md) and [prompt contract](docs/extraction/PROMPT-CONTRACT.md) |
+| Review production security | [Confirmed open risks](docs/security/THREAT-MODEL.md#confirmed-open-risk-register), [security rules](docs/security/SECURITY-RULES.md), and [production validation](docs/security/PRODUCTION-VALIDATION.md) |
+| Deploy the platform | [Deployment guide](deploy/README.md) and [SRE reliability guide](docs/operations/SRE-RELIABILITY.md) |
 
-## Documentation
+## Current boundaries
 
-| Document | Contenu |
-|---|---|
-| [`docs/README.md`](docs/README.md) | Index des références vivantes et règle d’archivage |
-| [`docs/DEVELOPER-GUIDE.md`](docs/DEVELOPER-GUIDE.md) | Guide développeur : ajouter une fonctionnalité, conventions, git, déploiement |
-| [`docs/mobile/MOBILE-APP.md`](docs/mobile/MOBILE-APP.md) | Référence vivante du front mobile |
-| [`docs/backend/API-CONTRACTS.md`](docs/backend/API-CONTRACTS.md) + [`openapi.v1.yaml`](docs/backend/openapi.v1.yaml) | Contrats HTTP (problem+json, idempotence) |
-| [`docs/database/DATABASE.md`](docs/database/DATABASE.md) | Schéma PostgreSQL, append-only, triggers |
-| [`docs/ai-pipeline/AI-PIPELINE.md`](docs/ai-pipeline/AI-PIPELINE.md) + [`docs/extraction/PROMPT-CONTRACT.md`](docs/extraction/PROMPT-CONTRACT.md) | Pipeline OCR + LLM, gate anti-fabrication |
-| [`docs/architecture/adr/`](docs/architecture/adr/) | Décisions d'architecture |
-| [`docs/security/`](docs/security/) | Architecture, modèle de menace et validation production |
-| [`docs/archive/`](docs/archive/) | Audits, plans et présentations historiques |
-
-## État & limites connues
-
-- Suites mobile, portail et backend vertes ; builds React et Android validés.
-- Comptes nominatifs, RBAC `super_admin`/`admin`/`manager`, organisations, magasins, RLS et
-  stockage S3 compatible sont implémentés. SSO/OIDC reste hors de ce chantier.
-- Le téléphone conserve une file hors ligne et un cache ; PostgreSQL et le
-  stockage objet restent les sources de vérité.
-- Les limites de production sont suivies dans `docs/security/` et les contrôles automatisés.
+LabelScan currently uses local username/password roles (`super_admin`, `admin`, and
+`manager`); enterprise OIDC/SSO is not implemented. The mobile queue and catalogue cache
+support ordinary connection loss, but recovery from a process stop during an active
+operation still needs hardening. The mobile catalogue cache and export files also need
+stronger account-bound cleanup before production distribution. PostgreSQL and private
+image storage remain the sources of truth. Local development uses filesystem image
+storage, while the managed production profile requires encrypted S3-compatible storage.
+The documented single-VPS profile is an explicit exception with a private persistent
+volume and backup procedure. Compliance rules are still provisional and require formal
+approval before regulated production use. Review the
+[confirmed open-risk register](docs/security/THREAT-MODEL.md#confirmed-open-risk-register)
+before approving any release.

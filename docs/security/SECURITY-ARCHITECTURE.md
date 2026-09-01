@@ -1,194 +1,327 @@
-# LabelScan — architecture de sécurité de production
+# Production security architecture
 
-**Statut :** contrat de déploiement pré-pentest
+This document describes the controls implemented by the current LabelScan code and
+deployment contracts. It does not certify a running environment. Network policy, secret
+custody, TLS posture, backups, monitoring, provider agreements, and incident readiness
+need separate evidence in the [pre-pentest checklist](PRE-PENTEST-CHECKLIST.md).
+The [threat model](THREAT-MODEL.md#confirmed-open-risk-register) is the canonical,
+prioritized source for confirmed open risks and release blockers.
 
-**Révision :** 20 août 2026
+The executable deployment sources are:
 
-**Sources exécutables :** `deploy/compose/production.yml` et
-`deploy/compose/single-vps.yml`
+- [`deploy/compose/production.yml`](../../deploy/compose/production.yml) for externally
+  managed infrastructure;
+- [`deploy/compose/single-vps.yml`](../../deploy/compose/single-vps.yml) and
+  [`deploy/caddy/Caddyfile`](../../deploy/caddy/Caddyfile) for the Hostinger VPS;
+- `server/src/labelscan/platform/config.py` for production startup validation;
+- `server/migrations/` for database roles, grants, triggers, constraints, and RLS.
 
-Ce document décrit l'architecture réellement implémentée. Il ne certifie pas
-l'infrastructure qui sera créée autour de l'image. Les preuves externes restent dans
-`PRE-PENTEST-CHECKLIST.md`.
+## Security design in one view
 
-## 1. Décision d'architecture
-
-LabelScan reste un **monolithe modulaire**. Le découper en microservices avant le MVP
-ajouterait des identités machine, des flux réseau et des états distribués sans réduire la
-surface métier. Les frontières de contexte sont déjà imposées par `import-linter`; les
-travaux CPU/IO longs sont isolés dans un processus worker et communiquent par une outbox
-PostgreSQL transactionnelle.
-
-Arborescence de référence :
-
-```text
-Labelscan/
-├── src/                         application mobile Expo SDK 54
-├── web/                         backoffice React/Vite same-origin
-├── server/
-│   ├── src/labelscan/
-│   │   ├── app/                 composition API/worker uniquement
-│   │   ├── contexts/            audit, compliance, HACCP, identity,
-│   │   │                        ingestion et traceability
-│   │   └── platform/            HTTP, config, DB, outbox et stockage
-│   ├── migrations/              migrations Alembic, exécutées à part
-│   ├── tests/                   preuves unitaires/intégration/tenancy
-│   └── scripts/                 inventaire OpenAPI reproductible
-├── deploy/                      contrats managed et mono-VPS sans secrets
-├── security/                    politiques d'audit des dépendances
-└── docs/security/               architecture, menaces et gates pentest
-```
-
-Les couches `domain` ne dépendent ni de FastAPI, SQLAlchemy, stockage objet, OCR ou LLM.
-Les appels Google Vision et Anthropic passent par des adapters; ils ne sont possibles que
-depuis le worker.
-
-## 2. Topologie et frontières de confiance
+LabelScan keeps the backend as a modular monolith so identity, ingestion, audit, and
+outbox writes can use PostgreSQL transactions without introducing service-to-service
+credentials or distributed consistency. The API and worker are separate processes: only
+the worker receives OCR/LLM credentials and makes provider calls.
 
 ```text
-Mobile Expo ───────┐
-                   ├─ HTTPS ─> Edge TLS/WAF ─> API (1 replica) ─┬─ PostgreSQL privé
-Navigateur ────────┘                 │                          ├─ S3 privé + KMS
-                                     │                          └─ outbox
-                                     │
-                                     └─ aucun accès direct API/DB depuis Internet
+Mobile / browser
+       │ HTTPS
+       ▼
+TLS edge ── private hop ── API ── PostgreSQL
+                               └── raw-image storage
 
-Worker (réseau backend seulement) ───┬─ PostgreSQL / stockage brut
-                                     ├─ Google Vision
-                                     └─ Anthropic
+Worker ── PostgreSQL + raw storage
+   ├── Google Vision
+   └── Anthropic
 
-Job migrate (one-shot) ───────────────── PostgreSQL, puis arrêt obligatoire
+Migration job ── PostgreSQL owner connection ── exits
 ```
 
-| Frontière | Donnée admise | Contrôles repository | Preuve externe attendue |
-|---|---|---|---|
-| Internet → edge | HTTPS uniquement | URL mobile HTTP refusée en release | TLS/HSTS, body cap, scan TLS/WAF |
-| Edge → API | HTTP privé, hôte et IP proxy connus | allowed hosts; `Origin` exact sur auth cookie; IP proxy explicite | règles réseau et normalisation `X-Forwarded-For` |
-| Client → identité | mot de passe ou refresh opaque | cooldown, rotation/replay, cookies stricts, session révocable | comptes de test et secret de signature géré |
-| API → PostgreSQL | requêtes applicatives | paramètres SQL, tenant context, RLS, runtime non-superuser et non propriétaire; TLS vérifié en managed ou réseau Docker privé sur mono-VPS | grants/ownership des rôles et transport DB |
-| API/worker → objet | JPEG/PNG/WebP validé | limite 10 MiB, magic bytes, dimensions, clé par contenu, KMS obligatoire en prod | bucket privé, policy et clé KMS |
-| Worker → IA | image/OCR utile à l'extraction | adapters dédiés, timeout/gates métier, secrets fichier | egress allow-list, clés restreintes, DPA/région |
-| Image → runtime | image OCI immuable | bases par digest, UID 10001, root FS read-only, caps supprimées | digest scanné/signé et SBOM |
+No diagram proves exposure. The managed edge and networks are external. On the VPS,
+Caddy is the only service that publishes host ports; PostgreSQL, API, and workers stay on
+Docker networks.
 
-## 3. Rôles d'exécution
+## Two production topologies
 
-- `migrate` reçoit l'URL du rôle propriétaire `labelscan_db_admin` seulement le temps
-  d'une release. Un échec bloque le démarrage des rôles applicatifs.
-- `api` sert le backoffice et `/v1` sans port hôte publié. Swagger, Redoc et OpenAPI sont
-  désactivés en production. Le rate limiter MVP impose exactement une replica.
-- `worker` n'expose aucun port. Il est le seul rôle qui reçoit les secrets OCR/LLM.
-- En topologie managée, PostgreSQL, S3 et l'edge sont externes. Sur le mono-VPS Hostinger,
-  PostgreSQL, Caddy et le volume brut sont dans la Compose durcie mais seul Caddy publie
-  des ports; la base et les images restent sur le réseau/volume privés.
+| Property | Managed profile | Hostinger single VPS |
+|---|---|---|
+| TLS edge | External and not defined by Compose | Caddy from this repository |
+| PostgreSQL | External; URL must use `sslmode=verify-full` | Private `db` container; no host port, no database TLS inside the Docker network |
+| Raw images | Private S3-compatible bucket with KMS settings | Private persistent Docker volume at `/app/data/raw` |
+| Secrets | External Docker secret objects | Root-owned files under `/opt/labelscan/secrets` mounted only into named services |
+| Database roles | **Gap:** one Compose secret is shared by migration and runtime | Separate owner/migration and restricted runtime credentials |
+| Backups | Entirely external | Pre-release dump/archive on the VPS; off-host copy remains external |
+| Egress control | External network policy | Worker-only egress network, but no destination allow-list in Compose |
 
-Tous les rôles applicatifs utilisent un UID/GID fixe, une racine en lecture seule, un tmpfs
-`noexec,nosuid,nodev`, `no-new-privileges`, aucune capability Linux et des limites de PID,
-mémoire et CPU. Ils ne montent jamais le socket Docker.
+The managed database-secret gap prevents that profile from meeting the documented
+least-privilege role split in the current managed profile. Do not mark the control
+complete until the Compose contract has separate owner and runtime secrets.
 
-## 4. Contrat de configuration fail-closed
+## Trust boundaries and controls
 
-Avec `LABELSCAN_ENV=production`, le processus refuse de démarrer si un invariant manque :
+| Boundary | Repository controls | Evidence still needed |
+|---|---|---|
+| Internet → edge | Host allow-list in the app; Hostinger HTTP redirect, HSTS, unknown-host rejection, and 11 MiB multipart cap | External port scan, TLS report, certificate renewal test, WAF/rate-limit policy if used |
+| Edge → API | No API host port in production Compose; explicit allowed hosts/proxies; foreign browser origin rejected on cookie-auth routes | Network membership and forwarded-header tests from trusted and untrusted peers |
+| Client → identity | PBKDF2 password hashing, generic login failure, signed short-lived JWT, server-side session check, rotating hashed refresh token | Account lifecycle review, credential policy, MFA decision, abuse testing |
+| API/worker → PostgreSQL | Parameter binding, tenant context, RLS, composite ownership keys, hardened runtime grants | Real production role/ownership query, connection transport proof, cross-tenant test |
+| API/worker → raw storage | Content-addressed SHA-256 reference; production storage topology validation; organization-prefixed S3 keys in the managed profile | Bucket/volume ACLs, encryption-at-rest proof, versioning/backup/restore evidence; VPS filesystem keys are not tenant-prefixed |
+| Worker → providers | Provider adapters, server-side secrets, timeouts, closed output schema, evidence/review gates | Restricted keys, quotas/cost alarms, egress policy, region/DPA approval |
+| Source → runtime image | Locked dependencies, digest-pinned base images, CI audits and Hostinger Trivy scans | SBOM, image signature/provenance, registry policy, runtime digest inspection |
 
-- topologie `managed` : URL PostgreSQL avec `sslmode=verify-full` et stockage S3/KMS;
-- topologie `single-vps` : hôte DB exact `db` et stockage brut exact `/app/data/raw`;
-- JWT secret non exemple, issuer et audience explicites;
-- origin HTTPS, allowed hosts et IP exactes des proxies explicites;
-- version de build explicite et header-auth désactivée;
-- côté worker, providers et secrets Google Vision/Anthropic présents.
+## Fail-closed production configuration
 
-Les secrets peuvent uniquement venir de `NAME` ou `NAME_FILE`, jamais des deux. Le contrat
-production n'utilise que les fichiers montés dans `/run/secrets`.
+For `LABELSCAN_ENV=production`, the API or worker refuses to start when its required
+contract is missing.
 
-## 5. Données et sessions
+Shared checks include:
 
-- Le JWT d'accès dure 15 minutes et porte `jti`, `sid`, `iss`, `aud`, acteur,
-  organisation, rôle, scopes, magasins, portails métier, portail principal, code
-  métier et type de client. La session serveur est vérifiée sur chaque accès protégé.
-- Le refresh est une valeur opaque 256 bits, hachée en base, valable sept jours et tournée
-  atomiquement. Une réutilisation révoque toute la famille.
-- Mobile : les deux tokens sont dans SecureStore avec
-  `WHEN_UNLOCKED_THIS_DEVICE_ONLY`. Navigateur : access token en mémoire, refresh dans un
-  cookie `HttpOnly`, `SameSite=Strict`, `Secure` en production, limité à `/v1/auth`.
-- Chaque session porte `client_type=browser|mobile`. Le navigateur accepte
-  `super_admin`, `admin` et `manager`; le mobile accepte uniquement un `manager` actif
-  affecté à exactement un portail et un magasin.
-  Login et refresh refusent tout changement de surface.
-- Logout, changement de mot de passe/rôle/affectation, reset de credential,
-  désactivation de compte ou de portail révoquent les sessions concernées.
-- L'image brute est persistée avant normalisation. Les historiques critiques et l'audit
-  sont append-only; le tenant est imposé par ownership et RLS PostgreSQL.
-- Aucun GUC applicatif n'active un accès multi-tenant. Les politiques RLS restent
-  organisation-scopées même si `labelscan.system_access` est falsifié. La résolution
-  initiale d'un refresh passe par deux fonctions
-  `SECURITY DEFINER` à `search_path` fixe qui ne renvoient que l'UUID d'organisation;
-  les lignes et hashes restent ensuite protégés par RLS.
+- the resolved topology is exactly `managed` or `single-vps`; an unset topology resolves
+  to `managed`;
+- header authentication is disabled;
+- the database URL and selected raw-store settings are present;
+- managed database transport uses `sslmode=verify-full`;
+- managed storage is S3 with `aws:kms`, a key ID, bucket, and region;
+- single-VPS storage is the filesystem path `/app/data/raw`, and the database host is
+  exactly `db` on the standard PostgreSQL port.
 
-### 5.1 Matrice d'autorisation métier
+The API additionally requires a non-placeholder JWT secret of at least 32 bytes, explicit
+issuer/audience, release version, HTTPS public origin, explicit hosts, and exact IPs or
+private proxy CIDRs. The worker requires the Google OCR selection and both provider keys.
 
-Le rôle accorde une capacité; l'organisation et les affectations accordent un
-périmètre de données. Les contrôles privilégiés relisent le rôle et les
-affectations persistés : des claims JWT plus larges ou périmés ne suffisent pas.
+The runtime can read a secret from `NAME` or `NAME_FILE`, but rejects both at once and
+limits secret files to 64 KiB. The production Compose profiles use mounted files. Direct
+environment values remain supported by code, so an operator must verify that the chosen
+deployment does not expose them through process or container metadata.
 
-| Rôle | Surface | Périmètre | Administration autorisée |
-|---|---|---|---|
-| `super_admin` | Navigateur | Tous les magasins et portails de son organisation | Seul rôle pouvant créer et soft-supprimer un admin; possède aussi les droits admin |
-| `admin` | Navigateur | Tous les magasins et portails de son organisation | Ajoute/désactive les magasins, choisit leurs métiers, crée/désactive les managers et affecte leurs portails |
-| `manager` | Navigateur et mobile | Son unique portail actif et le magasin dérivé | Consulte les arrivages et capture/valide les étiquettes; aucune administration d'identités |
+## Authentication and sessions
 
-`super_admin` reste strictement lié à une organisation : il n'existe pas de rôle
-global traversant les tenants.
+- Access tokens use HS256 and include `jti`, session family (`sid`), issuer, audience,
+  actor, organization, role, scopes, stores, business portals, profession, and client
+  type. Their default lifetime is 15 minutes and configuration cannot extend it beyond
+  one hour.
+- Refresh tokens are opaque random values. Only their SHA-256 digests are stored in
+  PostgreSQL. The default lifetime is seven days and the configured maximum is 30 days.
+- Refresh rotates atomically. Reuse of a consumed token revokes its session family.
+- Every protected production request checks that the session family behind the JWT is
+  still active.
+- Browser refresh tokens use an `HttpOnly`, `SameSite=Strict` cookie, marked `Secure` in
+  production and restricted to `/v1/auth`. Browser access tokens live in application
+  memory.
+- Mobile login/refresh returns both tokens in the JSON response. The intended mobile store
+  is SecureStore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY`.
+- Production browser login, refresh, and logout require the exact configured `Origin`.
+  Mobile uses token bodies rather than the browser cookie flow.
+- Login uses a dummy PBKDF2 verification for unknown accounts and a generic error to
+  reduce username enumeration.
 
-### 5.2 Isolation organisation × magasin × portail
+The rate limiter is in memory. Defaults bound failed logins by IP, add an account cooldown,
+limit refresh work, authenticated mutations, ingestion bursts, and long-poll holds. These
+limits reset on process restart and do not coordinate across API processes.
 
-Les trois professions autorisées sont `poissonnerie`, `boucherie` et
-`charcuterie_traiteur`. Ce dernier code désigne un unique métier; il ne doit pas
-être scindé. Un portail est identifié par l'unicité
-`(organization_id, store_id, profession_code)` et désactivé par état, jamais par
-suppression physique.
+### Mobile token storage
 
-La politique est appliquée à plusieurs étages :
+SecureStore with `WHEN_UNLOCKED_THIS_DEVICE_ONLY` is the sole persistent token store.
+Catalogue objects and exports contain no authorization metadata. The image hook derives
+the current Bearer in volatile state, reacts to token rotation, and refuses any URL that
+is not below the configured API base URL.
 
-1. résolution de l'organisation depuis la route/identité signée;
-2. scopes pour l'action, puis contexte d'accès pour les ids magasin/portail;
-3. prédicats SQL paramétrés sur `organization_id`, `store_id` et
-   `business_portal_id`;
-4. RLS PostgreSQL et clés étrangères composites empêchant les associations
-   inter-organisations;
-5. snapshots d'organisation, magasin, portail, métier/version et acteur sur
-   ingestion, lot et projection d'arrivage.
+### Shared-device and offline-queue controls
 
-Un identifiant absent ou non visible renvoie toujours `404 NOT_FOUND`, y compris
-sur les fiches et images d'arrivage, afin d'éviter l'énumération IDOR. `403
-FORBIDDEN` est réservé à une action connue interdite par le rôle/scope ou à une
-demande explicite de portail hors affectation. Les filtres ne peuvent jamais
-élargir le périmètre signé.
+Catalogue query keys and offline queues are partitioned by organization, actor, portal,
+and trade. Hydration/replay starts only after the authenticated context is known; logout,
+revocation, and scope changes clear the old perimeter first. Ownerless legacy rows are
+quarantined rather than upgraded implicitly.
 
-### 5.3 Credentials
+The versioned local schemas require organization and actor ownership. Ownerless legacy
+rows are quarantined, and a session-generation guard prevents work started by one session
+from continuing after a logout, revocation, or scope change. An `in_flight` operation still
+has no persisted lease recovery, and visible scan-card persistence is not atomic with
+durable photo/outbox persistence. Those remaining reliability gaps can strand or hide work
+after a crash.
 
-La création d'un admin ou manager exige un mot de passe d'au moins douze caractères et
-produit un compte immédiatement actif. Les placeholders connus sont refusés.
+JSON and CSV exports use an allow-listed, credential-free DTO and a temporary cache file
+deleted in `finally` after success, cancellation, or error. Startup ageing removes files
+left by an interrupted process. See OR-01 through OR-07 in the
+[risk register](THREAT-MODEL.md#confirmed-open-risk-register).
 
-Un utilisateur peut changer uniquement son propre mot de passe via
-`POST /v1/me/password`, en fournissant obligatoirement son mot de passe actuel. Un admin
-gère le cycle de vie et le portail des managers; un super-admin gère le cycle de vie des
-admins. Les réponses API n'exposent jamais un hash ou un ancien secret.
+## Authorization and tenant isolation
 
-## 6. Invariants de déploiement
+The active roles are `super_admin`, `admin`, and `manager`.
 
-1. Une image identifiée par digest, construite, scannée et signée.
-2. Une seule replica API tant que le rate limiter et les holds restent process-local.
-3. Edge seul exposé; API, DB, objet et workers privés.
-4. Migration one-shot réussie avant API/worker; aucun `alembic upgrade` dans leur startup.
-5. Secrets, TLS, sauvegardes, supervision et règles réseau prouvés hors Git.
-6. L'inventaire `docs/backend/openapi.v1.yaml` généré depuis le commit déployé est la
-   référence du périmètre pentest; l'endpoint OpenAPI runtime reste fermé.
+| Role | Current boundary |
+|---|---|
+| `super_admin` | All stores and portals in its organization; only role that manages administrators |
+| `admin` | Stores/portals owned by that administrator; manages their managers and configuration |
+| `manager` | One active business portal and the store/profession derived from it; only role accepted by mobile |
 
-## 7. Risques volontairement non résolus dans le MVP
+`super_admin` is organization-wide, never platform-global. The historical `operator` value
+remains interpretable in old data but production authentication does not accept it.
 
-- Le rate limiting n'est pas distribué : une seconde replica nécessite un contrôle edge ou
-  Redis avant déploiement.
-- SSO/MFA, PIN/kiosque et distribution MDM restent des travaux de phase suivante.
-- L'infrastructure managée, le chiffrement effectivement activé, les DPA, la rétention,
-  l'exercice PITR et la réponse à incident exigent des preuves externes.
-- Le pentest peut produire de nouveaux constats; ce document n'est ni une certification ni
-  une acceptation anticipée des risques.
+Authorization combines:
+
+1. verified identity and active session;
+2. required capability/scope;
+3. organization, store, and business-portal context;
+4. parameterized repository predicates;
+5. PostgreSQL RLS and composite foreign keys;
+6. immutable ownership snapshots on historical ingestion/traceability rows.
+
+Privileged identity operations re-read the actor's persisted role and assignments. Role,
+password, assignment, account, store, or portal changes revoke affected sessions. A hidden
+or foreign record is generally returned as `404`; `403` is used for a known action denied
+by role/scope or an explicit out-of-assignment request.
+
+## Password policy
+
+The server is authoritative:
+
+- all new passwords are 12–128 characters and known placeholders are rejected;
+- administrator and super-administrator passwords must also contain uppercase,
+  lowercase, digit, and non-alphanumeric characters;
+- manager passwords use the length and placeholder policy;
+- password hashes use PBKDF2-HMAC-SHA256 with a per-password random salt and 600,000
+  iterations; verification uses a constant-time comparison;
+- changing a password requires the current password and revokes sessions.
+
+Back-office forms mirror these rules, including the 12-character minimum and Unicode-safe
+letter/number/special-character checks for privileged roles. The server remains
+authoritative, and release tests cover each create/change flow so later UI drift cannot
+weaken or misrepresent the policy.
+
+PBKDF2 at this work factor is not recorded as a current vulnerability. The
+[OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+prefers Argon2id for general password storage and lists PBKDF2-HMAC-SHA256 at 600,000
+iterations when FIPS-140 compliance is required. The current encoding has no
+rehash-on-login path or pepper. Benchmark Argon2id on the production hardware, add an
+algorithm-versioned migration, and make any pepper decision together with key custody and
+recovery design. This is hardening item OR-13, not a release blocker by itself.
+
+## Upload and extraction boundary
+
+The public ingestion route requires authentication, the ingestion scope, and an
+idempotency key. It reads the upload incrementally, accepts JPEG/PNG/WebP only, limits the
+file to 10 MiB, checks format headers and dimensions, caps either side at 10,000 pixels,
+and caps total pixels. Hostinger Caddy rejects an 11 MiB multipart envelope before the API.
+
+These checks are targeted parsers, not a complete image decode, malware scan, antivirus,
+or content-disarm pipeline. Fuzz malformed, polyglot, truncated, and resource-intensive
+files during security testing.
+
+OCR and label text are treated as untrusted data. Provider output must match a closed JSON
+schema and exact profile field set. The domain evidence gate rejects unsupported values,
+confidence/profile rules route uncertainty to review, and GS1 values take precedence for
+the fields they encode. These controls reduce prompt-injection and fabrication risk; they
+do not prove model correctness. Adversarial evaluation and human review remain required.
+
+The persisted provider history is deliberately described more narrowly than the accepted
+ADR-0003 target. The extraction consumer stores a reduced OCR projection (full text, mean
+confidence, and page) and a reduced LLM projection (decoded fields plus model/prompt
+metadata). It does not preserve the complete provider envelopes, OCR geometry, or
+per-token confidence. OR-17 tracks the immutable, access-controlled provider-artifact
+design and retrieval proof needed to close that evidence gap.
+
+## Database and audit controls
+
+- Tenant-owned tables use organization context and RLS where defined by migrations.
+- The current hardening migration forces RLS on protected ingestion and related tables and
+  fails if `labelscan_app` is privileged, owns protected objects, or is used to migrate.
+- The runtime role has explicit table/function grants and cannot create database objects,
+  use privileged role membership, or bypass RLS in the single-VPS contract.
+- Raw artifacts, extraction history, audit rows, batches, and other historical tables use
+  restricted grants and mutation-denial triggers where their migrations define them.
+- Audit triggers run as a tightly scoped definer function and require transaction-local
+  actor/action/correlation/trace context. The business write and audit row commit or roll
+  back together.
+- Mutable operational tables such as sessions, outbox delivery, ingestion status, alerts,
+  assignments, and current projections are not described as append-only.
+
+The audit row contains event time, actor, action, subject schema/table/ID, correlation ID,
+and trace ID. It does not contain the before/after snapshot references specified by
+ADR-0004. The journal proves that a configured write occurred with its security context,
+but it cannot by itself reconstruct the old and new values. OR-18 tracks a secret-safe
+snapshot or immutable change-record design and its same-transaction tests.
+
+Database controls still depend on the connection role actually used. Tests with a
+superuser cannot prove the production runtime boundary; inspect the live role, memberships,
+object ownership, grants, `rolbypassrls`, and RLS behavior.
+
+Managed S3 keys include the organization prefix. The filesystem raw store used by the
+single-VPS profile ignores `organization_id` when it derives a path and stores bytes only
+by content hash. Normal API and database authorization still scopes access, but the
+volume is not a storage-level tenant boundary: a compromised process or known checksum
+can cross that defense-in-depth layer. Treat OR-11 in the
+[open-risk register](THREAT-MODEL.md#confirmed-open-risk-register) as a deliberate VPS
+storage migration decision, not as equivalent to managed S3 isolation.
+
+The S3 adapter recomputes SHA-256 after a read. The filesystem store and its HTTP image
+reader do not; they trust the checksum-derived path. The database still records the expected
+hash, but corruption or unauthorized byte changes are not detected on the VPS read path.
+OR-15 requires fail-closed read verification plus operational durability checks.
+
+## HTTP and browser controls
+
+Production disables `/docs`, `/redoc`, and `/openapi.json`. API responses default to
+`Cache-Control: no-store`, use sanitized RFC 9457 problem responses, and return correlation
+IDs without internal exception details. Security middleware adds content sniffing, frame,
+permissions, referrer, and CSP controls. The back office receives a same-origin CSP; public
+Hostinger responses receive canonical HSTS, content-type, and referrer headers from Caddy.
+
+Caddy rejects unknown HTTP hosts and uses strict SNI handling for HTTPS. The Hostinger API
+trusts the private `172.16.0.0/12` proxy CIDR configured in Compose, so Docker network
+membership is part of the trust boundary. The deploy smoke test covers unknown hosts and
+forged identity headers, but it does not replace a full forwarded-header test from every
+network position.
+
+## Container and supply-chain controls
+
+Application and worker containers run as UID/GID `10001` with a read-only root filesystem,
+a bounded `noexec,nosuid,nodev` temporary filesystem, all capabilities dropped,
+`no-new-privileges`, and resource/PID limits. Caddy runs as UID/GID `10002` and retains
+only `NET_BIND_SERVICE`. PostgreSQL runs as its non-root image user on a writable private
+data volume; it cannot use the application read-only profile.
+
+Base images and GitHub Actions are pinned. Python requirements are fully resolved and
+hashed; npm lockfiles are audited. CI performs a high-signal tracked-secret scan. The
+Hostinger release gate scans all three runtime images and deployment configuration with
+Trivy.
+
+The tracked-secret scan recognizes selected key patterns and filenames; it is not a full
+secret detector. The VPS workflow does not currently generate an SBOM or sign its locally
+built images. Runtime image provenance and registry enforcement remain external for the
+managed profile.
+
+## Mobile transport controls and limitation
+
+The intended production/preview EAS profiles use HTTPS and configure Android API 33 as the
+minimum, disable Android backups, block unnecessary sensitive permissions, and enable
+release shrinking/minification. The static Android check resolves the configuration as a
+production profile.
+
+A locally assembled Android release can retain cleartext traffic when
+`LABELSCAN_BUILD_PROFILE` is not `preview` or `production`. Therefore the static check
+alone does not prove the shipped native artifact. The release process must use an approved
+profile and inspect the generated manifest/network security configuration before approval.
+
+## Controls that are not implemented here
+
+Several enterprise controls sit outside the current repository: SSO/OIDC, MFA,
+MDM/kiosk policy, remote device attestation, automatic malware scanning/content disarm,
+a distributed rate limiter, Prometheus/OpenTelemetry, automatic SLO alerting, and a tested
+incident-response platform.
+
+Implemented areas also have unresolved gaps. The
+[open-risk register](THREAT-MODEL.md#confirmed-open-risk-register) is the only maintained
+source for their priority, impact, remediation, and exception policy:
+
+- mobile credentials, account isolation, queued work, durability, exports, Android
+  transport, and local capacity: `OR-01`–`OR-07`, `OR-16`, `OR-19`;
+- deployment credentials, egress, backups, storage tenancy, and filesystem integrity:
+  `OR-08`–`OR-11`, `OR-15`;
+- operational detection, provider evidence, and audit reconstruction: `OR-12`, `OR-17`,
+  `OR-18`;
+- password evolution/forms, model compatibility, and client-header ownership: `OR-13`,
+  `OR-14`, `OR-20`, `OR-21`.
+
+These gaps are not implied acceptance. Do not approve a P0 item as ordinary technical
+debt.

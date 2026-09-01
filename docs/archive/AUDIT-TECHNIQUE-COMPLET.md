@@ -1,5 +1,8 @@
 # Audit Technique Complet — LabelScan (Traçabilité HACCP produits de la mer)
 
+> **Archived:** Point-in-time audit, not a current risk or implementation guide. See the
+> [archive index](README.md) and [current security architecture](../security/SECURITY-ARCHITECTURE.md).
+
 > **Version :** **v2 — 2026-06-17** (remplace la v1 du 2026-06-15)  **Auditeur :** Architecte Technique Senior / Lead Dev
 > **Périmètre :** dépôt `LabelScan/` (mobile Expo/RN + backend Python/FastAPI + docs + infra)
 > **Méthode :** lecture exhaustive du code source + exécution réelle de `lint-imports` (G-ARCH, **112 fichiers / 268 dépendances, 5/5 contrats**) et de la suite de tests (**27 fichiers / 142 tests**) ; chaque constat est ancré en `chemin:ligne`.
@@ -42,7 +45,7 @@ Le prompt d'audit était générique (placeholders). La stack **réelle** observ
 - [3. Cartographie des dépendances](#3-cartographie-des-dépendances)
 - [4. Speech technologique (justification par brique)](#4-speech-technologique--justification-par-brique)
 - [5. Synthèse stratégique & plan d'action](#5-synthèse-stratégique--plan-daction)
-- [6. Conformité au spec figé (GAP REPORT)](#6-conformité-au-spec-figé--gap-report)
+- [6. Conformité au spec figé (GAP REPORT)](#6-conformité-au-spec-figé-gap-report)
 - [7. Conditions STOP & contradictions (CLAUDE.md)](#7-conditions-stop--contradictions-claudemd)
 
 ---

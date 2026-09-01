@@ -14,7 +14,8 @@
  */
 
 import { fieldOrderForTrade } from './fieldOrder';
-import type { ExtractionField } from '../types/api';
+import { requiresExplicitHumanConfirmation } from './reviewFieldAttention';
+import type { ExtractionField, ValidationStatus } from '../types/api';
 
 /** The active poissonnerie V2 denominator shown in the UI. */
 export const CANONICAL_FIELD_COUNT = fieldOrderForTrade('poissonnerie').length;
@@ -28,6 +29,22 @@ export function normalizeFinalReviewValue(
   return normalized.toUpperCase() === NOT_COMMUNICATED_VALUE
     ? NOT_COMMUNICATED_VALUE
     : normalized;
+}
+
+/**
+ * Seed the editable HUMAN review without inventing a decision for the operator.
+ *
+ * A machine absence stays blank and therefore cannot count as a completed field. A
+ * defensive stray value attached to `missing` is ignored too. `NC` becomes final only
+ * when it was already explicit in a non-missing value or when the operator selects it
+ * in the review UI.
+ */
+export function initialHumanReviewValue(
+  value: string | null | undefined,
+  validationStatus?: ValidationStatus,
+): string {
+  if (validationStatus === 'missing') return '';
+  return normalizeFinalReviewValue(value);
 }
 
 /** Typing a single n/N explicitly offers the canonical non-communicated value. */
@@ -47,8 +64,9 @@ function isFilledValue(value: string | null | undefined): boolean {
 
 /**
  * Count filled canonical fields from a FINAL extraction run's field list.
- * A field with validation_status 'missing' never counts, even if it carries a
- * stray value. Fields outside the canonical profile set are ignored.
+ * A field with a questionable machine status never counts until a human draft exists,
+ * even if it carries a proposed value. Fields outside the canonical profile set are
+ * ignored.
  *
  * `edits` (workflow v2, optional) is the scan's persisted review draft: where a key
  * exists it OVERRIDES the run value — a typed value fills the field, a blanked draft
@@ -69,7 +87,7 @@ export function filledCountFromRun(
     }
     const f = byName.get(name);
     if (!f) continue;
-    if (f.validation_status === 'missing') continue;
+    if (requiresExplicitHumanConfirmation(f.validation_status)) continue;
     if (isFilledValue(f.value)) count += 1;
   }
   return count;

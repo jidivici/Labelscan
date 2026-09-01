@@ -20,7 +20,8 @@ from labelscan.app.extraction_wiring import register_extraction_consumer
 from labelscan.app.ocr_wiring import build_ocr_provider
 from labelscan.platform.config import validate_runtime_configuration
 from labelscan.platform.db.engine import make_engine
-from labelscan.platform.observability import configure_logging
+from labelscan.platform.external_api import external_api_monitor
+from labelscan.platform.observability import configure_logging, get_logger
 from labelscan.platform.outbox.worker import OutboxWorker
 from labelscan.platform.storage_factory import build_raw_store
 
@@ -52,6 +53,8 @@ _HEARTBEAT_PATH = os.environ.get(
 _HEARTBEAT_MAX_AGE_S = float(
     os.environ.get("LABELSCAN_WORKER_HEARTBEAT_MAX_AGE", "180")
 )
+_METRICS_LOG_INTERVAL_S = 60.0
+_log = get_logger("worker.metrics")
 
 
 def _beat(path: str = _HEARTBEAT_PATH) -> None:
@@ -77,8 +80,14 @@ def poll_forever(
     worker: OutboxWorker, *, interval_seconds: float = 1.0, batch: int = 100
 ) -> None:
     _beat()  # mark alive immediately at boot (before the first claim)
+    last_metrics_log = 0.0
     while True:
         _beat()  # one heartbeat per poll iteration
+        now = time.monotonic()
+        if now - last_metrics_log >= _METRICS_LOG_INTERVAL_S:
+            for provider, metrics in external_api_monitor.snapshot().items():
+                _log.info("external_api_metrics", extra={"provider": provider, **metrics})
+            last_metrics_log = now
         if worker.run_once(max_messages=batch) == 0:
             time.sleep(interval_seconds)
 

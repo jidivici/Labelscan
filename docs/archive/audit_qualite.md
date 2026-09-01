@@ -1,4 +1,7 @@
 # MISSION D'AUDIT STRICT : Vérification de l'augmentation réelle de la qualité
+
+> **Archived:** Closed audit brief, not a current quality process. See the
+> [archive index](README.md) and [living documentation](../README.md).
 **Rôle :** Lead QA Engineer & UX/UI Auditor (Intransigeant)
 **Modèle d'exécution :** Claude Opus 4.8
 

@@ -4,6 +4,7 @@ migrated to head (the run script / CI does `alembic upgrade head` first).
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
 from contextlib import contextmanager
@@ -13,15 +14,74 @@ from sqlalchemy import create_engine, text
 
 ACTOR_ID = "11111111-1111-1111-1111-111111111111"
 
+_JPEG_COMMENT_PAYLOAD_MAX = 65_533
+_ONE_PIXEL_JPEG = base64.b64decode(
+    b"/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAMCAgMCAgMDAwMEAwMEBQgFBQQE"
+    b"BQoHBwYIDAoMDAsKCwsNDhIQDQ4RDgsLEBYQERMUFRUVDA8XGBYUGBIUFRT/"
+    b"2wBDAQMEBAUEBQkFBQkUDQsNFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQU"
+    b"FBQUFBQUFBQUFBQUFBQUFBQUFBQUFBT/wAARCAABAAEDASIAAhEBAxEB/8QA"
+    b"HwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFB"
+    b"AQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKF"
+    b"hcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1d"
+    b"nd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx"
+    b"8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBA"
+    b"QEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECA"
+    b"xEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJy"
+    b"gpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYa"
+    b"HiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX"
+    b"2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDwqiiiv3M/HD//"
+    b"2Q=="
+)
+
+
+def _jpeg_comment_segments(payload: bytes) -> bytes:
+    return b"".join(
+        b"\xff\xfe" + (len(chunk) + 2).to_bytes(2, "big") + chunk
+        for offset in range(0, len(payload), _JPEG_COMMENT_PAYLOAD_MAX)
+        if (chunk := payload[offset : offset + _JPEG_COMMENT_PAYLOAD_MAX])
+    )
+
 
 def jpeg_bytes(payload: bytes = b"") -> bytes:
-    """Minimal one-pixel JPEG structure accepted by the upload header validator."""
-    return (
-        b"\xff\xd8\xff\xc0\x00\x11\x08\x00\x01\x00\x01"
-        b"\x03\x01\x11\x00\x02\x11\x00\x03\x11\x00"
-        + payload
-        + b"\xff\xd9"
-    )
+    """Return a real Pillow-decodable JPEG carrying opaque test payload.
+
+    Payload bytes live in standards-compliant COM segments rather than in the
+    entropy stream. This keeps the compressed pixels valid while still giving
+    tests deterministic, distinct raw artifacts of arbitrary size.
+    """
+
+    return _ONE_PIXEL_JPEG[:2] + _jpeg_comment_segments(payload) + _ONE_PIXEL_JPEG[2:]
+
+
+def jpeg_bytes_of_size(total_size: int) -> bytes:
+    """Return a valid JPEG whose byte length is exactly ``total_size``.
+
+    Each COM segment costs four framing bytes, so payload-boundary tests cannot
+    derive their payload from the base JPEG length alone. Solve for a segment
+    count whose encoded payload lands exactly on the requested boundary.
+    """
+
+    base_size = len(_ONE_PIXEL_JPEG)
+    if total_size < base_size:
+        raise ValueError(f"JPEG size must be at least {base_size} bytes")
+    if total_size == base_size:
+        return _ONE_PIXEL_JPEG
+
+    available = total_size - base_size
+    max_segments = available // 4
+    for segment_count in range(1, max_segments + 1):
+        payload_size = available - (4 * segment_count)
+        if payload_size <= 0:
+            break
+        required_segments = (
+            payload_size + _JPEG_COMMENT_PAYLOAD_MAX - 1
+        ) // _JPEG_COMMENT_PAYLOAD_MAX
+        if required_segments == segment_count:
+            result = jpeg_bytes(b"x" * payload_size)
+            if len(result) != total_size:  # pragma: no cover - invariant guard
+                raise AssertionError("exact-size JPEG construction failed")
+            return result
+    raise ValueError(f"cannot encode a valid JPEG of exactly {total_size} bytes")
 
 
 @contextmanager
@@ -50,6 +110,16 @@ def capture_logger(caplog, name: str):
 os.environ.setdefault(
     "LABELSCAN_JWT_SECRET", "test-jwt-secret-not-for-prod-0123456789abcdef"
 )
+
+
+@pytest.fixture(autouse=True)
+def _reset_external_api_metrics():
+    """Keep process-local provider quotas isolated between unit tests."""
+    from labelscan.platform.external_api import external_api_monitor
+
+    external_api_monitor.reset()
+    yield
+    external_api_monitor.reset()
 
 
 def bearer(

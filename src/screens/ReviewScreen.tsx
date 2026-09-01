@@ -26,9 +26,15 @@ import { StackNavigationProp } from '@react-navigation/stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
-import { deletePendingPhoto, getAllArticles, persistConfirmedPhoto } from '../services/storage';
+import {
+  deleteConfirmedPhoto,
+  deletePendingPhoto,
+  getAllArticles,
+  persistConfirmedPhoto,
+} from '../services/storage';
 import { queryClient } from '../services/queryClient';
 import { businessProfileFor } from '../services/businessProfiles';
+import { catalogQueryKey } from '../services/catalogApi';
 import { suggestAllergen } from '../services/allergenSuggestions';
 import { buildFieldHistory, suggestForField, type FieldHistory } from '../services/fieldHistory';
 import {
@@ -55,7 +61,7 @@ import {
   validateHealthMark,
   type WeightUnit,
 } from '../services/inputMasks';
-import { fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
+import { displayFieldValue, fieldLabelFr, ingestionStatusFr } from '../services/fieldLabels';
 import { parseGs1, gs1FieldValues } from '../services/gs1';
 import { useScan } from '../hooks/useScanQueue';
 import {
@@ -66,7 +72,8 @@ import {
   saveScanPhotoRotation,
 } from '../services/scanQueue';
 import {
-  filledCountFromValues,
+  filledCountFromRun,
+  initialHumanReviewValue,
   normalizeFinalReviewValue,
   NOT_COMMUNICATED_VALUE,
   notCommunicatedSuggestion,
@@ -84,7 +91,16 @@ import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
 import { validateFinalReviewValues } from '../services/finalReviewValidation';
-import { shouldHighlightReviewField } from '../services/reviewFieldAttention';
+import { canonicalizeFinalReviewValue } from '../services/finalReviewValidation';
+import {
+  captureActiveSession,
+  isSessionFenceCurrent,
+  operatorContextKey,
+} from '../services/authStorage';
+import {
+  requiresExplicitHumanConfirmation,
+  shouldHighlightReviewField,
+} from '../services/reviewFieldAttention';
 import { useAuth } from '../context/AuthContext';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import type { RootStackParamList } from '../navigation/RootNavigator';
@@ -111,10 +127,10 @@ const PHOTO_HEIGHT_LANDSCAPE = 200;
 
 // ── Server extraction — single homogeneous editable list ──────────────────────────
 
-// Empty fields get a brand-tinted "à compléter" highlight, computed from the live
-// draft inside EditableFieldRow (so it clears the instant a value is typed). We
-// deliberately do NOT surface AI confidence or an "à vérifier" flag: manual validation
-// is the single source of truth (CLAUDE.md "Clean UI Radicale", audit §6.2).
+// Empty fields get a brand-tinted review cue, computed from the live draft inside
+// EditableFieldRow (so it clears the instant a value is typed or explicitly marked NC).
+// Raw AI confidence stays hidden: the operator receives one actionable human-review
+// state instead of provider-specific implementation details.
 
 // Canonical profile display order. The SAME order drives the loading skeleton
 // list AND the ready list, so rows never reshuffle when the run lands (audit §2.2 — zero
@@ -299,13 +315,15 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   history?: FieldHistory | null;
   edited: boolean;
 }) {
-  // "À compléter" highlight is REACTIVE to the live draft (not the server value): an
-  // empty field is highlighted with the brand tint, which vanishes as soon as it is filled.
+  // The review cue is REACTIVE to the live draft (not the server value): an empty
+  // machine result remains unconfirmed until the operator enters a value or selects NC.
   const empty = draft.trim() === '';
   // A questionable extraction is deliberately styled like an empty field: same calm
   // green cue, never an alarming error colour. We do not expose raw provider text;
   // the usual field suggestions remain the only assistance under the input.
   const highlighted = shouldHighlightReviewField(draft, field.validation_status, edited);
+  const needsExplicitConfirmation =
+    !empty && !edited && requiresExplicitHumanConfirmation(field.validation_status);
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
   const showSuggestion = !!suggestion && empty;
@@ -318,6 +336,10 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // Health mark ("estampille sanitaire"): the official stamp is always uppercase, so
   // every keystroke is force-cased — never a stripped/computed character.
   const isHealthMark = isHealthMarkField(field.field_name);
+  const attentionLabel =
+    !edited && requiresExplicitHumanConfirmation(field.validation_status)
+      ? 'À vérifier'
+      : 'À compléter';
   const handleChange = (text: string) => {
     if (notCommunicatedSuggestion(text)) {
       emit(text);
@@ -352,8 +374,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
     <View style={styles.fieldRow}>
       <View style={styles.fieldHeader}>
         <Text style={[typography.labelSmall, styles.fieldName]}>{fieldLabelFr(field.field_name)}</Text>
-        {empty ? (
-          <Text style={[typography.labelSmall, styles.attentionTag]}>À compléter</Text>
+        {empty || needsExplicitConfirmation ? (
+          <Text style={[typography.labelSmall, styles.attentionTag]}>{attentionLabel}</Text>
         ) : null}
       </View>
       {isNotCommunicated && ['weight', 'storage_temperature'].includes(field.field_name) ? (
@@ -372,7 +394,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         <WeightInput
           draft={draft}
           onChange={emit}
-          highlighted={empty}
+          highlighted={highlighted}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         />
@@ -380,7 +402,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         <TempRangeInput
           draft={draft}
           onChange={emit}
-          highlighted={empty}
+          highlighted={highlighted}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         />
@@ -406,6 +428,47 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         />
       )}
       {hint ? <Text style={[typography.labelSmall, styles.inputHint]}>{hint}</Text> : null}
+      {needsExplicitConfirmation ? (
+        <View style={styles.reviewDecisionRow}>
+          <Pressable
+            onPress={() => emit(draft)}
+            style={styles.confirmSuggestionChip}
+            android_ripple={{ color: colors.primaryContainer }}
+            accessibilityRole="button"
+            accessibilityLabel={`Confirmer la valeur proposée pour ${fieldLabelFr(field.field_name)}`}
+          >
+            <MaterialCommunityIcons name="check" size={14} color={colors.onPrimary} />
+            <Text style={[typography.labelSmall, styles.confirmSuggestionChipText]}>
+              Confirmer cette valeur
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => emit(NOT_COMMUNICATED_VALUE)}
+            style={styles.notCommunicatedChip}
+            android_ripple={{ color: colors.primaryContainer }}
+            accessibilityRole="button"
+            accessibilityLabel={`Marquer ${fieldLabelFr(field.field_name)} non communiqué`}
+            accessibilityHint="Remplace la valeur proposée par NC"
+          >
+            <Text style={[typography.labelSmall, styles.notCommunicatedChipText]}>Marquer NC</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      {empty ? (
+        <Pressable
+          onPress={() => emit(NOT_COMMUNICATED_VALUE)}
+          style={styles.notCommunicatedChip}
+          android_ripple={{ color: colors.primaryContainer }}
+          accessibilityRole="button"
+          accessibilityLabel={`Marquer ${fieldLabelFr(field.field_name)} non communiqué`}
+          accessibilityHint="Confirme que cette information est absente de l’étiquette"
+        >
+          <MaterialCommunityIcons name="eye-check-outline" size={14} color={colors.primary} />
+          <Text style={[typography.labelSmall, styles.notCommunicatedChipText]}>
+            Information absente · Marquer NC
+          </Text>
+        </Pressable>
+      ) : null}
       {historySuggestions.length > 0 ? (
         <View style={styles.historyChipsRow}>
           {historySuggestions.map((value) => (
@@ -447,7 +510,7 @@ export function ReviewScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RouteType>();
-  const { user, businessPortalId, tradeCode } = useAuth();
+  const { user, organizationId, actorId, businessPortalId, tradeCode } = useAuth();
   const { pendingScanId } = route.params;
 
   // Single source of truth (workflow v1): photo, barcode, ingestion id and the
@@ -466,9 +529,17 @@ export function ReviewScreen() {
   const reviewProfile = businessProfileFor(scan?.tradeCode ?? tradeCode);
   const fieldGroups = reviewProfile.groups;
   const fieldOrder = reviewProfile.fields;
+  const currentScopeKey = useMemo(
+    () =>
+      organizationId && actorId && businessPortalId && tradeCode
+        ? operatorContextKey({ organizationId, actorId, businessPortalId, tradeCode })
+        : null,
+    [actorId, businessPortalId, organizationId, tradeCode],
+  );
 
   const [saving, setSaving] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+  const saveInFlightRef = useRef(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
@@ -496,8 +567,18 @@ export function ReviewScreen() {
   // save's own navigation (the queue notifies during the await → double goBack).
   const closingRef = useRef(false);
   useEffect(() => {
-    if (!scan && !closingRef.current) navigation.goBack();
-  }, [scan, navigation]);
+    const scanScopeKey = scan
+      ? operatorContextKey({
+          organizationId: scan.organizationId,
+          actorId: scan.actorId,
+          businessPortalId: scan.businessPortalId,
+          tradeCode: scan.tradeCode,
+        })
+      : null;
+    if ((!scan || !currentScopeKey || scanScopeKey !== currentScopeKey) && !closingRef.current) {
+      navigation.goBack();
+    }
+  }, [currentScopeKey, scan, navigation]);
 
   const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
   const fields = run?.fields ?? [];
@@ -518,15 +599,22 @@ export function ReviewScreen() {
   const [fieldHistory, setFieldHistory] = useState<FieldHistory | null>(null);
   useEffect(() => {
     let cancelled = false;
-    getAllArticles()
-      .then((articles) => {
-        if (!cancelled) setFieldHistory(buildFieldHistory(articles));
-      })
-      .catch(() => undefined);
+    void (async () => {
+      const fence = await captureActiveSession();
+      if (!fence || fence.scopeKey !== currentScopeKey) return;
+      try {
+        const articles = await getAllArticles();
+        if (!cancelled && isSessionFenceCurrent(fence) && fence.scopeKey === currentScopeKey) {
+          setFieldHistory(buildFieldHistory(articles));
+        }
+      } catch {
+        // A storage/network hiccup only disables suggestions for this session.
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [currentScopeKey]);
 
   // Instrumentation (dev only): the photo→ready latency (docs/LATENCY-REVIEW.md §6),
   // measured from the scan's creation (workflow v1 — there is no more "Valider tap"
@@ -568,26 +656,27 @@ export function ReviewScreen() {
   }, [interimValues, gs1Values]);
 
   // Effective value of each canonical field = the operator's draft if present, else the
-  // display-formatted extracted value. This is exactly what handleSave will persist, so
-  // it drives the profile completeness gate AND seeds each editable row (no
-  // divergence between the count and what's on screen).
+  // display-formatted extracted value. A machine absence deliberately remains blank:
+  // only a typed value or an explicit tap on "Marquer NC" completes it. This is exactly
+  // what handleSave persists, so the counter and the backend payload cannot diverge.
   const effectiveValues = useMemo(() => {
     const out: Record<string, string> = {};
     for (const name of fieldOrder) {
       const field = fieldsByName.get(name);
-      const extracted = field
-        ? isDateField(name)
-          ? displayDate(field.value ?? '')
-          : field.value ?? ''
+      const initial = field
+        ? initialHumanReviewValue(field.value, field.validation_status)
         : '';
+      const extracted = isDateField(name)
+        ? displayDate(initial)
+        : displayFieldValue(name, initial) ?? '';
       out[name] = edits[name] ?? extracted;
     }
     return out;
   }, [fieldsByName, edits, fieldOrder]);
   // "Enregistrer l'arrivage" unlocks only when every active profile field is non-blank.
   const filledCount = useMemo(
-    () => filledCountFromValues(effectiveValues, reviewProfile.code),
-    [effectiveValues, reviewProfile.code],
+    () => filledCountFromRun(fields, edits, reviewProfile.code),
+    [edits, fields, reviewProfile.code],
   );
 
   // GS1 wins on lot/DLC at T+0; the backend reconciles the same way, so the values stay
@@ -604,15 +693,48 @@ export function ReviewScreen() {
 
   const handleRecapture = useCallback(async () => {
     if (!scan) return;
+    const fence = await captureActiveSession();
+    if (!fence || !isSessionFenceCurrent(fence) || fence.scopeKey !== currentScopeKey) return;
     // This terminal result must never reach the review outbox. Remove only the local
     // workflow/photo, then create a completely fresh idempotent ingestion from Camera.
     closingRef.current = true;
     await discardScan(scan.id);
+    if (!isSessionFenceCurrent(fence)) return;
     navigation.replace('Camera', { recapture: true });
-  }, [navigation, scan]);
+  }, [currentScopeKey, navigation, scan]);
 
   const handleSave = useCallback(async () => {
-    if (requiresRecapture || !run || !ingestion || !ingestionId || !scan) return;
+    if (
+      requiresRecapture ||
+      !run ||
+      !ingestion ||
+      !ingestionId ||
+      !scan ||
+      saveInFlightRef.current
+    ) return;
+    saveInFlightRef.current = true;
+    const fence = await captureActiveSession();
+    const scanScopeKey = operatorContextKey({
+      organizationId: scan.organizationId,
+      actorId: scan.actorId,
+      businessPortalId: scan.businessPortalId,
+      tradeCode: scan.tradeCode,
+    });
+    if (
+      !fence ||
+      !isSessionFenceCurrent(fence) ||
+      !currentScopeKey ||
+      fence.scopeKey !== currentScopeKey ||
+      scanScopeKey !== currentScopeKey
+    ) {
+      saveInFlightRef.current = false;
+      return;
+    }
+    const sessionIsCurrent = () =>
+      isSessionFenceCurrent(fence) && fence.scopeKey === currentScopeKey;
+    const assertCurrentSession = () => {
+      if (!sessionIsCurrent()) throw new Error('MOBILE_SESSION_CHANGED');
+    };
     // A scan captured by the short-lived +90° build has already reached the
     // server without physical rotation. It cannot be corrected safely after
     // OCR: ask for a new capture instead of submitting a payload the deployed
@@ -622,6 +744,7 @@ export function ReviewScreen() {
         'Photo à reprendre',
         'Cette photo a été prise avec une ancienne version de la rotation. Revenez à la liste, supprimez cet arrivage puis reprenez la photo.',
       );
+      saveInFlightRef.current = false;
       return;
     }
     setSaving(true);
@@ -629,18 +752,17 @@ export function ReviewScreen() {
     try {
       const savedFields: ArticleField[] = fieldOrder.map((name): ArticleField => {
         const extractedField = fieldsByName.get(name);
-        const draft = edits[name];
-        const hasEdit = draft !== undefined;
-        const rawNext = normalizeFinalReviewValue(hasEdit ? draft : extractedField?.value);
+        const rawNext = normalizeFinalReviewValue(effectiveValues[name]);
         // Dates are stored CANONICAL ISO (the operator types DD/MM/YYYY; we keep
         // YYYY-MM-DD) so storage, display (displayDate) and the backend chronological gate
         // stay in sync. toIsoDate is the exact inverse of the displayDate that seeds the
         // field, so the persisted value renders back to what the operator saw (audit §7.2
         // step 4 / §4.3 / §4.4).
-        const nextValue =
+        const dateCanonical =
           rawNext !== NOT_COMMUNICATED_VALUE && isDateField(name)
             ? toIsoDate(rawNext)
             : rawNext;
+        const nextValue = canonicalizeFinalReviewValue(name, dateCanonical);
         // Compare CANONICAL values: re-typing the same date is no longer a false "édité"
         // (audit §5 step 3 — the old code compared a DD/MM/YYYY draft to an ISO value).
         const changed = nextValue !== extractedField?.value;
@@ -660,16 +782,10 @@ export function ReviewScreen() {
       let operation = scan.finalizeOpId
         ? await getOperation(scan.finalizeOpId)
         : null;
+      assertCurrentSession();
       const finalReviewPayload = {
         ingestion_id: ingestionId,
-        fields: Object.fromEntries(
-          fieldOrder.map((name) => [
-            name,
-            normalizeFinalReviewValue(
-              savedFields.find((field) => field.field_name === name)?.value,
-            ),
-          ]),
-        ),
+        fields: Object.fromEntries(savedFields.map((field) => [field.field_name, field.value])),
         photo_rotation_degrees: photoRotationDegrees,
         photo_base_rotation_degrees: scan.photoBaseRotationDegrees ?? -90,
       };
@@ -686,18 +802,25 @@ export function ReviewScreen() {
       }
       if (!operation) {
         operation = await enqueueFinalizeReview(finalReviewPayload);
+        assertCurrentSession();
         attachFinalizeOperation(scan.id, operation.id);
       } else {
         // A manager can correct the photo after a first offline/failed attempt.
         // Reuse the durable operation, but never resend its stale orientation.
-        operation = (await updatePendingFinalizeReview(operation.id, finalReviewPayload)) ?? operation;
+        operation =
+          (await updatePendingFinalizeReview(operation.id, finalReviewPayload, Date.now(), fence)) ??
+          operation;
+        assertCurrentSession();
         if (operation.status === 'dead_letter') {
-          operation = await requeueDeadLetter(operation.id);
+          operation = await requeueDeadLetter(operation.id, Date.now(), fence);
         }
+        assertCurrentSession();
         if (operation) attachFinalizeOperation(scan.id, operation.id);
       }
       await drainOutbox();
+      assertCurrentSession();
       const synchronized = operation ? await getOperation(operation.id) : null;
+      assertCurrentSession();
       if (synchronized?.status !== 'succeeded') {
         const serverReason = synchronized?.last_error_message?.trim();
         setSaveFeedback(
@@ -720,7 +843,7 @@ export function ReviewScreen() {
       // appear on the home page with a noticeable delay.
       const localPhotoUri = photoUri ?? null;
       const promotePhoto = localPhotoUri
-        ? persistConfirmedPhoto(ingestionId, localPhotoUri)
+        ? persistConfirmedPhoto(ingestionId, localPhotoUri, fence.scopeKey)
         : null;
       const optimisticArrival: Article = {
         id: `pending-${ingestionId}`,
@@ -746,14 +869,24 @@ export function ReviewScreen() {
       // completes, so the home card can display it immediately.
       closingRef.current = true;
       await completeScan(scan.id, { keepPhoto: Boolean(localPhotoUri) });
-      queryClient.setQueryData<Article[]>(['catalog', 'arrivals'], (current = []) => [
+      assertCurrentSession();
+      if (!organizationId || !actorId || !businessPortalId || !tradeCode) {
+        throw new Error('MOBILE_CONTEXT_MISSING');
+      }
+      const cacheKey = catalogQueryKey({ organizationId, actorId, businessPortalId, tradeCode });
+      queryClient.setQueryData<Article[]>(cacheKey, (current = []) => [
         optimisticArrival,
         ...current.filter((article) => article.ingestion_id !== ingestionId),
       ]);
       if (promotePhoto && localPhotoUri) {
         void promotePhoto.then((confirmedPhotoUri) => {
           if (!confirmedPhotoUri) return;
-          queryClient.setQueryData<Article[]>(['catalog', 'arrivals'], (current = []) =>
+          if (!sessionIsCurrent()) {
+            void deleteConfirmedPhoto(confirmedPhotoUri);
+            void deletePendingPhoto(localPhotoUri);
+            return;
+          }
+          queryClient.setQueryData<Article[]>(cacheKey, (current = []) =>
             current.map((article) => article.ingestion_id === ingestionId
               ? { ...article, photo_uri: confirmedPhotoUri }
               : article),
@@ -772,6 +905,7 @@ export function ReviewScreen() {
       }
     } catch (err) {
       closingRef.current = false; // stay on screen — re-arm the removed-scan guard
+      if (!sessionIsCurrent()) return;
       console.error('Save error:', err);
       Alert.alert(
         "Échec de l\u2019enregistrement",
@@ -779,7 +913,8 @@ export function ReviewScreen() {
         [{ text: 'OK' }]
       );
     } finally {
-      setSaving(false);
+      saveInFlightRef.current = false;
+      if (sessionIsCurrent()) setSaving(false);
     }
   }, [
     run,
@@ -791,7 +926,10 @@ export function ReviewScreen() {
     photoUri,
     barcodeRaw,
     user,
+    organizationId,
+    actorId,
     businessPortalId,
+    currentScopeKey,
     fieldOrder,
     fieldsByName,
     reviewProfile,
@@ -811,6 +949,11 @@ export function ReviewScreen() {
     run != null &&
     ingestion != null &&
     complete;
+  const showFinalFieldProjection =
+    ready ||
+    requiresRecapture ||
+    scan?.status === 'submit_error' ||
+    scan?.status === 'extract_error';
 
   return (
     <View style={styles.root}>
@@ -871,7 +1014,7 @@ export function ReviewScreen() {
           </Text>
         ) : null}
 
-          {requiresRecapture ? (
+        {requiresRecapture ? (
             <View style={[styles.ocrCard, styles.recaptureCard]} accessibilityRole="alert">
               <View style={styles.recaptureTitleRow}>
                 <MaterialCommunityIcons name="camera-retake-outline" size={22} color={colors.error} />
@@ -886,7 +1029,8 @@ export function ReviewScreen() {
                 {RECAPTURE_GUIDANCE}
               </Text>
             </View>
-          ) : scan?.status === 'submit_error' || scan?.status === 'extract_error' ? (
+          ) : null}
+        {scan?.status === 'submit_error' || scan?.status === 'extract_error' ? (
             // Defensive only — a card in error state is not tappable from home, so this
             // normally can't be reached; kept in case the scan regresses while open.
             <View style={styles.ocrCard}>
@@ -896,39 +1040,41 @@ export function ReviewScreen() {
                   : 'L’analyse de cette étiquette a échoué. Revenez à l’accueil pour réessayer.'}
               </Text>
             </View>
-          ) : ready && run == null ? (
+          ) : null}
+        {ready && run == null ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Impossible de charger les champs extraits. L'étiquette a été traitée sur le serveur
                 (statut : {ingestion ? ingestionStatusFr(ingestion.status) : '—'}).
               </Text>
             </View>
-          ) : ready && fields.length === 0 ? (
+          ) : null}
+        {ready && fields.length === 0 ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Aucun champ extrait.
               </Text>
             </View>
-          ) : (
-            // Photo + (chargement) + champs. Le plus simple possible : une liste STABLE
-            // en FIELD_ORDER, lignes GS1/interim préremplies, le reste en skeleton en
-            // place, qui deviennent éditables au ready — SANS cascade, sans compteur.
-            <>
-              {ready ? null : (
-                <ExtractionProgress
-                  startedAt={mountedAt}
-                  ready={false}
-                  ocrDone={ocrDone}
-                  analysisLabel={
-                    reviewProfile.code === 'poissonnerie'
-                      ? 'Analyse de l’espèce'
-                      : reviewProfile.code === 'boucherie'
-                        ? 'Analyse de la viande'
-                        : 'Analyse du produit préparé'
-                  }
-                />
-              )}
-              {fieldGroups.map((group) => (
+          ) : null}
+
+        {/* Alerts never replace the contract: every profile row stays visible. A machine
+            absence stays blank/à vérifier until the operator explicitly supplies a value
+            or marks it NC. */}
+        {!showFinalFieldProjection ? (
+          <ExtractionProgress
+            startedAt={mountedAt}
+            ready={false}
+            ocrDone={ocrDone}
+            analysisLabel={
+              reviewProfile.code === 'poissonnerie'
+                ? 'Analyse de l’espèce'
+                : reviewProfile.code === 'boucherie'
+                  ? 'Analyse de la viande'
+                  : 'Analyse du produit préparé'
+            }
+          />
+        ) : null}
+        {fieldGroups.map((group) => (
                 <View key={group.id} style={styles.fieldGroup}>
                   <View style={styles.fieldGroupHeader}>
                     <View style={styles.fieldGroupIcon}>
@@ -945,10 +1091,10 @@ export function ReviewScreen() {
                   <View style={styles.fieldGroupCard}>
                     {group.fields.map((name) => {
                       const field = fieldsByName.get(name);
-                      const editableField: ExtractionField | null = field ?? (ready ? {
+                      const editableField: ExtractionField | null = field ?? (showFinalFieldProjection ? {
                         field_name: name,
                         value: null,
-                        evidence: null,
+                        evidence: [],
                         provenance: null,
                         source_raw_artifact_id: null,
                         validation_status: 'missing',
@@ -983,9 +1129,7 @@ export function ReviewScreen() {
                     })}
                   </View>
                 </View>
-              ))}
-            </>
-          )}
+        ))}
       </ScrollView>
 
       {saveFeedback ? (
@@ -1164,7 +1308,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     flexShrink: 1,
   },
-  // "À compléter" tag — brand tinted, shown only while the field is empty.
+  // Human-review tag — brand tinted, shown only while the field is empty.
   attentionTag: {
     color: colors.onPrimaryContainer,
     backgroundColor: colors.primaryContainer,
@@ -1191,6 +1335,43 @@ const styles = StyleSheet.create({
   inputHint: {
     color: colors.onSurfaceVariant,
     marginTop: spacing.xs,
+  },
+  notCommunicatedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+  },
+  notCommunicatedChipText: {
+    color: colors.primary,
+  },
+  reviewDecisionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  confirmSuggestionChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.full,
+    backgroundColor: colors.primary,
+    overflow: 'hidden',
+  },
+  confirmSuggestionChipText: {
+    color: colors.onPrimary,
   },
   saveFeedback: {
     flexDirection: 'row',

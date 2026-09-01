@@ -14,6 +14,7 @@ from labelscan.contexts.identity.domain.store import (
     Store,
     normalize_store_code,
     normalize_store_name,
+    normalize_store_query,
 )
 
 
@@ -74,7 +75,7 @@ class StoreAdminService:
         actor_id: str | None = None,
         include_all: bool = False,
     ) -> list[Store]:
-        normalized_query = query.strip() if query and query.strip() else None
+        normalized_query = normalize_store_query(query)
         return self._stores.list_stores(
             organization_id=organization_id,
             active=active,

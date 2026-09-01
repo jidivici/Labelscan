@@ -7,7 +7,7 @@ import uuid
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from labelscan.contexts.identity.application.manage_stores import (
     CreateStoreCommand,
@@ -19,7 +19,7 @@ from labelscan.contexts.identity.application.store_ports import (
     StoreInUse,
     StoreNotFound,
 )
-from labelscan.contexts.identity.domain.store import Store
+from labelscan.contexts.identity.domain.store import Store, normalize_store_name
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
 
@@ -59,18 +59,36 @@ class StoreResponse(BaseModel):
 
 
 class CreateStoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
     # The web portal creates opaque codes automatically.  Keeping this optional
     # preserves the API for integrations that already own a store-code scheme.
     code: str | None = Field(None, min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=120)
     profession_codes: list[
         Literal["poissonnerie", "boucherie", "charcuterie_traiteur"]
-    ] = Field(min_length=1)
+    ] = Field(min_length=1, max_length=3)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return normalize_store_name(value)
 
 
 class UpdateStoreRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
+
     name: str | None = Field(None, min_length=1, max_length=120)
     active: bool | None = None
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def validate_name(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        return normalize_store_name(value)
 
 
 class CurrentStoreResponse(BaseModel):
@@ -135,13 +153,17 @@ def list_stores(
     principal: Principal = Depends(require_scope("identity:admin")),
     service: StoreAdminService = Depends(get_store_admin_service),
 ) -> list[StoreResponse]:
-    stores = service.list(
-        organization_id=principal.organization_id,
-        active=active,
-        query=q,
-        actor_id=principal.actor_id,
-        include_all=principal.role == "super_admin",
-    )
+    try:
+        stores = service.list(
+            organization_id=principal.organization_id,
+            active=active,
+            query=q,
+            actor_id=principal.actor_id,
+            include_all=principal.role == "super_admin",
+        )
+    except Exception as exc:
+        _map_write_error(exc)
+        raise
     return [StoreResponse.from_domain(store) for store in stores]
 
 

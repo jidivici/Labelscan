@@ -21,12 +21,16 @@ import * as FileSystem from 'expo-file-system/legacy';
 
 import { API_BASE_URL } from '../config';
 import {
+  captureActiveSession,
   clearSessionTokens,
+  clearUsername,
   emitUnauthenticated,
   getRefreshToken,
   getToken,
+  isSessionFenceCurrent,
   setOperatorContext,
-  setTokens,
+  setTokensForSession,
+  type SessionFence,
 } from './authStorage';
 import { isTradeCode } from './businessProfiles';
 import type {
@@ -87,7 +91,7 @@ export interface RequestOptions {
   idempotencyKey?: string;
   /** Skip Bearer attachment AND the 401→sign-out reaction (used by the login call). */
   skipAuth?: boolean;
-  /** Extra headers (lowest precedence). */
+  /** Extra non-security headers. Auth/correlation/idempotency/content-type cannot be overridden. */
   headers?: Record<string, string>;
   /** Caller-controlled AbortSignal, composed with the timeout. */
   signal?: AbortSignal;
@@ -95,18 +99,34 @@ export interface RequestOptions {
   authRetried?: boolean;
 }
 
-let refreshPromise: Promise<string | null> | null = null;
+let refreshState: { fence: SessionFence; promise: Promise<string | null> } | null = null;
 
-async function refreshAccessToken(): Promise<string | null> {
-  if (refreshPromise) return refreshPromise;
-  refreshPromise = (async () => {
+async function refreshAccessToken(fence: SessionFence): Promise<string | null> {
+  if (!isSessionFenceCurrent(fence)) return null;
+  if (
+    refreshState &&
+    refreshState.fence.generation === fence.generation &&
+    isSessionFenceCurrent(refreshState.fence)
+  ) {
+    return refreshState.promise;
+  }
+  const promise = (async () => {
     const refreshToken = await getRefreshToken();
-    if (!refreshToken) return null;
+    if (!refreshToken || !isSessionFenceCurrent(fence)) return null;
+    // A shared refresh has its own fixed deadline. It must not inherit one caller's
+    // signal, but it must still abort on session revocation and cannot hang every
+    // authenticated request forever when the refresh endpoint stalls.
+    const controller = new AbortController();
+    const abortFromFence = () => controller.abort();
+    const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+    if (fence.signal.aborted) controller.abort();
+    else fence.signal.addEventListener('abort', abortFromFence, { once: true });
     try {
       const response = await fetchJson(resolveUrl('/v1/mobile/auth/refresh'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refresh_token: refreshToken }),
+        signal: controller.signal,
       });
       if (!response.ok) return null;
       const body = await response.json();
@@ -115,27 +135,40 @@ async function refreshAccessToken(): Promise<string | null> {
       }
       if (
         body.user?.role !== 'manager' ||
+        typeof body.user.id !== 'string' ||
+        typeof body.user.organization_id !== 'string' ||
         typeof body.user.business_portal_id !== 'string' ||
         !isTradeCode(body.user.trade_code)
       ) {
         return null;
       }
-      await Promise.all([
-        setTokens(body.access_token, body.refresh_token),
-        setOperatorContext({
-          businessPortalId: body.user.business_portal_id,
-          tradeCode: body.user.trade_code,
-        }),
-      ]);
+      if (!isSessionFenceCurrent(fence)) return null;
+      const tokensRotated = await setTokensForSession(
+        fence,
+        body.access_token,
+        body.refresh_token,
+      );
+      if (!tokensRotated || !isSessionFenceCurrent(fence)) return null;
+      await setOperatorContext({
+        organizationId: body.user.organization_id,
+        actorId: body.user.id,
+        businessPortalId: body.user.business_portal_id,
+        tradeCode: body.user.trade_code,
+      });
+      if (!isSessionFenceCurrent(fence)) return null;
       return body.access_token;
     } catch {
       return null;
+    } finally {
+      clearTimeout(timer);
+      fence.signal.removeEventListener('abort', abortFromFence);
     }
   })();
+  refreshState = { fence, promise };
   try {
-    return await refreshPromise;
+    return await promise;
   } finally {
-    refreshPromise = null;
+    if (refreshState?.promise === promise) refreshState = null;
   }
 }
 
@@ -185,37 +218,93 @@ async function send<T>(
   opts: RequestOptions,
   baseHeaders: Record<string, string>,
   transport: (url: string, init: RequestInit) => Promise<HttpResponse>,
+  responseType: 'json' | 'text' = 'json',
+  inheritedFence?: SessionFence,
 ): Promise<T> {
   const url = resolveUrl(path);
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const correlationId = opts.correlationId ?? uuidv4();
 
+  // Bind the whole request/refresh/retry lifecycle to the identity that initiated
+  // it. A late 401 from session A must never refresh or clear session B.
+  const fence = opts.skipAuth
+    ? null
+    : inheritedFence ?? await captureActiveSession();
+  if (!opts.skipAuth && (!fence || !isSessionFenceCurrent(fence))) {
+    throw new ApiError({
+      code: 'SESSION_CHANGED',
+      status: 0,
+      message: 'authenticated session changed before the request started',
+      correlationId,
+      retriable: false,
+    });
+  }
+
   // Attach the Bearer token on every authenticated request. The login call sets
   // skipAuth so it never carries (or reacts to) a stale token.
   const token = opts.skipAuth ? null : await getToken();
+  if (fence && !isSessionFenceCurrent(fence)) {
+    throw new ApiError({
+      code: 'SESSION_CHANGED',
+      status: 0,
+      message: 'authenticated session changed before transport',
+      correlationId,
+      retriable: false,
+    });
+  }
 
+  const protectedNames = new Set([
+    'authorization',
+    'x-correlation-id',
+    'idempotency-key',
+    'content-type',
+  ]);
+  const safeExtraHeaders = Object.fromEntries(
+    Object.entries(opts.headers ?? {}).filter(([name]) => !protectedNames.has(name.toLowerCase())),
+  );
   const headers: Record<string, string> = {
+    ...safeExtraHeaders,
+    ...baseHeaders,
     'X-Correlation-Id': correlationId,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(opts.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : {}),
-    ...baseHeaders,
-    ...(opts.headers ?? {}),
   };
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  if (opts.signal) {
-    if (opts.signal.aborted) controller.abort();
-    else opts.signal.addEventListener('abort', () => controller.abort(), { once: true });
+  const abortFromCaller = () => controller.abort();
+  const abortSignals = new Set<AbortSignal>();
+  if (opts.signal) abortSignals.add(opts.signal);
+  if (fence) abortSignals.add(fence.signal);
+  for (const signal of abortSignals) {
+    if (signal.aborted) controller.abort();
+    else signal.addEventListener('abort', abortFromCaller, { once: true });
   }
 
   try {
     const response = await transport(url, { ...init, headers, signal: controller.signal });
+    if (fence && !isSessionFenceCurrent(fence)) {
+      throw new ApiError({
+        code: 'SESSION_CHANGED',
+        status: 0,
+        message: 'authenticated session changed during transport',
+        correlationId,
+        retriable: false,
+      });
+    }
     if (!response.ok) {
       if (response.status === 401 && !opts.skipAuth && !opts.authRetried) {
-        const refreshed = await refreshAccessToken();
-        if (refreshed) {
-          return send<T>(path, init, { ...opts, authRetried: true }, baseHeaders, transport);
+        const refreshed = fence ? await refreshAccessToken(fence) : null;
+        if (refreshed && fence && isSessionFenceCurrent(fence)) {
+          return send<T>(
+            path,
+            init,
+            { ...opts, authRetried: true },
+            baseHeaders,
+            transport,
+            responseType,
+            fence,
+          );
         }
       }
       const apiError = await parseError(response, correlationId);
@@ -223,17 +312,66 @@ async function send<T>(
       // valid: clear it and signal the auth layer (drops back to the login
       // screen). The login call sets skipAuth, so a bad-credentials 401 there
       // does NOT trigger a sign-out loop.
-      if (response.status === 401 && !opts.skipAuth) {
-        await clearSessionTokens();
+      if (
+        response.status === 401 &&
+        !opts.skipAuth &&
+        fence &&
+        isSessionFenceCurrent(fence)
+      ) {
+        // Both async calls invalidate their in-memory state synchronously. Notify
+        // React before awaiting a potentially slow native keychain deletion so the
+        // revoked account's UI/data close immediately; the purge still completes
+        // before this request settles.
+        const credentialPurge = Promise.allSettled([clearSessionTokens(), clearUsername()]);
         emitUnauthenticated();
+        const purgeResults = await credentialPurge;
+        if (purgeResults.some((result) => result.status === 'rejected')) {
+          throw new ApiError({
+            code: 'SECURE_SESSION_PURGE_FAILED',
+            status: 0,
+            message: 'local session credentials could not be removed',
+            correlationId,
+            retriable: false,
+          });
+        }
       }
       throw apiError;
     }
     if (response.status === 204) return undefined as T;
     const body = await response.text();
-    return (body ? JSON.parse(body) : undefined) as T;
+    if (fence && !isSessionFenceCurrent(fence)) {
+      throw new ApiError({
+        code: 'SESSION_CHANGED',
+        status: 0,
+        message: 'authenticated session changed while reading response',
+        correlationId,
+        retriable: false,
+      });
+    }
+    if (responseType === 'text') return body as T;
+    try {
+      if (!body) throw new SyntaxError('empty JSON response');
+      return JSON.parse(body) as T;
+    } catch {
+      throw new ApiError({
+        code: 'INVALID_RESPONSE',
+        status: response.status,
+        message: 'server returned an invalid JSON response',
+        correlationId,
+        retriable: false,
+      });
+    }
   } catch (err) {
     if (err instanceof ApiError) throw err; // already a typed, safe error
+    if (fence && !isSessionFenceCurrent(fence)) {
+      throw new ApiError({
+        code: 'SESSION_CHANGED',
+        status: 0,
+        message: 'authenticated session changed during request',
+        correlationId,
+        retriable: false,
+      });
+    }
     const aborted = controller.signal.aborted;
     throw new ApiError({
       code: aborted ? 'TIMEOUT' : 'NETWORK_ERROR',
@@ -244,7 +382,17 @@ async function send<T>(
     });
   } finally {
     clearTimeout(timer);
+    for (const signal of abortSignals) signal.removeEventListener('abort', abortFromCaller);
   }
+}
+
+/** Authenticated text download using the same refresh, timeout and header guards. */
+export function apiTextRequest(
+  path: string,
+  options: RequestOptions & { method?: string } = {},
+): Promise<string> {
+  const { method = 'GET', ...opts } = options;
+  return send<string>(path, { method }, opts, {}, fetchJson, 'text');
 }
 
 /** Typed JSON request (GET by default). `body` is JSON-encoded when provided. */

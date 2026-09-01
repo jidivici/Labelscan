@@ -1,42 +1,89 @@
-# EAS Build only needs the Expo mobile application. Keep backend, portal,
-# operational material and local work artifacts out of the remote build context.
+# Keep this file as a superset of .gitignore. Its presence replaces Git's
+# ignore rules when EAS creates the remote build archive.
+
+# Dependencies
+node_modules/
+
+# Local agent and developer state
 .git/
 .github/
 .agents/
 .claude/
 .codex*/
 .idea/
+.vscode/
 .tmp/
+.local-archive/
 
-deploy/
-docs/
-output/
-security/
-server/
-web/
-
-node_modules/
+# Expo and generated native projects
 .expo/
 dist/
 web-build/
-ios/
-android/
+expo-env.d.ts
+/ios/
+/android/
 
-src/__tests__/
+# Build, test and diagnostic output
+build/
 coverage/
 test-results/
+playwright-report/
+.nyc_output/
+output/
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.metro-health-check*
 
+# Local presentation, office and install artifacts
+*.apk
+*.aab
+*.ipa
+*.xcarchive/
+*.ppt
+*.pptx
+*.doc
+*.docx
+/*.pdf
+/LabelScan-*/
+/LabelScan_*/
+/Fiche_*/
+/build_labelscan_summary.py
+
+# Native credentials and local secrets
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
 .env
 .env.*
 !.env.example
 !.env*.example
 
-*.log
-*.pem
-*.key
-*.jks
-*.p8
-*.p12
-*.mobileprovision
+# Python tooling and caches
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+__pycache__/
+*.py[cod]
+
+# TypeScript and operating-system metadata
 *.tsbuildinfo
 .DS_Store
+
+# The remote mobile build does not need backend, web portal, operations or docs.
+deploy/
+docs/
+postman/
+security/
+server/
+web/
+src/__tests__/

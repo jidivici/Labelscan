@@ -144,6 +144,8 @@ def _spans_for(
     OCR text. None means at least one piece of evidence is not grounded -> fabrication."""
     spans: list[Span] = []
     for ev in evidence:
+        if not isinstance(ev, str) or not ev.strip():
+            return None
         idx = ocr_text.find(ev)
         if idx < 0:
             return None

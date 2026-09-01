@@ -25,7 +25,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import random
 import time
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Protocol
 
 from sqlalchemy import text
@@ -37,6 +40,7 @@ from labelscan.contexts.ingestion.application.extraction_ports import (
     LlmResult,
     OcrProvider,
     OcrResult,
+    PermanentProviderError,
 )
 from labelscan.contexts.ingestion.domain.extraction import (
     GateOutcome,
@@ -49,6 +53,9 @@ from labelscan.contexts.ingestion.domain.extraction import (
     is_ocr_garbage,
 )
 from labelscan.contexts.ingestion.domain.gs1 import parse_gs1
+from labelscan.contexts.ingestion.domain.input_validation import (
+    validate_human_field_value,
+)
 from labelscan.contexts.ingestion.domain.interim_fields import extract_interim_fields
 from labelscan.contexts.ingestion.domain.reconciliation import (
     adjusted_outcome,
@@ -57,6 +64,7 @@ from labelscan.contexts.ingestion.domain.reconciliation import (
 )
 from labelscan.platform.db.audit_context import set_audit_context
 from labelscan.platform.db.tenant_context import set_tenant_context
+from labelscan.platform.external_api import ExternalApiRateLimitExceeded
 from labelscan.platform.observability import get_logger
 
 _log = get_logger("ingestion.extraction")
@@ -92,6 +100,19 @@ class _ProviderExhausted(Exception):
 # condition. Retrying these is futile and would mask the defect behind a FAILED
 # run, so they propagate out of the retry loop instead of being swallowed.
 _NON_RETRYABLE = (TypeError, AttributeError, NameError, ImportError)
+_RETRYABLE_HTTP_STATUSES = frozenset({408, 409, 429})
+_RETRYABLE_EXCEPTION_NAMES = frozenset(
+    {
+        "APIConnectionError",
+        "APITimeoutError",
+        "DeadlineExceeded",
+        "InternalServerError",
+        "ServiceUnavailable",
+        "TooManyRequests",
+    }
+)
+_PROVIDER_BACKOFF_BASE_SECONDS = 0.25
+_PROVIDER_BACKOFF_MAX_SECONDS = 8.0
 
 _MAX_OCR_TEXT_CHARS = 100_000
 _MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024
@@ -103,6 +124,62 @@ _MAX_WARNING_CHARS = 512
 _VALIDATION_STATUSES = frozenset(
     {"present", "missing", "ambiguous", "normalized", "unnormalizable", "invalid"}
 )
+
+
+def _provider_status_code(exc: Exception) -> int | None:
+    status = getattr(exc, "status_code", None)
+    if not isinstance(status, int):
+        response = getattr(exc, "response", None)
+        status = getattr(response, "status_code", None)
+    return status if isinstance(status, int) and not isinstance(status, bool) else None
+
+
+def _provider_retry_after(exc: Exception) -> float | None:
+    value: object = getattr(exc, "retry_after", None)
+    if value is None:
+        response = getattr(exc, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers is not None:
+            try:
+                value = headers.get("retry-after") or headers.get("Retry-After")
+            except (AttributeError, TypeError):
+                value = None
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return max(0.0, float(value))
+    if isinstance(value, str):
+        try:
+            return max(0.0, float(value.strip()))
+        except ValueError:
+            try:
+                target = parsedate_to_datetime(value)
+                if target.tzinfo is None:
+                    target = target.replace(tzinfo=UTC)
+                return max(0.0, (target - datetime.now(UTC)).total_seconds())
+            except (TypeError, ValueError, OverflowError):
+                return None
+    return None
+
+
+def _is_retryable_provider_error(exc: Exception) -> bool:
+    status = _provider_status_code(exc)
+    if status is not None:
+        return status in _RETRYABLE_HTTP_STATUSES or 500 <= status <= 599
+    return isinstance(exc, (TimeoutError, ConnectionError)) or (
+        type(exc).__name__ in _RETRYABLE_EXCEPTION_NAMES
+    )
+
+
+def _safe_provider_error(exc: Exception | None) -> str:
+    if exc is None:
+        return "provider failure"
+    status = _provider_status_code(exc)
+    if status is not None:
+        return f"provider failure (HTTP {status})"
+    if isinstance(exc, PermanentProviderError):
+        return "provider rejected request"
+    if isinstance(exc, ValueError):
+        return "invalid local provider result"
+    return f"provider failure ({type(exc).__name__})"
 
 
 def _validate_ocr_result(result: OcrResult) -> OcrResult:
@@ -143,6 +220,10 @@ def _validate_llm_result(result: LlmResult) -> LlmResult:
             or len(field.value) > _MAX_MACHINE_VALUE_CHARS
         ):
             raise ValueError(f"LLM value for '{field.name}' is invalid")
+        if field.value is not None:
+            canonical = validate_human_field_value(field.name, field.value)
+            if canonical == "NC" or canonical != field.value:
+                raise ValueError(f"LLM value for '{field.name}' is non-canonical")
         if (
             not isinstance(field.llm_confidence, (int, float))
             or isinstance(field.llm_confidence, bool)
@@ -153,12 +234,16 @@ def _validate_llm_result(result: LlmResult) -> LlmResult:
         if field.validation_status not in _VALIDATION_STATUSES:
             raise ValueError(f"LLM validation status for '{field.name}' is invalid")
         if len(field.evidence) > _MAX_EVIDENCE_ITEMS or any(
-            not isinstance(item, str) or len(item) > _MAX_EVIDENCE_CHARS
+            not isinstance(item, str)
+            or not item.strip()
+            or len(item) > _MAX_EVIDENCE_CHARS
             for item in field.evidence
         ):
             raise ValueError(f"LLM evidence for '{field.name}' is invalid")
         if len(field.warnings) > _MAX_WARNING_ITEMS or any(
-            not isinstance(item, str) or len(item) > _MAX_WARNING_CHARS
+            not isinstance(item, str)
+            or not item.strip()
+            or len(item) > _MAX_WARNING_CHARS
             for item in field.warnings
         ):
             raise ValueError(f"LLM warnings for '{field.name}' are invalid")
@@ -627,14 +712,37 @@ class ExtractionConsumer:
 
     def _with_provider_retry(self, fn):
         last: Exception | None = None
-        for _ in range(self._max_provider_attempts):
+        for attempt in range(self._max_provider_attempts):
             try:
                 return fn()
             except _NON_RETRYABLE:
                 raise  # programming error — surface it, don't swallow as a FAILED run
-            except Exception as e:  # expected transient/provider failure
+            except PermanentProviderError as e:
+                # Repeating the same rejected request cannot recover. Convert it to
+                # the consumer's terminal provider state after exactly one attempt so
+                # the extraction is recorded FAILED instead of poisoning the outbox.
+                raise _ProviderExhausted(_safe_provider_error(e)) from e
+            except ExternalApiRateLimitExceeded as e:
+                # Wait for the local one-second window rather than immediately
+                # burning the remaining retry attempts on an intentional throttle.
                 last = e
-        raise _ProviderExhausted(str(last))
+                if attempt + 1 < self._max_provider_attempts:
+                    time.sleep(e.retry_after)
+            except Exception as e:
+                last = e
+                if not _is_retryable_provider_error(e):
+                    # 4xx (other than 408/409/429), invalid local JSON/schema and
+                    # unknown errors cannot become valid by replaying identical data.
+                    raise _ProviderExhausted(_safe_provider_error(e)) from e
+                if attempt + 1 < self._max_provider_attempts:
+                    exponential = min(
+                        _PROVIDER_BACKOFF_MAX_SECONDS,
+                        _PROVIDER_BACKOFF_BASE_SECONDS * (2**attempt),
+                    )
+                    jittered = exponential * random.uniform(0.75, 1.25)
+                    retry_after = _provider_retry_after(e) or 0.0
+                    time.sleep(max(jittered, retry_after))
+        raise _ProviderExhausted(_safe_provider_error(last)) from last
 
     # ---- step helpers -------------------------------------------------------
 
@@ -655,8 +763,10 @@ class ExtractionConsumer:
                         "JOIN ingestion.ingestion AS ingestion "
                         "ON ingestion.id = artifact.ingestion_id "
                         "WHERE artifact.ingestion_id = :id "
-                        "AND artifact.artifact_kind = 'image' "
-                        "ORDER BY artifact.occurred_at LIMIT 1"
+                        "AND artifact.artifact_kind IN ('sanitized_image', 'image') "
+                        "ORDER BY CASE artifact.artifact_kind "
+                        "WHEN 'sanitized_image' THEN 0 ELSE 1 END, "
+                        "artifact.occurred_at LIMIT 1"
                     ),
                     {"id": ingestion_id},
                 )

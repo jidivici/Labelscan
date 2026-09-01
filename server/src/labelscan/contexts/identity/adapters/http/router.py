@@ -15,7 +15,7 @@ import ipaddress
 import threading
 
 from fastapi import APIRouter, Cookie, Depends, Path, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from labelscan.contexts.identity.application.login import InvalidCredentials, Login
 from labelscan.contexts.identity.application.sessions import (
@@ -28,6 +28,7 @@ from labelscan.contexts.identity.domain.user import (
     MANAGER_ROLE,
     SUPER_ADMIN_ROLE,
     AuthenticatedUser,
+    normalize_identity_text,
 )
 from labelscan.platform.config import is_production, is_trusted_proxy, public_origin
 from labelscan.platform.http import jwt as jwt_codec
@@ -39,12 +40,19 @@ router = APIRouter()
 
 
 class _StrictRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
 class LoginRequest(_StrictRequest):
     username: str = Field(min_length=1, max_length=254)
     password: str = Field(min_length=1, max_length=128)
+
+    @field_validator("username", mode="before")
+    @classmethod
+    def validate_username(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return normalize_identity_text(value, field="username", maximum=254)
 
 
 class RefreshRequest(_StrictRequest):

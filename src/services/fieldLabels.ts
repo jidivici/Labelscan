@@ -106,3 +106,10 @@ export function displayFieldValue(fieldName: string, value: string | null): stri
   if (value != null && isDateField(fieldName)) return displayDate(value);
   return value;
 }
+
+/** Final review/catalogue projection: absence is rendered explicitly, never hidden. */
+export function displayFinalFieldValue(fieldName: string, value: string | null): string {
+  const displayed = displayFieldValue(fieldName, value)?.trim() ?? '';
+  if (!displayed || displayed.toLocaleUpperCase('fr-FR') === 'NC') return 'NC';
+  return displayed;
+}

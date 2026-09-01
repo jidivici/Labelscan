@@ -20,6 +20,24 @@ jest.mock('../services/api', () => {
   return { ApiError, overrideField: jest.fn() };
 });
 
+jest.mock('../services/authStorage', () => ({
+  captureActiveSession: jest.fn(async () => ({
+    generation: 1,
+    scopeKey: 'org-a:actor-a:portal-a:poissonnerie',
+    signal: new AbortController().signal,
+  })),
+  getOperatorContext: jest.fn(async () => ({
+    organizationId: 'org-a',
+    actorId: 'actor-a',
+    businessPortalId: 'portal-a',
+    tradeCode: 'poissonnerie',
+  })),
+  isSessionFenceCurrent: jest.fn(() => true),
+  operatorContextKey: jest.fn((context) =>
+    [context.organizationId, context.actorId, context.businessPortalId, context.tradeCode].join(':'),
+  ),
+}));
+
 const mockOverride = overrideField as jest.MockedFunction<typeof overrideField>;
 
 const ok = {

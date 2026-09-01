@@ -1,5 +1,8 @@
 # LabelScan — Target Architecture
 
+> **Archived:** Historical architecture target, not current development guidance. See the
+> [archive index](README.md) and [enterprise architecture](../ENTERPRISE-ARCHITECTURE.md).
+
 > Archivé le 20 août 2026 : cible historique, remplacée par `ENTERPRISE-ARCHITECTURE.md` et les ADR.
 
 **Status:** Historical target/design record. The current runtime and production trust
@@ -17,7 +20,7 @@ boundaries are documented in
 This document covers domain discovery, bounded contexts, the target modular-monolith +
 hexagonal architecture, C4 diagrams, dependency rules, domain events, aggregate boundaries,
 ADRs, and a phased migration strategy. The ADRs live as individual files under
-[`adr/`](./adr/) and are summarised in [Section 8](#8-architecture-decision-records-summary).
+[`adr/`](../architecture/adr/) and are summarised in [Section 8](#8-architecture-decision-records-summary).
 
 Architecture-shaping hard constraints (from the brief). Every section below is checked against
 these:
@@ -506,18 +509,18 @@ stream of facts referenced by `Batch`/location.
 
 ## 8. Architecture Decision Records (summary)
 
-Full ADRs in [`adr/`](./adr/). Each uses the template: Status / Context / Decision /
+Full ADRs in [`adr/`](../architecture/adr/). Each uses the template: Status / Context / Decision /
 Consequences / Alternatives considered / Trade-offs / Reversibility.
 
 | ADR | Decision | One-line rationale |
 |-----|----------|--------------------|
-| [0001](./adr/0001-modular-monolith-vs-microservices.md) | **Modular monolith first**, not microservices | Boundaries still emerging + strong consistency for ingestion/audit; keep ops cost low, extract along seams later. |
-| [0002](./adr/0002-hexagonal-ports-adapters-ocr-llm.md) | **Hexagonal ports & adapters** for OCR/LLM (and persistence) | Constraint #6: providers must be replaceable; isolate the domain from Vision/LLM SDKs (ACL at the edge). |
-| [0003](./adr/0003-raw-before-normalized-immutable-store.md) | **Raw-before-normalized immutable ingestion store** | Constraint #3 + #4: capture the literal label fact append-only before any interpretation; recoverable/reprocessable. |
-| [0004](./adr/0004-immutable-audit-append-only-vs-event-sourcing.md) | **Append-only audit table now**, event-sourcing deferred | Meets auditability/immutability (#4) with far less complexity; ES is reversible-forward if needed. |
-| [0005](./adr/0005-confidence-scores-in-the-model.md) | **Confidence + provenance live on each `ExtractedField` value object** | Constraint #2: confidence is intrinsic to a field, not a side table; unknown ⇒ `null`, no fabrication (#1). |
-| [0006](./adr/0006-ddd-tactical-vs-layered-per-context.md) | **Tactical DDD only in core contexts**, layered elsewhere | Avoid architecture astronautics; rich modeling where invariants are real (Ingestion, HACCP), CRUD/layered for reference data + identity. |
-| [0007](./adr/0007-python-fastapi-backend.md) | **Python / FastAPI + Pydantic at boundaries, PostgreSQL** | Decided with user; strong OCR/LLM ecosystem; accepted trade-off: no type-sharing with the TS mobile app. |
+| [0001](../architecture/adr/0001-modular-monolith-vs-microservices.md) | **Modular monolith first**, not microservices | Boundaries still emerging + strong consistency for ingestion/audit; keep ops cost low, extract along seams later. |
+| [0002](../architecture/adr/0002-hexagonal-ports-adapters-ocr-llm.md) | **Hexagonal ports & adapters** for OCR/LLM (and persistence) | Constraint #6: providers must be replaceable; isolate the domain from Vision/LLM SDKs (ACL at the edge). |
+| [0003](../architecture/adr/0003-raw-before-normalized-immutable-store.md) | **Raw-before-normalized immutable ingestion store** | Constraint #3 + #4: capture the literal label fact append-only before any interpretation; recoverable/reprocessable. |
+| [0004](../architecture/adr/0004-immutable-audit-append-only-vs-event-sourcing.md) | **Append-only audit table now**, event-sourcing deferred | Meets auditability/immutability (#4) with far less complexity; ES is reversible-forward if needed. |
+| [0005](../architecture/adr/0005-confidence-scores-in-the-model.md) | **Confidence + provenance live on each `ExtractedField` value object** | Constraint #2: confidence is intrinsic to a field, not a side table; unknown ⇒ `null`, no fabrication (#1). |
+| [0006](../architecture/adr/0006-ddd-tactical-vs-layered-per-context.md) | **Tactical DDD only in core contexts**, layered elsewhere | Avoid architecture astronautics; rich modeling where invariants are real (Ingestion, HACCP), CRUD/layered for reference data + identity. |
+| [0007](../architecture/adr/0007-python-fastapi-backend.md) | **Python / FastAPI + Pydantic at boundaries, PostgreSQL** | Decided with user; strong OCR/LLM ecosystem; accepted trade-off: no type-sharing with the TS mobile app. |
 
 ---
 

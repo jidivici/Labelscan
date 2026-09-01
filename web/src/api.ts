@@ -71,14 +71,14 @@ export async function authorizedFetch(
   init: RequestInit = {},
   authRetried = false,
 ): Promise<Response> {
+  const headers = new Headers(init.headers);
+  for (const name of ['authorization', 'content-type', 'accept']) headers.delete(name);
+  headers.set('Accept', 'application/json');
+  if (init.body) headers.set('Content-Type', 'application/json');
+  if (session) headers.set('Authorization', `Bearer ${session.token}`);
   const response = await fetch(path, {
     ...init,
-    headers: {
-      Accept: 'application/json',
-      ...(init.body ? { 'Content-Type': 'application/json' } : {}),
-      ...(session ? { Authorization: `Bearer ${session.token}` } : {}),
-      ...init.headers,
-    },
+    headers,
     credentials: 'same-origin',
   });
   if (response.status === 401 && session && !authRetried) {

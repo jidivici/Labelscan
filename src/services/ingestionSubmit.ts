@@ -27,7 +27,11 @@ import {
   type CreateIngestionPayload,
   type OperationError,
 } from './outbox';
-import { getOperatorContext } from './authStorage';
+import {
+  captureActiveSession,
+  getOperatorContext,
+  isSessionFenceCurrent,
+} from './authStorage';
 
 export type SubmitOutcome =
   | { kind: 'succeeded'; ingestionId: string; replayed: boolean }
@@ -35,7 +39,7 @@ export type SubmitOutcome =
   | { kind: 'dead_letter'; code: string; message: string };
 
 export interface CaptureInput {
-  fileUri: string; // image to submit — cropped to the capture frame (full image as fallback)
+  fileUri: string; // durable JPEG cropped to the capture frame; no full/cache fallback
   barcodeRaw?: string;
   capturedAt: string; // ISO 8601
 }
@@ -59,11 +63,16 @@ export function enqueueCapture(input: CaptureInput): Promise<CreateIngestionOper
 
 /** Claim the op and execute it ONCE in the foreground, recording the outcome. */
 export async function executeCreateIngestionOp(opId: string): Promise<SubmitOutcome> {
+  const fence = await captureActiveSession();
+  if (!fence) return { kind: 'pending', code: 'CONTEXT_MISMATCH' };
   const queued = await getOperation(opId);
-  if (queued && !operationMatchesOperatorContext(queued, await getOperatorContext())) {
+  if (
+    !isSessionFenceCurrent(fence) ||
+    (queued && !operationMatchesOperatorContext(queued, await getOperatorContext()))
+  ) {
     return { kind: 'pending', code: 'CONTEXT_MISMATCH' };
   }
-  const claimed = await markInFlight(opId);
+  const claimed = await markInFlight(opId, Date.now(), fence);
   if (!claimed || claimed.type !== 'create_ingestion') {
     // Could not claim it (already terminal/claimed) — leave for a later drain.
     return { kind: 'pending', code: 'NOT_CLAIMABLE' };
@@ -76,15 +85,26 @@ export async function executeCreateIngestionOp(opId: string): Promise<SubmitOutc
         barcode_raw: claimed.payload.barcode_raw,
         client_captured_at: claimed.payload.client_captured_at,
       },
-      { idempotencyKey: claimed.idempotencyKey, correlationId: claimed.correlationId },
+      {
+        idempotencyKey: claimed.idempotencyKey,
+        correlationId: claimed.correlationId,
+        signal: fence.signal,
+      },
     );
+    if (!isSessionFenceCurrent(fence)) {
+      return { kind: 'pending', code: 'SESSION_CHANGED' };
+    }
     await markSucceeded(claimed.id, {
       result: { ingestion_id: res.ingestion_id, status: res.status, replayed: res.replayed },
+      fence,
     });
     return { kind: 'succeeded', ingestionId: res.ingestion_id, replayed: res.replayed };
   } catch (err) {
+    if (!isSessionFenceCurrent(fence)) {
+      return { kind: 'pending', code: 'SESSION_CHANGED' };
+    }
     const opError = toOperationError(err);
-    const updated = await markFailed(claimed.id, opError);
+    const updated = await markFailed(claimed.id, opError, Date.now(), fence);
     if (updated?.status === 'dead_letter') {
       return { kind: 'dead_letter', code: opError.code, message: opError.message ?? 'submission failed' };
     }

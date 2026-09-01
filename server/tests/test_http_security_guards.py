@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 from fastapi.testclient import TestClient
 
 from labelscan.app.http_app import create_app
+from labelscan.contexts.ingestion.adapters.http.router import get_submit_ingestion
+from labelscan.contexts.ingestion.application.submit_ingestion import IngestionAccepted
+from labelscan.platform.http.middleware import IngestionRequestSizeLimitMiddleware
+from labelscan.platform.http.security import enforce_api_authentication_surface
+from tests.conftest import bearer, jpeg_bytes
 
 
 def configure_production(monkeypatch) -> None:
@@ -108,3 +115,135 @@ def test_authentication_payload_rejects_unknown_fields():
     )
     assert response.status_code == 400
     assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_non_public_v1_route_cannot_start_without_authentication():
+    from fastapi import FastAPI
+
+    app = FastAPI()
+
+    @app.get("/v1/accidental-public-route")
+    def accidental_public_route():
+        return {"secret": True}
+
+    with pytest.raises(RuntimeError, match="GET /v1/accidental-public-route"):
+        enforce_api_authentication_surface(app)
+
+
+def test_ingestion_multipart_envelope_is_bounded_before_parsing():
+    response = TestClient(create_app()).post(
+        "/v1/ingestions",
+        content=b"x" * (11 * 1024 * 1024 + 1),
+        headers={"Content-Type": "multipart/form-data; boundary=probe"},
+    )
+    assert response.status_code == 413
+    assert response.json()["error_code"] == "PAYLOAD_TOO_LARGE"
+
+
+def test_actual_asgi_bytes_are_counted_even_with_content_length() -> None:
+    called = False
+    sent: list[dict] = []
+    messages = iter(
+        [
+            {"type": "http.request", "body": b"12", "more_body": True},
+            {"type": "http.request", "body": b"345", "more_body": False},
+        ]
+    )
+
+    async def downstream(_scope, _receive, _send):
+        nonlocal called
+        called = True
+
+    async def receive():
+        return next(messages)
+
+    async def send(message):
+        sent.append(message)
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "https",
+        "path": "/v1/ingestions",
+        "raw_path": b"/v1/ingestions",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"content-length", b"1"),
+            (b"content-type", b"multipart/form-data; boundary=probe"),
+        ],
+        "client": ("127.0.0.1", 1234),
+        "server": ("testserver", 443),
+        "state": {},
+    }
+
+    asyncio.run(
+        IngestionRequestSizeLimitMiddleware(downstream, max_bytes=4)(
+            scope, receive, send
+        )
+    )
+
+    assert called is False
+    assert next(message for message in sent if message["type"] == "http.response.start")[
+        "status"
+    ] == 413
+
+
+class _SubmitStub:
+    def __init__(self) -> None:
+        self.calls = []
+
+    def __call__(self, command):
+        self.calls.append(command)
+        return IngestionAccepted(
+            ingestion_id="33333333-3333-3333-3333-333333333333",
+            status="raw_stored",
+            http_status=202,
+            replayed=False,
+        )
+
+
+@pytest.mark.parametrize(
+    "parts",
+    [
+        [
+            ("image", ("label.jpg", jpeg_bytes(b"unknown"), "image/jpeg")),
+            ("unexpected", (None, "value")),
+        ],
+        [
+            ("image", ("label.jpg", jpeg_bytes(b"duplicate-field"), "image/jpeg")),
+            ("barcode_raw", (None, "4006381333931")),
+            ("barcode_raw", (None, "93000502900204")),
+        ],
+        [
+            ("image", ("first.jpg", jpeg_bytes(b"first"), "image/jpeg")),
+            ("image", ("second.jpg", jpeg_bytes(b"second"), "image/jpeg")),
+        ],
+        [
+            ("image", ("label.jpg", jpeg_bytes(b"many-fields"), "image/jpeg")),
+            ("unknown-1", (None, "1")),
+            ("unknown-2", (None, "2")),
+            ("unknown-3", (None, "3")),
+            ("unknown-4", (None, "4")),
+        ],
+    ],
+)
+def test_ingestion_multipart_rejects_unknown_and_duplicate_fields(parts) -> None:
+    use_case = _SubmitStub()
+    app = create_app()
+    app.dependency_overrides[get_submit_ingestion] = lambda: use_case
+
+    response = TestClient(app).post(
+        "/v1/ingestions",
+        files=parts,
+        headers={
+            **bearer("ingestion:write"),
+            "Idempotency-Key": "strict-multipart",
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+    assert use_case.calls == []

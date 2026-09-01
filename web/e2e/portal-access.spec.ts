@@ -225,7 +225,7 @@ test('super-admin creates an active account with a direct password', async ({ pa
 
   const panel = page.locator('.data-panel').filter({ has: page.getByRole('heading', { name: 'Nouvel administrateur' }) });
   await panel.getByLabel('Identifiant').fill('admin.direct');
-  await panel.locator('input[type="password"]').fill('Mot-de-passe-direct!');
+  await panel.locator('input[type="password"]').fill('Mot-de-passe-direct1!');
   await panel.getByRole('button', { name: 'Créer le compte' }).click();
 
   await expect(page.getByRole('status')).toContainText('peut se connecter immédiatement');

@@ -276,9 +276,9 @@ export function AdminPage() {
           ? <IdentityEmpty title="Créez d’abord un magasin" description="Ajoutez un magasin et activez au moins un métier avant de créer votre premier manager." />
           : <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
           <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-          <PasswordField value={password} onChange={setPassword} />
+          <PasswordField value={password} onChange={setPassword} minLength={12} hint="12 caractères minimum." />
           <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={portals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
-          <button className="button primary" disabled={saving || !selectedPortalId || password.length === 0}>{saving ? 'Création…' : 'Créer le compte'}</button>
+          <button className="button primary" disabled={saving || !selectedPortalId || password.length < 12}>{saving ? 'Création…' : 'Créer le compte'}</button>
         </form>}
       </IdentityPanel>
     }

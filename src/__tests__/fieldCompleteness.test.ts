@@ -9,6 +9,7 @@ import {
   filledCountFromInterim,
   filledCountFromRun,
   filledCountFromValues,
+  initialHumanReviewValue,
   isProductNameKnownFromInterim,
   isProductNameKnownFromRun,
   normalizeFinalReviewValue,
@@ -25,7 +26,7 @@ function field(
   return {
     field_name: name,
     value: 'x',
-    evidence: null,
+    evidence: [],
     provenance: null,
     source_raw_artifact_id: null,
     validation_status: 'present',
@@ -47,6 +48,24 @@ describe('fieldCompleteness', () => {
     expect(normalizeFinalReviewValue('   ')).toBe('');
     expect(normalizeFinalReviewValue(' nc ')).toBe(NOT_COMMUNICATED_VALUE);
     expect(normalizeFinalReviewValue('  Cabillaud  ')).toBe('Cabillaud');
+  });
+
+  it('keeps a machine absence unconfirmed until the operator explicitly chooses NC', () => {
+    const extractedValue: string | null = null;
+
+    const initialDraft = initialHumanReviewValue(extractedValue, 'missing');
+    expect(initialDraft).toBe('');
+    expect(filledCountFromValues({ commercial_designation: initialDraft })).toBe(0);
+
+    const explicitHumanDecision = NOT_COMMUNICATED_VALUE;
+    expect(filledCountFromValues({ commercial_designation: explicitHumanDecision })).toBe(1);
+    expect(extractedValue).toBeNull();
+  });
+
+  it('ignores a defensive stray value when the machine status is missing', () => {
+    expect(initialHumanReviewValue('valeur incohérente', 'missing')).toBe('');
+    expect(initialHumanReviewValue(' Cabillaud ', 'present')).toBe('Cabillaud');
+    expect(initialHumanReviewValue(' nc ', 'present')).toBe(NOT_COMMUNICATED_VALUE);
   });
 
   it('proposes NC only after the operator types n or N', () => {
@@ -71,6 +90,22 @@ describe('fieldCompleteness', () => {
       field('not_a_canonical_field'), // outside the closed set → ignored
     ];
     expect(filledCountFromRun(fields)).toBe(3);
+  });
+
+  it('does not count questionable machine suggestions before explicit human confirmation', () => {
+    const fields = [
+      field('commercial_designation', { value: 'Cabillaud ?', validation_status: 'ambiguous' }),
+      field('batch_number', { value: 'LOT-?', validation_status: 'unnormalizable' }),
+      field('gtin', { value: '1234', validation_status: 'invalid' }),
+    ];
+
+    expect(filledCountFromRun(fields)).toBe(0);
+    expect(filledCountFromRun(fields, { commercial_designation: 'Cabillaud' })).toBe(1);
+    expect(filledCountFromRun(fields, {
+      commercial_designation: 'Cabillaud',
+      batch_number: 'LOT-42',
+      gtin: NOT_COMMUNICATED_VALUE,
+    })).toBe(3);
   });
 
   it('filledCountFromRun is null/empty-safe', () => {

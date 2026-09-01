@@ -11,6 +11,10 @@ const apiClient = fs.readFileSync(new URL('../src/services/api.ts', import.meta.
 const previousProfile = process.env.LABELSCAN_BUILD_PROFILE;
 process.env.LABELSCAN_BUILD_PROFILE = 'production';
 const config = resolveConfig({ config: base.expo });
+delete process.env.LABELSCAN_BUILD_PROFILE;
+const fallbackConfig = resolveConfig({ config: base.expo });
+process.env.LABELSCAN_BUILD_PROFILE = 'development';
+const developmentConfig = resolveConfig({ config: base.expo });
 if (previousProfile === undefined) delete process.env.LABELSCAN_BUILD_PROFILE;
 else process.env.LABELSCAN_BUILD_PROFILE = previousProfile;
 
@@ -18,11 +22,19 @@ const buildProperties = config.plugins.find(
   (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-build-properties',
 );
 const androidBuild = buildProperties?.[1]?.android;
+const fallbackAndroidBuild = fallbackConfig.plugins.find(
+  (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-build-properties',
+)?.[1]?.android;
+const developmentAndroidBuild = developmentConfig.plugins.find(
+  (plugin) => Array.isArray(plugin) && plugin[0] === 'expo-build-properties',
+)?.[1]?.android;
 const blockedPermissions = config.android?.blockedPermissions ?? [];
 const checks = [
   ['Expo SDK 54', base.expo.sdkVersion === '54.0.0'],
   ['Android minimum API 33 (Android 13)', androidBuild?.minSdkVersion === 33],
   ['HTTP clair interdit en production', androidBuild?.usesCleartextTraffic === false],
+  ['Repli sans profil interdit le HTTP clair', fallbackAndroidBuild?.usesCleartextTraffic === false],
+  ['HTTP LAN réservé au profil development', developmentAndroidBuild?.usesCleartextTraffic === true],
   ['R8 actif en release', androidBuild?.enableMinifyInReleaseBuilds === true],
   ['Ressources inutilisées retirées', androidBuild?.enableShrinkResourcesInReleaseBuilds === true],
   ['Sauvegarde Android désactivée', config.android?.allowBackup === false],

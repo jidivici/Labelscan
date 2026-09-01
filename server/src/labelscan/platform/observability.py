@@ -44,6 +44,18 @@ _EXTRA_FIELDS = (
     # id / reason enum only — NEVER prompt contents, OCR text, or secrets.
     "model",
     "reason",
+    "prompt_version",
+    "schema_hash",
+    "cache_identity",
+    "cache_enabled",
+    "cache_ttl",
+    "cache_reason",
+    "cache_prefix_tokens",
+    "cache_min_tokens",
+    "input_tokens",
+    "output_tokens",
+    "estimated_cost_usd",
+    "stop_reason",
     "cache_creation_input_tokens",
     "cache_read_input_tokens",
     # Latency instrumentation (docs/LATENCY-REVIEW.md §6): per-ingestion
@@ -59,6 +71,18 @@ _EXTRA_FIELDS = (
     "actor_id",
     "rate_limit_scope",
     "retry_after",
+    # Provider-capacity measurements: identifiers and scalar counters only.
+    # Never add request/response content or credentials to this allow-list.
+    "provider",
+    "configured_rps",
+    "requests_total",
+    "success_total",
+    "failure_total",
+    "rate_limited_total",
+    "requests_last_second",
+    "in_flight",
+    "latency_avg_ms",
+    "latency_max_ms",
 )
 
 

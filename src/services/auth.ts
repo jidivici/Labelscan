@@ -9,8 +9,7 @@
 
 import { apiRequest } from './api';
 import {
-  clearSessionTokens,
-  clearUsername,
+  clearSessionCredentials,
   getRefreshToken,
   setOperatorContext,
   setTokens,
@@ -26,8 +25,10 @@ interface LoginResponse {
   refresh_token: string;
   refresh_expires_in: number;
   user: {
+    id: string;
     role: 'admin' | 'manager' | 'super_admin';
     username: string;
+    organization_id: string | null;
     business_portal_id: string | null;
     trade_code: string | null;
   };
@@ -46,6 +47,10 @@ function operatorSession(response: LoginResponse): OperatorSession {
   if (
     typeof response.user.username !== 'string' ||
     response.user.username.trim() === '' ||
+    typeof response.user.id !== 'string' ||
+    response.user.id.trim() === '' ||
+    typeof response.user.organization_id !== 'string' ||
+    response.user.organization_id.trim() === '' ||
     typeof response.user.business_portal_id !== 'string' ||
     response.user.business_portal_id.trim() === '' ||
     !isTradeCode(response.user.trade_code)
@@ -54,6 +59,8 @@ function operatorSession(response: LoginResponse): OperatorSession {
   }
   return {
     username: response.user.username,
+    organizationId: response.user.organization_id,
+    actorId: response.user.id,
     businessPortalId: response.user.business_portal_id,
     tradeCode: response.user.trade_code,
   };
@@ -72,6 +79,8 @@ async function persistSession(
       setTokens(response.access_token, response.refresh_token),
       setUsername(session.username || fallbackUsername || ''),
       setOperatorContext({
+        organizationId: session.organizationId,
+        actorId: session.actorId,
         businessPortalId: session.businessPortalId,
         tradeCode: session.tradeCode,
       }),
@@ -79,7 +88,7 @@ async function persistSession(
   } catch (error) {
     // SecureStore writes are independent native calls: fail closed if only part of
     // the session landed, otherwise a token could survive without its portal context.
-    await Promise.allSettled([clearSessionTokens(), clearUsername()]);
+    await clearSessionCredentials();
     throw error;
   }
   return session;
@@ -103,6 +112,9 @@ export async function login(username: string, password: string): Promise<Operato
 
 export async function logout(): Promise<void> {
   const refreshToken = await getRefreshToken();
+  // Local logout is authoritative and completes before a potentially slow remote
+  // revocation. If the process is killed during the POST, no credential can restore.
+  await clearSessionCredentials();
   try {
     if (refreshToken) {
       await apiRequest('/v1/mobile/auth/logout', {
@@ -111,16 +123,15 @@ export async function logout(): Promise<void> {
         skipAuth: true,
       });
     }
-  } finally {
-    await clearSessionTokens();
-    await clearUsername();
+  } catch {
+    // The captured refresh token expires server-side; local sign-out remains complete.
   }
 }
 
 export async function restoreAuthentication(): Promise<OperatorSession | null> {
   const refreshToken = await getRefreshToken();
   if (!refreshToken) {
-    await clearSessionTokens();
+    await clearSessionCredentials();
     return null;
   }
   try {
@@ -130,12 +141,12 @@ export async function restoreAuthentication(): Promise<OperatorSession | null> {
       skipAuth: true,
     });
     if (!res.access_token || !res.refresh_token) {
-      await clearSessionTokens();
+      await clearSessionCredentials();
       return null;
     }
     return await persistSession(res);
   } catch {
-    await clearSessionTokens();
+    await clearSessionCredentials();
     return null;
   }
 }

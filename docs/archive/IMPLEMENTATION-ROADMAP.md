@@ -1,5 +1,8 @@
 # LabelScan — Plan d'implémentation (état au 3 août 2026)
 
+> **Archived:** Superseded implementation roadmap, not a current backlog. See the
+> [archive index](README.md) and [developer guide](../DEVELOPER-GUIDE.md).
+
 > Archivé le 20 août 2026 : plan ponctuel largement livré, non utilisable comme backlog courant.
 
 **Objectif :** passer de l'état actuel (cœur métier complet, testé, mono-site, mono-compte)

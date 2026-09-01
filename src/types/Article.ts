@@ -33,7 +33,6 @@ export interface Article {
   extraction_run_id: string | null;
   captured_at: string; // ISO 8601
   photo_uri: string | null; // permanent local path, when a photo was kept
-  photo_headers?: Record<string, string>;
   /** Half-turn approved by the reviewer; the immutable OCR source is unchanged. */
   photo_rotation_degrees?: 0 | 180;
   /** Historical raw photos need -90° on display; new crops are already upright. */

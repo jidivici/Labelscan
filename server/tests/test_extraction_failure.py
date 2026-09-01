@@ -26,7 +26,7 @@ def _quiesce(engine):
         )
 
 
-def test_provider_failure_produces_failed_run_after_retry_limit(
+def test_unknown_provider_failure_is_terminal_without_unsafe_retry(
     submit, engine, raw_store
 ):
     _quiesce(engine)
@@ -55,7 +55,9 @@ def test_provider_failure_produces_failed_run_after_retry_limit(
     # does NOT raise (no crash loop) — the consumer records a FAILED run and consumes the event.
     worker.run_once()
 
-    assert llm.calls == 3  # retried up to the limit, then gave up
+    # An unclassified RuntimeError is terminal. Only explicit timeout/connection
+    # failures and HTTP 408/409/429/5xx are safe to replay.
+    assert llm.calls == 1
 
     with engine.connect() as c:
         run = (

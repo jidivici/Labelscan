@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { API_BASE_URL } from '../config';
 import { businessProfileFor } from './businessProfiles';
 import { apiRequest } from './api';
-import { getToken } from './authStorage';
+import type { OperatorContext } from './authStorage';
 import type { Article, ArticleField } from '../types/Article';
 
 interface ArrivalSummary {
@@ -84,14 +84,17 @@ function fieldsFromValues(
   });
 }
 
-async function imageHeaders(): Promise<Record<string, string> | undefined> {
-  const token = await getToken();
-  return token ? { Authorization: `Bearer ${token}` } : undefined;
-}
+export const catalogQueryKey = (context: OperatorContext) => [
+  'catalog',
+  'arrivals',
+  context.organizationId,
+  context.actorId,
+  context.businessPortalId,
+  context.tradeCode,
+] as const;
 
 export async function listCatalogArticles(): Promise<Article[]> {
   const page = await apiRequest<ArrivalPage>('/v1/arrivals?limit=200');
-  const headers = await imageHeaders();
   return page.items.map((arrival) => {
     const values: Record<string, string | null> = {
       commercial_designation: arrival.product_name,
@@ -115,7 +118,6 @@ export async function listCatalogArticles(): Promise<Article[]> {
       photo_uri: arrival.photo_available
         ? `${API_BASE_URL}/v1/arrivals/${encodeURIComponent(arrival.batch_id)}/image`
         : null,
-      photo_headers: headers,
       photo_rotation_degrees: arrival.photo_rotation_degrees ?? 0,
       photo_base_rotation_degrees: arrival.photo_base_rotation_degrees ?? -90,
       barcode_raw: arrival.gtin,
@@ -135,7 +137,6 @@ export async function getCatalogArticle(batchId: string): Promise<Article | null
     const arrival = await apiRequest<ArrivalDetail>(
       `/v1/arrivals/${encodeURIComponent(batchId)}`,
     );
-    const headers = await imageHeaders();
     return {
       id: arrival.batch_id,
       source: 'backend_extraction',
@@ -145,7 +146,6 @@ export async function getCatalogArticle(batchId: string): Promise<Article | null
       photo_uri: arrival.photo_available
         ? `${API_BASE_URL}/v1/arrivals/${encodeURIComponent(arrival.batch_id)}/image`
         : null,
-      photo_headers: headers,
       photo_rotation_degrees: arrival.photo_rotation_degrees ?? 0,
       photo_base_rotation_degrees: arrival.photo_base_rotation_degrees ?? -90,
       barcode_raw: arrival.fields.gtin ?? null,
@@ -166,9 +166,10 @@ export async function getCatalogArticle(batchId: string): Promise<Article | null
   }
 }
 
-export function useCatalogArticles() {
+export function useCatalogArticles(context: OperatorContext | null) {
   return useQuery({
-    queryKey: ['catalog', 'arrivals'],
+    queryKey: context ? catalogQueryKey(context) : ['catalog', 'arrivals', 'signed-out'],
     queryFn: listCatalogArticles,
+    enabled: context != null,
   });
 }

@@ -1,5 +1,8 @@
 # LabelScan — Architecture Synthesis
 
+> **Archived:** Historical design synthesis, not current development guidance. See the
+> [archive index](README.md) and [enterprise architecture](../ENTERPRISE-ARCHITECTURE.md).
+
 > Archivé le 20 août 2026 : synthèse de conception partiellement implémentée, supplantée par les références thématiques.
 
 **Status:** Partially implemented (Phases 0–4 shipped; Phase 5 in progress). This document

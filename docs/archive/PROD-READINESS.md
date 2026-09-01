@@ -1,5 +1,8 @@
 # LabelScan — Synthèse prod-readiness : ce qui manque pour vendre à un grand groupe
 
+> **Archived:** Earlier release snapshot, not a production approval checklist. See the
+> [archive index](README.md) and [production validation guide](../security/PRODUCTION-VALIDATION.md).
+
 > Archivé le 20 août 2026 : état pré-déploiement remplacé par les contrôles de sécurité vivants.
 
 **Date :** 3 août 2026 (security refresh V3)

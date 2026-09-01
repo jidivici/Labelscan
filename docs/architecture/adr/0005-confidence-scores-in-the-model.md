@@ -1,15 +1,21 @@
 # ADR-0005: Confidence scores and provenance live on each ExtractedField
 
 ## Status
-Accepted & Implemented
+
+Accepted and implemented
+
+The context and alternatives below preserve the conditions recorded when this decision
+was made. The current persisted field shape is summarized at the end.
 
 ## Context
-Constraint #2 requires **every extracted field to carry a confidence score**, and constraint #1
-forbids hallucinating data or inventing missing fields. Today no confidence is kept at all
-([initial audit](../../archive/AUDIT.md), D2) and there are no structured fields (D1). We must decide *where* confidence and
+
+The decision brief required **every extracted field to carry a confidence score** and
+forbade fabricating missing fields. At decision time, the system retained
+no confidence and had no structured fields. The decision needed to establish *where* confidence and
 provenance live in the model and how "unknown" is represented.
 
 ## Decision
+
 Model each extracted seafood field as an **`ExtractedField` value object** owned by the
 `ExtractionRun` inside the `Ingestion` aggregate, shaped as:
 
@@ -24,12 +30,13 @@ ExtractedField {
 ```
 
 Rules: a **non-null value must always carry a confidence and provenance**; a missing field has
-`value = None` (and still records why — not read vs. not present) and is **never invented**
-(constraint #1). `Confidence` is a first-class value object so thresholds (review triggers,
+`value = None` (and still records why — not read vs. not present) and is **never invented**.
+`Confidence` is a first-class value object so thresholds (review triggers,
 HACCP gating) are expressed in domain terms, not raw floats scattered around. Human confirmation
 (`ExtractionConfirmed`) records overrides as new provenance, not by erasing the original.
 
 ## Consequences
+
 - **Easier:** confidence travels with the datum everywhere (events, persistence, UI review);
   required-field validation and low-confidence review become simple domain rules; auditors can see
   source + confidence per field.
@@ -37,21 +44,31 @@ HACCP gating) are expressed in domain terms, not raw floats scattered around. Hu
   extra adapter work.
 
 ## Alternatives considered
+
 1. **Separate `confidence` side-table keyed by ingestion+field.** Rejected: confidence is
    intrinsic to a reading; splitting it invites rows where a value exists without a confidence,
    violating the invariant the model should make impossible.
 2. **A single overall confidence per ingestion.** Rejected: violates "every *field* must have a
    confidence"; loses per-field review granularity.
-3. **Plain float instead of a value object.** Rejected: scatters threshold logic; no place for the
-   no-fabrication and band rules.
+3. **Plain float instead of a value object.** Rejected: scatters threshold logic and leaves no
+   single place for evidence-grounding and confidence-band rules.
 
 ## Trade-offs
-We trade *model richness/mapping effort* for *an enforceable per-field confidence+provenance
-invariant and no-hallucination guarantee*. The extra structure is exactly where the compliance
-value is.
+
+We trade *model richness and mapping effort* for an enforceable per-field confidence and
+provenance invariant. This structure supports evidence review, but it does not prove semantic
+truth or regulatory compliance by itself.
 
 ## Reversibility
+
 **High.** `ExtractedField` is an internal value object; its shape can evolve (add fields, refine
 bands) behind the aggregate. Persisted as structured rows/JSONB, schema changes are migrations,
 not redesigns.
-</content>
+
+## Current implementation note
+
+The current extracted-field model records LLM confidence, OCR confidence, combined
+confidence, qualitative band, evidence, provenance, source, validation status, and
+warnings. Database constraints require a non-null value to carry provenance and a source
+artifact reference; null values carry neither. Human review and field override create a new
+append-only extraction run instead of mutating the earlier interpretation.

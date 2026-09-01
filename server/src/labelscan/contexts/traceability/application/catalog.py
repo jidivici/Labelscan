@@ -60,6 +60,7 @@ class CatalogQuery:
     field_filters: tuple[tuple[str, str], ...] = ()
     sort_by: str = "recorded_at"
     sort_direction: str = "desc"
+    include_total: bool = True
 
 
 @dataclass(frozen=True)
@@ -130,6 +131,12 @@ class CatalogService:
             and request.date_from > request.date_to
         ):
             raise ValueError("date_from must be before or equal to date_to")
+        if (
+            request.expiry_from is not None
+            and request.expiry_to is not None
+            and request.expiry_from > request.expiry_to
+        ):
+            raise ValueError("expiry_from must be before or equal to expiry_to")
         if request.limit < 1 or request.limit > 200 or request.offset < 0:
             raise ValueError("invalid catalogue pagination")
         if request.completeness_min is not None and not (
@@ -180,6 +187,7 @@ class CatalogService:
                 field_filters=request.field_filters,
                 sort_by=request.sort_by,
                 sort_direction=sort_direction,
+                include_total=request.include_total,
             )
         )
 

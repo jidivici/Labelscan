@@ -1,5 +1,8 @@
 # LabelScan — Revue technique de passation
 
+> **Archived:** Historical handover review, not current development guidance. See the
+> [archive index](README.md) and [developer guide](../DEVELOPER-GUIDE.md).
+
 > Archivé le 20 août 2026 : revue ponctuelle contenant des constats désormais corrigés.
 
 **Format :** lecture/présentation ~1 h 30, pensée pour un passage de relais. Un nouveau
@@ -7,10 +10,10 @@ développeur doit pouvoir, après cette revue, situer n'importe quel fichier du 
 comprendre *pourquoi* il est là.
 **Date :** 6 juillet 2026 (état v1.1 — module calendrier inclus).
 **Compléments :** ce document justifie les choix ; les références exhaustives restent
-[`architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md), les
-[ADR](architecture/adr/), [`mobile/MOBILE-APP.md`](mobile/MOBILE-APP.md),
-[`backend/API-CONTRACTS.md`](backend/API-CONTRACTS.md),
-[`database/DATABASE.md`](database/DATABASE.md).
+[`architecture/ARCHITECTURE.md`](../ENTERPRISE-ARCHITECTURE.md), les
+[ADR](../architecture/adr/), [`mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md),
+[`backend/API-CONTRACTS.md`](../backend/API-CONTRACTS.md),
+[`database/DATABASE.md`](../database/DATABASE.md).
 
 ---
 
@@ -108,7 +111,7 @@ réseau + latence, traitée par un programme dédié (§9).
   jamais le LLM contredire le code-barres** (réconciliation : GS1 gagne sur ses champs).
 - **LLM ensuite** : Claude **Haiku** par défaut (rapport coût/latence), **escalade Opus**
   configurable sur les cas difficiles, prompt caching activé. Le prompt est un
-  **contrat versionné** ([`extraction/PROMPT-CONTRACT.md`](extraction/PROMPT-CONTRACT.md),
+  **contrat versionné** ([`extraction/PROMPT-CONTRACT.md`](../extraction/PROMPT-CONTRACT.md),
   v2.0.0, 17 champs) avec cas de test d'or (`extraction/test-cases/`).
 - **Gate no-fab côté serveur** : sortie LLM validée contre le texte OCR — un champ non
   ancré dans le texte est rejeté. La confiance est **dans le modèle** (ADR-0005 : chaque

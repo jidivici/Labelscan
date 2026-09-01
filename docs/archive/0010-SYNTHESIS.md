@@ -1,5 +1,8 @@
 # Synthèse v0010 — Cache de prompt (Work Item B) + escalade deux niveaux (Work Item A)
 
+> **Archived:** Historical delivery snapshot, not current development guidance. See the
+> [archive index](README.md) and [living documentation](../README.md).
+
 **Date :** 2026-06-19
 **Périmètre :** `server/` (contexte `ingestion`). Migration `0010` (additive, colonnes nullables).
 **Drapeaux :** escalade **OFF par défaut** (`LABELSCAN_LLM_ESCALATION_ENABLED=false`), cache **ON par
@@ -8,7 +11,7 @@ défaut** (`LABELSCAN_LLM_PROMPT_CACHE_ENABLED=true`). La feature escalade est l
 > **Honnêteté d'abord.** Les chiffres de coût/latence ci-dessous sont **illustratifs** et marqués
 > *[à mesurer]* — ils donnent la *forme* du gain, pas une facture. Les mesures réelles se font avec
 > `count_tokens` + la télémétrie de prod (voir §4). C'est la même discipline que
-> [`ai-pipeline/model-and-cost-notes.md`](./ai-pipeline/model-and-cost-notes.md).
+> [`ai-pipeline/model-and-cost-notes.md`](../ai-pipeline/model-and-cost-notes.md).
 
 ---
 
@@ -127,7 +130,7 @@ C'est le gain **le plus net** — et le plus important pour un système HACCP.
 ### 4.1 Déjà automatisés (offline, dans la suite — `pytest`)
 Tournent sans réseau ni dépense (fakes déterministes + PG éphémère). Ce qu'ils **prouvent** :
 
-**Escalade** — [`tests/test_extraction_escalation.py`](../server/tests/test_extraction_escalation.py) :
+**Escalade** — [`tests/test_extraction_escalation.py`](../../server/tests/test_extraction_escalation.py) :
 - `test_flag_off_no_escalation_still_needs_review` — **flag OFF ⇒ comportement inchangé** : la 2ᵉ
   instance est injectée mais **jamais appelée** ; un champ requis faible reste `needs_review`.
 - `test_flag_on_recovers_free_text_field_to_extracted` — flag ON : champ texte-libre requis ambigu,
@@ -141,7 +144,7 @@ Tournent sans réseau ni dépense (fakes déterministes + PG éphémère). Ce qu
 - `test_same_model_never_called_twice_for_one_ingestion` — dedup `(ingestion, modèle)` : si le modèle
   d'escalade = modèle primaire, l'artefact existant **court-circuite** le 2ᵉ appel.
 
-**Cache** — [`tests/test_prompt_cache.py`](../server/tests/test_prompt_cache.py) :
+**Cache** — [`tests/test_prompt_cache.py`](../../server/tests/test_prompt_cache.py) :
 - préfixe caché **ne contient aucune** donnée dynamique/secret (texte OCR, indice GS1,
   `correlation_id`, `trace_id`, timestamp horloge) ;
 - texte OCR + indice GS1 vivent dans le message **dynamique** (pas dans le préfixe) ;
@@ -160,7 +163,7 @@ outbox/DLQ) **doit rester verte** : c'est la preuve « flag OFF = pas de changem
 ### 4.2 Nécessitent l'API live (credentials `ANTHROPIC_API_KEY`)
 Skippés en CI sans clé ; **à lancer manuellement** avant d'activer le cache en prod :
 - **Plancher de cache Haiku ≥ 4096 tokens** — `test_static_prefix_meets_haiku_4096_floor`
-  (skip sans clé) **ou** le script [`scripts/measure_prompt_tokens.py`](../server/scripts/measure_prompt_tokens.py).
+  (skip sans clé) **ou** le script [`scripts/measure_prompt_tokens.py`](../../server/scripts/measure_prompt_tokens.py).
   *Pourquoi :* sous 4096, Haiku **ne cache jamais** silencieusement (`cache_creation_input_tokens=0`).
 - **Cache réellement lu (cassette/2 appels live)** — deux appels partageant le préfixe dans le TTL :
   le 1ᵉʳ doit reporter `cache_creation_input_tokens > 0`, le 2ᵉ `cache_read_input_tokens > 0`.

@@ -11,13 +11,15 @@ from labelscan.contexts.traceability.application.catalog import CatalogService
 from labelscan.platform.raw_images import RawImage
 from tests.conftest import bearer
 
+BATCH_ID = "33333333-3333-3333-3333-333333333333"
+
 
 class _ImageRepository:
     def list_products(self, filters):
         return [], 0
 
     def image_checksum(self, batch_id, store_code):
-        if batch_id == "batch-visible" and store_code == "PARIS-01":
+        if batch_id == BATCH_ID and store_code == "PARIS-01":
             return "a" * 64
         return None
 
@@ -37,7 +39,7 @@ def test_operator_can_load_only_its_store_arrival_image() -> None:
 
     with TestClient(app) as client:
         visible = client.get(
-            "/v1/arrivals/batch-visible/image",
+            f"/v1/arrivals/{BATCH_ID}/image",
             headers=bearer(
                 "catalog:read",
                 role="operator",
@@ -46,7 +48,7 @@ def test_operator_can_load_only_its_store_arrival_image() -> None:
             ),
         )
         hidden = client.get(
-            "/v1/arrivals/batch-visible/image",
+            f"/v1/arrivals/{BATCH_ID}/image",
             headers=bearer(
                 "catalog:read",
                 role="operator",

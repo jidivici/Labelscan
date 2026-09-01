@@ -25,6 +25,7 @@ import {
   markSucceeded,
   type OperationError,
 } from './outbox';
+import { captureActiveSession, isSessionFenceCurrent } from './authStorage';
 
 // Mirror of the backend GS1_OWNED_FIELDS (override_field.py): these come from the
 // barcode symbology — overriding them is flagged explicitly (force_gs1) so the server
@@ -67,17 +68,33 @@ export async function submitFieldOverrides(input: {
   fields: FieldCorrection[];
 }): Promise<SubmitOverridesResult> {
   const result: SubmitOverridesResult = { submitted: 0, pending: 0 };
+  const fence = await captureActiveSession();
+  if (!fence) return { submitted: 0, pending: input.fields.length };
 
-  for (const field of input.fields) {
+  for (const [index, field] of input.fields.entries()) {
+    if (!isSessionFenceCurrent(fence)) {
+      result.pending += input.fields.length - index;
+      break;
+    }
     const forceGs1 = isGs1OwnedField(field.field_name);
-    const op = await enqueueOverrideField({
-      ingestion_id: input.ingestionId,
-      field_name: field.field_name,
-      value: field.value,
-      force_gs1: forceGs1 || undefined,
-    });
+    let op;
+    try {
+      op = await enqueueOverrideField({
+        ingestion_id: input.ingestionId,
+        field_name: field.field_name,
+        value: field.value,
+        force_gs1: forceGs1 || undefined,
+      });
+    } catch {
+      result.pending += 1;
+      continue;
+    }
 
-    const claimed = await markInFlight(op.id);
+    if (!isSessionFenceCurrent(fence)) {
+      result.pending += input.fields.length - index;
+      break;
+    }
+    const claimed = await markInFlight(op.id, Date.now(), fence);
     if (!claimed || claimed.type !== 'override_field') {
       result.pending += 1;
       continue;
@@ -93,12 +110,19 @@ export async function submitFieldOverrides(input: {
           idempotencyKey: claimed.idempotencyKey,
           correlationId: claimed.correlationId,
           forceGs1: claimed.payload.force_gs1,
+          signal: fence.signal,
         },
       );
-      await markSucceeded(claimed.id);
+      if (!isSessionFenceCurrent(fence)) {
+        result.pending += 1;
+        continue;
+      }
+      await markSucceeded(claimed.id, { fence });
       result.submitted += 1;
     } catch (err) {
-      await markFailed(claimed.id, toOperationError(err));
+      if (isSessionFenceCurrent(fence)) {
+        await markFailed(claimed.id, toOperationError(err), Date.now(), fence);
+      }
       result.pending += 1;
     }
   }

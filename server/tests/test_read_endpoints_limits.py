@@ -5,6 +5,8 @@ Verifies bounded results on alerts list with proper key names.
 
 from __future__ import annotations
 
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -14,6 +16,7 @@ from labelscan.contexts.haccp.adapters.http.lifecycle_router import get_alert_se
 from labelscan.contexts.haccp.adapters.sql_alert_repository import SqlAlertRepository
 from labelscan.contexts.haccp.application.alert_service import AlertLifecycleService
 from labelscan.platform.db.audit_context import set_audit_context
+from labelscan.platform.http.deps import get_engine
 from tests.conftest import ACTOR_ID, bearer
 
 AUTH_READ = bearer("haccp:read")
@@ -49,6 +52,13 @@ def client(engine):
     app.dependency_overrides[get_alert_service] = lambda: AlertLifecycleService(
         SqlAlertRepository(engine)
     )
+    return TestClient(app)
+
+
+@pytest.fixture
+def validation_client():
+    app = create_app()
+    app.dependency_overrides[get_engine] = lambda: object()
     return TestClient(app)
 
 
@@ -89,3 +99,44 @@ def test_alerts_list_pagination_offset(client, engine):
     assert len(r1.json()["items"]) == 3
     assert len(r2.json()["items"]) == 3
     assert r1.json()["items"][0]["id"] != r2.json()["items"][0]["id"]
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"batch_id": str(uuid.uuid4()).upper()},
+        {"business_portal_id": uuid.uuid4().hex},
+        {"profession": "POISSONNERIE"},
+        {"profession": "poissonnerie\u202e"},
+        {"profession": "poissonnerie\x01"},
+        {"profession": "p" * 65},
+        {"offset": "100001"},
+        {"offset": "1.0"},
+        {"limit": "1e2"},
+        {"unexpected": "value"},
+    ],
+)
+def test_alert_query_rejects_noncanonical_or_unsafe_inputs(validation_client, params):
+    response = validation_client.get("/v1/alerts", params=params, headers=AUTH_READ)
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_alert_query_rejects_duplicate_scalar_parameters(validation_client):
+    response = validation_client.get(
+        "/v1/alerts",
+        params=[("state", "open"), ("state", "resolved")],
+        headers=AUTH_READ,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_alert_query_accepts_a_supported_profession_enum(client):
+    response = client.get(
+        "/v1/alerts", params={"profession": "boucherie"}, headers=AUTH_READ
+    )
+
+    assert response.status_code == 200

@@ -1,5 +1,8 @@
 # LabelScan — Architecture & Data-Integrity Audit
 
+> **Archived:** Point-in-time audit, not a current risk or implementation guide. See the
+> [archive index](README.md) and [living documentation](../README.md).
+
 **Date:** 2026-06-14
 **Scope:** `LabelScan/` only.
 **Reviewed at commit:** `0235ab6` (Initial commit).

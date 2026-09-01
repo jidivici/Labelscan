@@ -52,6 +52,17 @@ def test_fabricated_value_is_coerced_to_null_and_flagged():
     assert "EVIDENCE_NOT_IN_RAW_OCR" in v.security_flags
 
 
+def test_whitespace_only_evidence_never_anchors_a_value():
+    fields = (
+        field("scientific_name", "Gadus morhua", 0.96, ["   "]),
+        field("expiry_date", "2026-06-20", 0.95, ["2026-06-20"]),
+        field("production_method", "wild_caught", 0.93, ["Wild caught"]),
+    )
+    verdict = evaluate(fields, ocr_text=OCR_TEXT, ocr_confidence=0.95, rule_set=RULES)
+    assert _by(verdict, "scientific_name").value is None
+    assert "EVIDENCE_NOT_IN_RAW_OCR" in verdict.security_flags
+
+
 def test_missing_required_field_routes_to_review():
     fields = (
         field("scientific_name", "Gadus morhua", 0.96, ["Gadus morhua"]),

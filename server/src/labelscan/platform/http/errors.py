@@ -51,6 +51,7 @@ ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
         False,
     ),
     "PAYLOAD_TOO_LARGE": (413, "Payload exceeds the configured limit", False),
+    "EXPORT_TOO_LARGE": (413, "Export exceeds the configured row limit", False),
     "UNSUPPORTED_MEDIA_TYPE": (415, "Unsupported image media type", False),
     "RATE_LIMITED": (429, "Too many requests", True),
     "INTERNAL_ERROR": (500, "Unexpected server fault", True),

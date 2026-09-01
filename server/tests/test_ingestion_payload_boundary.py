@@ -16,7 +16,7 @@ from labelscan.contexts.ingestion.adapters.sql_ingestion_repository import (
     SqlIngestionRepository,
 )
 from labelscan.contexts.ingestion.application.submit_ingestion import SubmitIngestion
-from tests.conftest import bearer, jpeg_bytes
+from tests.conftest import bearer, jpeg_bytes, jpeg_bytes_of_size
 
 AUTH = bearer("ingestion:write")
 
@@ -38,8 +38,7 @@ def _files(content: bytes, media="image/jpeg", barcode_raw=None):
 
 
 def test_payload_exactly_10mb_accepted(client):
-    overhead = len(jpeg_bytes())
-    content = jpeg_bytes(b"x" * (10 * 1024 * 1024 - overhead))
+    content = jpeg_bytes_of_size(10 * 1024 * 1024)
     files, data = _files(content)
     r = client.post(
         "/v1/ingestions",
@@ -51,8 +50,7 @@ def test_payload_exactly_10mb_accepted(client):
 
 
 def test_payload_just_over_10mb_rejected(client):
-    overhead = len(jpeg_bytes())
-    content = jpeg_bytes(b"x" * (10 * 1024 * 1024 + 1 - overhead))
+    content = jpeg_bytes_of_size(10 * 1024 * 1024 + 1)
     files, data = _files(content)
     r = client.post(
         "/v1/ingestions",

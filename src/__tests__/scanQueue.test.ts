@@ -9,12 +9,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 jest.mock('react-native', () => ({
-  AppState: { addEventListener: jest.fn(() => ({ remove: jest.fn() })) },
+  AppState: {
+    currentState: 'active',
+    addEventListener: jest.fn(() => ({ remove: jest.fn() })),
+  },
 }));
 
 jest.mock('../services/storage', () => ({
+  clearPendingScanPhotos: jest.fn(async () => undefined),
   persistPendingPhoto: jest.fn(async (id: string) => `file:///pending/${id}.jpg`),
   deletePendingPhoto: jest.fn(async () => undefined),
+  deletePendingPhotoStrict: jest.fn(async () => undefined),
+  isCanonicalPendingPhotoUri: jest.fn((uri: unknown) =>
+    typeof uri === 'string' && /^file:\/\/\/pending\/[A-Za-z0-9][A-Za-z0-9_-]{0,127}\.jpg$/.test(uri)),
   sweepPendingPhotos: jest.fn(async () => undefined),
 }));
 
@@ -31,12 +38,30 @@ jest.mock('../services/outbox', () => ({
   getOperation: jest.fn(),
 }));
 
-import { deletePendingPhoto, persistPendingPhoto } from '../services/storage';
+jest.mock('../services/authStorage', () => ({
+  captureActiveSession: jest.fn(),
+  getOperatorContext: jest.fn(),
+  isSessionFenceCurrent: jest.fn(() => true),
+  operatorContextKey: jest.fn((context: {
+    organizationId: string;
+    actorId: string;
+    businessPortalId: string;
+    tradeCode: string;
+  }) => [context.organizationId, context.actorId, context.businessPortalId, context.tradeCode].join(':')),
+}));
+
+import {
+  clearPendingScanPhotos,
+  deletePendingPhoto,
+  persistPendingPhoto,
+} from '../services/storage';
 import { enqueueCapture, executeCreateIngestionOp } from '../services/ingestionSubmit';
 import { waitForIngestionResult } from '../services/ingestionResult';
 import { getOperation } from '../services/outbox';
+import { captureActiveSession, getOperatorContext } from '../services/authStorage';
 import {
   _resetScanQueueForTests,
+  clearScanQueue,
   completeScan,
   discardScan,
   enqueueScan,
@@ -54,8 +79,18 @@ const mockedWait = waitForIngestionResult as jest.MockedFunction<typeof waitForI
 const mockedGetOp = getOperation as jest.MockedFunction<typeof getOperation>;
 const mockedPersistPhoto = persistPendingPhoto as jest.MockedFunction<typeof persistPendingPhoto>;
 const mockedDeletePhoto = deletePendingPhoto as jest.MockedFunction<typeof deletePendingPhoto>;
+const mockedClearPendingPhotos = clearPendingScanPhotos as jest.MockedFunction<
+  typeof clearPendingScanPhotos
+>;
+const mockedContext = getOperatorContext as jest.MockedFunction<typeof getOperatorContext>;
+const mockedFence = captureActiveSession as jest.MockedFunction<typeof captureActiveSession>;
 
 interface FakeOp {
+  schema_version: 2;
+  owner_organization_id: string;
+  owner_actor_id: string;
+  owner_business_portal_id: string;
+  owner_trade_code: string;
   id: string;
   idempotencyKey: string;
   correlationId: string;
@@ -75,6 +110,11 @@ let opSeq = 0;
 function fakeOp(overrides: Partial<FakeOp> = {}): FakeOp {
   opSeq += 1;
   return {
+    schema_version: 2,
+    owner_organization_id: 'org-a',
+    owner_actor_id: 'actor-a',
+    owner_business_portal_id: 'portal-a',
+    owner_trade_code: 'poissonnerie',
     id: `op-${opSeq}`,
     idempotencyKey: `k-${opSeq}`,
     correlationId: `c-${opSeq}`,
@@ -109,6 +149,18 @@ describe('scanQueue', () => {
     mockedGetOp.mockReset();
     mockedPersistPhoto.mockReset().mockImplementation(async (id: string) => `file:///pending/${id}.jpg`);
     mockedDeletePhoto.mockReset().mockResolvedValue(undefined);
+    mockedClearPendingPhotos.mockReset().mockResolvedValue(undefined);
+    mockedContext.mockReset().mockResolvedValue({
+      organizationId: 'org-a',
+      actorId: 'actor-a',
+      businessPortalId: 'portal-a',
+      tradeCode: 'poissonnerie',
+    });
+    mockedFence.mockReset().mockImplementation(async () => ({
+      generation: 1,
+      scopeKey: 'org-a:actor-a:portal-a:poissonnerie',
+      signal: new AbortController().signal,
+    }));
     // Default: a poll that never resolves (tests opt into a real outcome via
     // mockResolvedValueOnce/mockImplementation). Without this, any scan that reaches
     // 'extracting' without an explicit stub would await `undefined` and throw.
@@ -129,6 +181,75 @@ describe('scanQueue', () => {
     await flush();
   });
 
+  it('does not enqueue an operation when the durable photo copy fails', async () => {
+    mockedPersistPhoto.mockResolvedValueOnce(null);
+
+    await expect(enqueueScan({
+      tempUri: 'file:///cache/unsafe.jpg',
+      capturedAt: '2026-07-05T10:00:00Z',
+    })).rejects.toThrow('DURABLE_PHOTO_PERSIST_FAILED');
+
+    expect(mockedEnqueueCapture).not.toHaveBeenCalled();
+    expect(getSnapshot().scans).toHaveLength(0);
+  });
+
+  it('strictly purges the pending-photo directory at a session boundary', async () => {
+    await clearScanQueue();
+
+    expect(mockedClearPendingPhotos).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let an old submit continuation mutate a same-id scan in a new session', async () => {
+    mockedEnqueueCapture.mockResolvedValueOnce(fakeOp());
+    let resolveOld!: (value: Awaited<ReturnType<typeof executeCreateIngestionOp>>) => void;
+    mockedExecute.mockReturnValueOnce(new Promise((resolve) => {
+      resolveOld = resolve;
+    }));
+
+    await enqueueScan({
+      id: 'shared-id',
+      tempUri: 'file:///cache/old.jpg',
+      capturedAt: '2026-08-31T08:00:00Z',
+    });
+    await clearScanQueue();
+
+    mockedContext.mockResolvedValue({
+      organizationId: 'org-b',
+      actorId: 'actor-b',
+      businessPortalId: 'portal-b',
+      tradeCode: 'boucherie',
+    });
+    mockedFence.mockResolvedValue({
+      generation: 2,
+      scopeKey: 'org-b:actor-b:portal-b:boucherie',
+      signal: new AbortController().signal,
+    });
+    mockedEnqueueCapture.mockResolvedValueOnce(fakeOp({
+      id: 'op-new',
+      owner_organization_id: 'org-b',
+      owner_actor_id: 'actor-b',
+      owner_business_portal_id: 'portal-b',
+      owner_trade_code: 'boucherie',
+    }));
+    mockedExecute.mockReturnValueOnce(new Promise(() => {}));
+    await enqueueScan({
+      id: 'shared-id',
+      tempUri: 'file:///cache/new.jpg',
+      capturedAt: '2026-08-31T08:01:00Z',
+    });
+
+    resolveOld({ kind: 'succeeded', ingestionId: 'ingestion-old', replayed: false });
+    await flush(5);
+
+    expect(getSnapshot().scans).toHaveLength(1);
+    expect(getSnapshot().scans[0]).toMatchObject({
+      id: 'shared-id',
+      organizationId: 'org-b',
+      status: 'submitting',
+      ingestionId: null,
+    });
+  });
+
   it('enqueueScan honors a pre-generated id (camera durable-raw-copy handoff)', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockReturnValue(new Promise(() => {}));
@@ -144,14 +265,23 @@ describe('scanQueue', () => {
   });
 
   it('stores the received trade locally without adding it to the ingestion payload', async () => {
+    mockedContext.mockResolvedValue({
+      organizationId: 'org-b',
+      actorId: 'actor-b',
+      businessPortalId: 'portal-boucherie',
+      tradeCode: 'boucherie',
+    });
+    mockedFence.mockResolvedValue({
+      generation: 1,
+      scopeKey: 'org-b:actor-b:portal-boucherie:boucherie',
+      signal: new AbortController().signal,
+    });
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockReturnValue(new Promise(() => {}));
 
     const scan = await enqueueScan({
       tempUri: 'file:///cache/boucherie.jpg',
       capturedAt: '2026-08-04T08:00:00Z',
-      tradeCode: 'boucherie',
-      businessPortalId: 'portal-boucherie',
     });
 
     expect(scan.tradeCode).toBe('boucherie');
@@ -179,7 +309,7 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].edits).toEqual({ weight: '5 kg', allergens: 'Poisson' });
 
     await flush();
-    const raw = await AsyncStorage.getItem('@labelscan:scanQueue');
+    const raw = await AsyncStorage.getItem('@labelscan:scanQueue:v2');
     expect(JSON.parse(raw as string)[0].edits).toEqual({ weight: '5 kg', allergens: 'Poisson' });
 
     // Restart: reset the singleton and re-hydrate from storage → the draft is restored.
@@ -205,6 +335,20 @@ describe('scanQueue', () => {
     expect(scan.status).toBe('extracting');
     expect(scan.ingestionId).toBe('ing-1');
     expect(mockedWait).toHaveBeenCalledWith('ing-1', expect.anything());
+  });
+
+  it('releases its controller slot before re-arming after a bounded poll timeout', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-timeout', replayed: false });
+    mockedWait
+      .mockResolvedValueOnce({ kind: 'timeout' })
+      .mockReturnValueOnce(new Promise(() => {}));
+
+    await enqueueScan({ tempUri: 'file:///cache/timeout.jpg', capturedAt: '2026-07-05T10:00:00Z' });
+    await flush(12);
+
+    expect(mockedWait).toHaveBeenCalledTimes(2);
+    expect(getSnapshot().scans[0].status).toBe('extracting');
   });
 
   it('submit dead_letter → submit_error, retryable via retryScan', async () => {
@@ -273,7 +417,7 @@ describe('scanQueue', () => {
     await enqueueScan({ tempUri: 'file:///cache/offline-bad.jpg', capturedAt: '2026-08-20T10:00:00Z' });
     await flush(8);
     expect(getSnapshot().scans[0].status).toBe('recapture_required');
-    expect(JSON.parse((await AsyncStorage.getItem('@labelscan:scanQueue')) as string)[0].status)
+    expect(JSON.parse((await AsyncStorage.getItem('@labelscan:scanQueue:v2')) as string)[0].status)
       .toBe('recapture_required');
 
     _resetScanQueueForTests();

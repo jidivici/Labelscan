@@ -75,7 +75,8 @@ describe('poissonneriePortal', () => {
     expect(screen.getByText('Cabillaud historique')).toBeInTheDocument();
     expect(screen.getByText('Criée des anciens lots')).toBeInTheDocument();
     expect(screen.queryByText('Non renseigné')).not.toBeInTheDocument();
-    expect(screen.queryByText('Producteur')).not.toBeInTheDocument();
+    expect(screen.getByText('Producteur')).toBeInTheDocument();
+    expect(screen.getAllByText('NC').length).toBeGreaterThan(0);
     expect(
       poissonneriePortal.detailSections
         .flatMap(({ fields }) => fields.map(({ key }) => key))

@@ -1,5 +1,8 @@
 # Revue de latence + livraison — session 21 juin 2026
 
+> **Archived:** Measurements from an earlier pipeline version. See the
+> [archive index](README.md) and [current reliability guide](../operations/SRE-RELIABILITY.md).
+
 > Archivé le 20 août 2026 : mesures et recommandations liées à une version antérieure du pipeline.
 
 > ⚠️ **MàJ 21 juin (soir) — mesures client en main (§0).** Les durées *par étape* du §2 restent

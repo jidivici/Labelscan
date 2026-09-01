@@ -1,6 +1,18 @@
-import { shouldHighlightReviewField } from '../services/reviewFieldAttention';
+import {
+  requiresExplicitHumanConfirmation,
+  shouldHighlightReviewField,
+} from '../services/reviewFieldAttention';
 
 describe('shouldHighlightReviewField', () => {
+  it('requires an explicit decision for every questionable machine status', () => {
+    expect(requiresExplicitHumanConfirmation('missing')).toBe(true);
+    expect(requiresExplicitHumanConfirmation('ambiguous')).toBe(true);
+    expect(requiresExplicitHumanConfirmation('unnormalizable')).toBe(true);
+    expect(requiresExplicitHumanConfirmation('invalid')).toBe(true);
+    expect(requiresExplicitHumanConfirmation('present')).toBe(false);
+    expect(requiresExplicitHumanConfirmation('normalized')).toBe(false);
+  });
+
   it('highlights empty values regardless of their source status', () => {
     expect(shouldHighlightReviewField('', 'missing', false)).toBe(true);
     expect(shouldHighlightReviewField('   ', 'invalid', true)).toBe(true);

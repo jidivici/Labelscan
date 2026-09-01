@@ -252,8 +252,10 @@ class SqlCatalogRepository(CatalogRepository):
         sort_direction = filters.sort_direction.upper()
         with self._engine.connect() as conn:
             set_tenant_context(conn, filters.organization_id)
-            total = int(
-                conn.execute(text(f"SELECT count(*) {base}"), params).scalar_one()
+            total = (
+                int(conn.execute(text(f"SELECT count(*) {base}"), params).scalar_one())
+                if filters.include_total
+                else 0
             )
             rows = (
                 conn.execute(

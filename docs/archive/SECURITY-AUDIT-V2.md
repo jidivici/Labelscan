@@ -1,5 +1,8 @@
 # Audit de sécurité — LabelScan V2 (préparation pentest externe)
 
+> **Archived:** Point-in-time security audit, not the current risk register. See the
+> [archive index](README.md) and [open risks](../security/THREAT-MODEL.md#confirmed-open-risk-register).
+
 > Archivé le 20 août 2026 : photographie historique, remplacée par l'architecture de sécurité vivante.
 
 > **Superseded:** this point-in-time assessment is retained for traceability. The

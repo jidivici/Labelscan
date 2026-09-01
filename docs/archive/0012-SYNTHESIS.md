@@ -1,11 +1,14 @@
 # Synthèse v0012 — UX front (page article + recherche) & extraction FAO ultra-précise
 
+> **Archived:** Historical delivery snapshot, not current development guidance. See the
+> [archive index](README.md) and [living documentation](../README.md).
+
 **Date :** 2026-06-20
 **Périmètre :** `src/` (app mobile) en majorité + **un** point backend (prompt Haiku, adaptateur OCR→JSON).
 **Aucune migration de base de données. Aucun changement de schéma** (`extraction.v1` inchangé).
 
 > Fait suite à [`0011-SYNTHESIS.md`](./0011-SYNTHESIS.md) (chantiers C/D/B/A). Référence front complète :
-> [`mobile/MOBILE-APP.md`](./mobile/MOBILE-APP.md). Contrat d'extraction : [`extraction/PROMPT-CONTRACT.md`](./extraction/PROMPT-CONTRACT.md).
+> [`mobile/MOBILE-APP.md`](../mobile/MOBILE-APP.md). Contrat d'extraction : [`extraction/PROMPT-CONTRACT.md`](../extraction/PROMPT-CONTRACT.md).
 
 ---
 
@@ -13,13 +16,13 @@
 
 | Sujet | Quoi | Statut | Fichiers |
 |---|---|---|---|
-| **Page centrale (Articles)** | Liste à plat **triée par nom de produit (A→Z)** ; **pas de compteur** ; carte = **« nom de produit - lot »** puis **date d'enregistrement DD/MM/YYYY** dessous | Livré + vérifié | [`ArticleListScreen`](../src/screens/ArticleListScreen.tsx), [`ArticleCard`](../src/components/ArticleCard.tsx), [`articleGrouping.ts`](../src/services/articleGrouping.ts) |
-| **Fiche produit (immuable)** | Bug « beaucoup de caractères » corrigé (échappements `\uXXXX` en JSX) ; dates en **DD/MM/YYYY** ; libellés FR | Livré + vérifié | [`ArticleDetailScreen`](../src/screens/ArticleDetailScreen.tsx) |
-| **Omni-recherche** | Tous les champs + code-barres ; accents/casse-insensible ; multi-termes ET | Livré + vérifié | [`useArticleSearch`](../src/hooks/useArticleSearch.ts), [`articleSearch.ts`](../src/services/articleSearch.ts) |
-| **Français métier** | Libellés de champ + statuts + `production_method` (Élevage / Pêche sauvage) | Livré | [`fieldLabels.ts`](../src/services/fieldLabels.ts) |
-| **Dates** | `formatDate` (long, en-tête revue) + `formatDateShort` (**DD/MM/YYYY**, articles) ; plus de « Invalid date » | Livré + vérifié | [`dates.ts`](../src/services/dates.ts) |
-| **Photo** | Persistée par **copie** (`.jpg` fixe) — corrige la perte de photo | Livré | [`storage.ts`](../src/services/storage.ts) |
-| **FAO — extraction (backend)** | Prompt Haiku **v1.2.0** : capture la désignation FAO **complète, verbatim, avec la sous-zone** + RÈGLE 7 (français si multilingue) | Code livré ; **grille d'éval + (re)déploiement requis** | [`claude_llm_provider.py`](../server/src/labelscan/contexts/ingestion/adapters/claude_llm_provider.py), PROMPT-CONTRACT §8 |
+| **Page centrale (Articles)** | Liste à plat **triée par nom de produit (A→Z)** ; **pas de compteur** ; carte = **« nom de produit - lot »** puis **date d'enregistrement DD/MM/YYYY** dessous | Livré + vérifié | [`ArticleListScreen`](../../src/screens/ArticleListScreen.tsx), [`ArticleCard`](../../src/components/ArticleCard.tsx), [`articleGrouping.ts`](../../src/services/articleGrouping.ts) |
+| **Fiche produit (immuable)** | Bug « beaucoup de caractères » corrigé (échappements `\uXXXX` en JSX) ; dates en **DD/MM/YYYY** ; libellés FR | Livré + vérifié | [`ArticleDetailScreen`](../../src/screens/ArticleDetailScreen.tsx) |
+| **Omni-recherche** | Tous les champs + code-barres ; accents/casse-insensible ; multi-termes ET | Livré + vérifié | [`useArticleSearch`](../../src/hooks/useArticleSearch.ts), [`articleSearch.ts`](../../src/services/articleSearch.ts) |
+| **Français métier** | Libellés de champ + statuts + `production_method` (Élevage / Pêche sauvage) | Livré | [`fieldLabels.ts`](../../src/services/fieldLabels.ts) |
+| **Dates** | `formatDate` (long, en-tête revue) + `formatDateShort` (**DD/MM/YYYY**, articles) ; plus de « Invalid date » | Livré + vérifié | [`dates.ts`](../../src/services/dates.ts) |
+| **Photo** | Persistée par **copie** (`.jpg` fixe) — corrige la perte de photo | Livré | [`storage.ts`](../../src/services/storage.ts) |
+| **FAO — extraction (backend)** | Prompt Haiku **v1.2.0** : capture la désignation FAO **complète, verbatim, avec la sous-zone** + RÈGLE 7 (français si multilingue) | Code livré ; **grille d'éval + (re)déploiement requis** | [`claude_llm_provider.py`](../../server/src/labelscan/contexts/ingestion/adapters/claude_llm_provider.py), PROMPT-CONTRACT §8 |
 
 `npm run typecheck` ✅ · `npx jest` ✅ **80/80** · backend `run_local_proofs.sh` ✅ **192 passed, 1 skipped**.
 

@@ -20,6 +20,7 @@ import base64
 import json
 
 from labelscan.contexts.ingestion.application.extraction_ports import OcrResult
+from labelscan.platform.external_api import external_api_monitor
 
 _ENDPOINT = "https://vision.googleapis.com/v1/images:annotate"
 # DOCUMENT_TEXT_DETECTION is the safe default (dense-text model, best recall on
@@ -92,23 +93,25 @@ class GoogleVisionOcr:
             ]
         }
         try:
-            resp = self._http_client().post(
-                self._endpoint,
-                params={
-                    "key": self._api_key
-                },  # key lives only in the request, never logged
-                json=payload,
-            )
+            with external_api_monitor.call("google_vision"):
+                resp = self._http_client().post(
+                    self._endpoint,
+                    params={
+                        "key": self._api_key
+                    },  # key lives only in the request, never logged
+                    json=payload,
+                )
+                if resp.status_code != 200:
+                    # Status only — never the key or response body.
+                    raise RuntimeError(
+                        f"google-vision returned HTTP {resp.status_code}"
+                    )
         except httpx.HTTPError as exc:
             # Sanitized: the exception text could otherwise echo the URL (which
             # carries ?key=...). Surface only the failure class.
             raise RuntimeError(
                 f"google-vision request failed: {type(exc).__name__}"
             ) from None
-        if resp.status_code != 200:
-            # Status only — never the key or response body.
-            raise RuntimeError(f"google-vision returned HTTP {resp.status_code}")
-
         raw = resp.content
         full_text, mean_confidence = _parse_annotate_response(json.loads(raw))
         return OcrResult(

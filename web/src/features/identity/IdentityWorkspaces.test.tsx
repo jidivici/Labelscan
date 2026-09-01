@@ -217,6 +217,29 @@ describe('IAM credentials', () => {
     expect(screen.getByLabelText('Mot de passe')).toBeInTheDocument();
   });
 
+  it.each([
+    ['une lettre accentuée', 'Abcdefghij1é'],
+    ['un chiffre Unicode', 'Abcdefghij1٢'],
+  ])('does not treat %s as the required special character', async (_case, password) => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/super-administration', superAdminSession);
+    await screen.findByRole('heading', { name: 'Administrateurs' });
+
+    await user.type(screen.getByLabelText('Mot de passe'), password);
+
+    expect(screen.getByRole('button', { name: 'Créer le compte' })).toBeDisabled();
+  });
+
+  it('accepts punctuation as the required special character', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/super-administration', superAdminSession);
+    await screen.findByRole('heading', { name: 'Administrateurs' });
+
+    await user.type(screen.getByLabelText('Mot de passe'), 'Abcdefghi1é!');
+
+    expect(screen.getByRole('button', { name: 'Créer le compte' })).toBeEnabled();
+  });
+
 });
 
 describe('IAM bounded actions', () => {

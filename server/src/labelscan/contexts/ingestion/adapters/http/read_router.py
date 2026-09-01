@@ -16,14 +16,19 @@ count; LISTEN/NOTIFY (Tier 2) is the upgrade path if that ever changes.
 
 from __future__ import annotations
 
+import re
 import time
+import unicodedata
+from collections import Counter
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from labelscan.contexts.ingestion.domain.status import IngestionStatus
 from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.http.access import (
     access_context_for_principal,
@@ -44,6 +49,67 @@ _log = get_logger("http.security")
 # SELECT status every ~300 ms per waiting client).
 _MAX_WAIT_S = 25.0
 _PROBE_INTERVAL_S = 0.3
+_WAIT_VALUE = re.compile(r"(?:0|[1-9][0-9]*)(?:\.[0-9]+)?\Z")
+_BIDI_CONTROL_CLASSES = frozenset(
+    {"RLE", "LRE", "RLO", "LRO", "PDF", "RLI", "LRI", "FSI", "PDI"}
+)
+_INGESTION_QUERY_PARAMETERS = frozenset({"wait", "last_status"})
+_CANONICAL_UUID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+
+def _safe_query_token(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("query value must be a string")
+    normalized = unicodedata.normalize("NFC", value)
+    if any(
+        unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+        or unicodedata.bidirectional(character) in _BIDI_CONTROL_CLASSES
+        for character in normalized
+    ):
+        raise ValueError("query value contains invalid characters")
+    return normalized
+
+
+def _parse_canonical_uuid(value: object) -> UUID:
+    value = _safe_query_token(value)
+    try:
+        parsed = UUID(value)
+    except ValueError as exc:
+        raise ValueError("resource id is invalid") from exc
+    if value != str(parsed):
+        raise ValueError("resource id must use canonical lowercase UUID form")
+    return parsed
+
+
+def _parse_wait(value: object) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        parsed = float(value)
+    elif isinstance(value, str) and value.isascii() and _WAIT_VALUE.fullmatch(value):
+        parsed = float(value)
+    else:
+        raise ValueError("wait must be a canonical non-negative decimal number")
+    return parsed
+
+
+def _require_query_shape(request: Request, allowed: frozenset[str]) -> None:
+    pairs = request.query_params.multi_items()
+    keys = [key for key, _ in pairs]
+    unknown = sorted(set(keys) - allowed)
+    duplicates = sorted(key for key, count in Counter(keys).items() if count > 1)
+    if unknown:
+        raise ApiError("VALIDATION_ERROR", "unknown query parameter")
+    if duplicates:
+        raise ApiError("VALIDATION_ERROR", "query parameters must be singular")
+    try:
+        for key, value in pairs:
+            if key == "wait":
+                _parse_wait(value)
+            elif key == "last_status":
+                _safe_query_token(value)
+    except ValueError as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc)) from exc
 
 
 def _organization_id(conn, principal: Principal) -> str:
@@ -109,20 +175,26 @@ class RunSummary(BaseModel):
 
 class FieldView(BaseModel):
     field_name: str
-    value: Any | None
-    evidence: Any | None
-    provenance: (
-        Any | None
-    )  # {raw_artifact_id, spans:[{page, offset_start, offset_end}]}
+    value: str | None
+    evidence: list[str]
+    # {raw_artifact_id, spans:[{page, offset_start, offset_end}]}
+    provenance: dict[str, Any] | None
     source_raw_artifact_id: str | None
     validation_status: str
-    warnings: Any
+    warnings: list[str] | None
     llm_confidence: float | None
     ocr_confidence: float | None
     combined_confidence: float
     confidence_band: str
     source: str
     created_at: str
+
+    @field_validator("evidence", mode="before")
+    @classmethod
+    def absent_evidence_is_an_empty_array(cls, value: Any) -> list[str]:
+        # PostgreSQL keeps NULL for its value/evidence integrity constraint; the
+        # public extraction contract is stable and always returns a JSON array.
+        return [] if value is None else value
 
 
 class InterimFieldView(BaseModel):
@@ -193,29 +265,36 @@ def _requires_recapture(status: str, fields: list[FieldView] | None) -> bool:
 @router.get("/v1/ingestions/{ingestion_id}", response_model=IngestionView)
 def get_ingestion(
     request: Request,
-    ingestion_id: str = Path(min_length=1, max_length=128),
+    ingestion_id: str = Path(
+        min_length=36, max_length=36, pattern=_CANONICAL_UUID_PATTERN
+    ),
     wait: float = Query(
         default=0.0,
+        ge=0.0,
+        le=_MAX_WAIT_S,
+        allow_inf_nan=False,
         description=(
-            "Long-poll hold in seconds (Tier 4), clamped to 25. Requires "
+            "Long-poll hold in seconds (Tier 4), bounded to 25. Requires "
             "last_status; the response returns as soon as the status differs "
             "from last_status, or when the hold expires (with the current state)."
         ),
     ),
-    last_status: str | None = Query(
+    last_status: IngestionStatus | None = Query(
         default=None,
-        max_length=64,
         description="The status the client last observed (long-poll baseline).",
     ),
     principal: Principal = Depends(require_scope("ingestion:read")),
     engine: Engine = Depends(get_engine),
 ) -> IngestionView:
+    _require_query_shape(request, _INGESTION_QUERY_PARAMETERS)
+    ingestion_id_text = str(_parse_canonical_uuid(ingestion_id))
+    last_status_text = last_status.value if last_status is not None else None
     # ── Tier 4 long-poll: bounded server-side wait for a status CHANGE ─────────
     # Both params required to arm the hold (a bare `wait` has no baseline to
     # compare against). A missing ingestion breaks out immediately — the view
     # load below raises the same 404 the plain GET always did.
     wait_s = clamp_wait(wait)
-    if wait_s > 0 and last_status:
+    if wait_s > 0 and last_status_text:
         try:
             rate_limits.acquire_hold(principal.actor_id)
         except LimitExceeded as exc:
@@ -236,8 +315,8 @@ def get_ingestion(
         try:
             deadline = time.monotonic() + wait_s
             while True:
-                current = _probe_status(engine, ingestion_id, principal)
-                if current is None or current != last_status:
+                current = _probe_status(engine, ingestion_id_text, principal)
+                if current is None or current != last_status_text:
                     break
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
@@ -262,7 +341,7 @@ def get_ingestion(
                     "WHERE ingestion.id = :id AND " + scope
                 ),
                 {
-                    "id": ingestion_id,
+                    "id": ingestion_id_text,
                     **scope_params,
                 },
             )
@@ -270,7 +349,7 @@ def get_ingestion(
             .first()
         )
         if row is None:
-            raise ApiError("NOT_FOUND", f"ingestion {ingestion_id} not found")
+            raise ApiError("NOT_FOUND", f"ingestion {ingestion_id_text} not found")
         arts = (
             c.execute(
                 text(
@@ -278,7 +357,7 @@ def get_ingestion(
                     "occurred_at::text AS occurred_at FROM ingestion.raw_artifact "
                     "WHERE ingestion_id = :id ORDER BY occurred_at"
                 ),
-                {"id": ingestion_id},
+                {"id": ingestion_id_text},
             )
             .mappings()
             .all()
@@ -290,12 +369,12 @@ def get_ingestion(
                     "ocr_provider, created_at::text AS created_at FROM ingestion.extraction_run "
                     "WHERE ingestion_id = :id ORDER BY attempt_no"
                 ),
-                {"id": ingestion_id},
+                {"id": ingestion_id_text},
             )
             .mappings()
             .all()
         )
-        audit = audit_entries(c, ingestion_id)
+        audit = audit_entries(c, ingestion_id_text)
 
         # Latest run's fields, embedded so the polling client renders Review without a 2nd
         # round-trip (§1.3). Empty until a run exists (during polling), so the per-poll
@@ -314,7 +393,7 @@ def get_ingestion(
                         "FROM ingestion.interim_field WHERE ingestion_id = :id "
                         "ORDER BY field_name"
                     ),
-                    {"id": ingestion_id},
+                    {"id": ingestion_id_text},
                 )
                 .mappings()
                 .all()
@@ -368,10 +447,12 @@ def get_ingestion(
 @router.get("/v1/extraction-runs/{run_id}", response_model=ExtractionRunView)
 def get_extraction_run(
     request: Request,
-    run_id: str = Path(min_length=1, max_length=128),
+    run_id: str = Path(min_length=36, max_length=36, pattern=_CANONICAL_UUID_PATTERN),
     principal: Principal = Depends(require_scope("ingestion:read")),
     engine: Engine = Depends(get_engine),
 ) -> ExtractionRunView:
+    _require_query_shape(request, frozenset())
+    run_id_text = str(_parse_canonical_uuid(run_id))
     with engine.connect() as c:
         organization_id = _organization_id(c, principal)
         set_tenant_context(c, organization_id)
@@ -394,7 +475,7 @@ def get_extraction_run(
                     "WHERE run.id = :id AND " + scope
                 ),
                 {
-                    "id": run_id,
+                    "id": run_id_text,
                     **scope_params,
                 },
             )
@@ -402,7 +483,7 @@ def get_extraction_run(
             .first()
         )
         if run is None:
-            raise ApiError("NOT_FOUND", f"extraction run {run_id} not found")
+            raise ApiError("NOT_FOUND", f"extraction run {run_id_text} not found")
         fields = (
             c.execute(
                 text(
@@ -412,12 +493,12 @@ def get_extraction_run(
                     "created_at::text AS created_at FROM ingestion.extracted_field "
                     "WHERE extraction_run_id = :id ORDER BY field_name"
                 ),
-                {"id": run_id},
+                {"id": run_id_text},
             )
             .mappings()
             .all()
         )
-        audit = audit_entries(c, run_id)
+        audit = audit_entries(c, run_id_text)
 
     return ExtractionRunView(
         **run, fields=[FieldView(**f) for f in fields], audit=audit

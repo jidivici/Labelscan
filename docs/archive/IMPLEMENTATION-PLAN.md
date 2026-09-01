@@ -1,5 +1,8 @@
 # LabelScan — Phase 2 Controlled Implementation Plan
 
+> **Archived:** Superseded implementation plan, not a current backlog. See the
+> [archive index](README.md) and [developer guide](../DEVELOPER-GUIDE.md).
+
 **Status:** Phases PG-0 through PG-5 IMPLEMENTED; PG-6 PARTIALLY IMPLEMENTED.
 This document remains the reference for the build plan; implementation status is noted per phase-group.
 **Date:** 2026-06-18 (updated from 2026-06-14 plan)

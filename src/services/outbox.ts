@@ -23,9 +23,18 @@ import { v4 as uuidv4 } from 'uuid';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import type { UploadFilePart } from './api';
-import { getOperatorContext, type OperatorContext } from './authStorage';
+import {
+  captureActiveSession,
+  getOperatorContext,
+  isSessionFenceCurrent,
+  operatorContextKey,
+  type OperatorContext,
+  type SessionFence,
+} from './authStorage';
 
-const OUTBOX_KEY = '@labelscan:outbox';
+export const OUTBOX_KEY = '@labelscan:outbox:v2';
+const LEGACY_OUTBOX_KEY = '@labelscan:outbox';
+const OUTBOX_SCHEMA_VERSION = 2 as const;
 
 export const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 1_000;
@@ -87,6 +96,7 @@ export interface OutboxResult {
 }
 
 interface OutboxOperationBase {
+  schema_version: typeof OUTBOX_SCHEMA_VERSION;
   id: string; // stable operation id
   idempotencyKey: string; // stable per operation (sent as Idempotency-Key)
   correlationId: string; // stable per operation (sent as X-Correlation-Id)
@@ -99,8 +109,10 @@ interface OutboxOperationBase {
   created_at: string;
   updated_at: string;
   /** Local replay owner. Never serialized into an HTTP request body. */
-  owner_business_portal_id?: string;
-  owner_trade_code?: string;
+  owner_organization_id: string;
+  owner_actor_id: string;
+  owner_business_portal_id: string;
+  owner_trade_code: string;
 }
 
 export interface CreateIngestionOperation extends OutboxOperationBase {
@@ -177,6 +189,8 @@ const NON_RETRYABLE_CODES = new Set<string>([
   'IDEMPOTENCY_KEY_CONFLICT',
   'ALERT_INVALID_TRANSITION',
   'FILE_NOT_FOUND', // the upload file is gone (OS-purged cache / discarded scan) — never comes back
+  'INVALID_RESPONSE',
+  'SESSION_CHANGED',
 ]);
 
 /** Whether an error is worth retrying. 429/5xx/network(0) yes; other 4xx no. */
@@ -209,11 +223,30 @@ async function loadAll(): Promise<OutboxOperation[]> {
 // Serializes read-modify-write so concurrent mutations can't clobber the queue
 // (AsyncStorage has no atomic compare-and-set). Same pattern as storage.ts.
 let writeQueue: Promise<unknown> = Promise.resolve();
+// Process-local leases distinguish a live HTTP attempt from an `in_flight` row left
+// behind by a killed process. The set is intentionally empty after a cold restart.
+const liveClaims = new Map<string, number>();
 
-function mutate<T>(fn: (ops: OutboxOperation[]) => { ops: OutboxOperation[]; result: T }): Promise<T> {
+function reserveLiveClaim(id: string): void {
+  liveClaims.set(id, (liveClaims.get(id) ?? 0) + 1);
+}
+
+function releaseLiveClaim(id: string): void {
+  const remaining = (liveClaims.get(id) ?? 0) - 1;
+  if (remaining > 0) liveClaims.set(id, remaining);
+  else liveClaims.delete(id);
+}
+
+function mutate<T>(
+  fn: (ops: OutboxOperation[]) => { ops: OutboxOperation[]; result: T },
+  fence?: SessionFence,
+): Promise<T> {
   const run = writeQueue.then(async () => {
+    if (fence && !isSessionFenceCurrent(fence)) throw new Error('MOBILE_SESSION_CHANGED');
     const current = await loadAll();
+    if (fence && !isSessionFenceCurrent(fence)) throw new Error('MOBILE_SESSION_CHANGED');
     const { ops, result } = fn(current);
+    if (fence && !isSessionFenceCurrent(fence)) throw new Error('MOBILE_SESSION_CHANGED');
     await AsyncStorage.setItem(OUTBOX_KEY, JSON.stringify(ops));
     return result;
   });
@@ -228,6 +261,33 @@ function mutate<T>(fn: (ops: OutboxOperation[]) => { ops: OutboxOperation[]; res
 
 export async function listAll(): Promise<OutboxOperation[]> {
   return loadAll();
+}
+
+export async function clearOutbox(): Promise<void> {
+  // Queue the purge behind every earlier read-modify-write. A delayed setItem can
+  // therefore never resurrect the previous identity's outbox after logout.
+  liveClaims.clear();
+  try {
+    await mutate(() => ({ ops: [], result: undefined }));
+    await AsyncStorage.removeItem(LEGACY_OUTBOX_KEY);
+  } finally {
+    // A claim whose storage write completed while this purge was queued may have
+    // registered its process lease after the first clear.
+    liveClaims.clear();
+  }
+}
+
+/** Drop legacy, malformed, ownerless or foreign operations before any replay. */
+export async function purgeUnsafeOutboxOperations(): Promise<number> {
+  const context = await getOperatorContext();
+  const fence = context ? await captureActiveSession() : null;
+  await AsyncStorage.multiRemove([LEGACY_OUTBOX_KEY]);
+  return mutate((operations) => {
+    const safe = context
+      ? operations.filter((operation) => operationMatchesOperatorContext(operation, context))
+      : [];
+    return { ops: safe, result: operations.length - safe.length };
+  }, fence ?? undefined);
 }
 
 /** One operation by id (read-only) — lets the scan queue reconcile its transport op. */
@@ -255,9 +315,19 @@ async function enqueue(
   fields: Pick<OutboxOperation, 'type' | 'payload'>,
   opts: EnqueueOptions,
 ): Promise<OutboxOperation> {
+  const fence = await captureActiveSession();
   const ts = isoAt(opts.now ?? Date.now());
   const owner = await getOperatorContext();
+  if (
+    !owner ||
+    !fence ||
+    !isSessionFenceCurrent(fence) ||
+    operatorContextKey(owner) !== fence.scopeKey
+  ) {
+    throw new Error('MOBILE_CONTEXT_MISSING');
+  }
   const op = {
+    schema_version: OUTBOX_SCHEMA_VERSION,
     id: opts.id ?? uuidv4(),
     idempotencyKey: opts.idempotencyKey ?? uuidv4(),
     correlationId: opts.correlationId ?? uuidv4(),
@@ -269,26 +339,26 @@ async function enqueue(
     result: null,
     created_at: ts,
     updated_at: ts,
-    ...(owner
-      ? {
-          owner_business_portal_id: owner.businessPortalId,
-          owner_trade_code: owner.tradeCode,
-        }
-      : {}),
+    owner_organization_id: owner.organizationId,
+    owner_actor_id: owner.actorId,
+    owner_business_portal_id: owner.businessPortalId,
+    owner_trade_code: owner.tradeCode,
     ...fields,
   } as OutboxOperation;
-  await mutate((ops) => ({ ops: [...ops, op], result: undefined }));
+  await mutate((ops) => ({ ops: [...ops, op], result: undefined }), fence);
   return op;
 }
 
-/** Unowned legacy operations remain replayable; new owned writes require an exact context. */
+/** Only v2 operations owned by the exact restored identity may be replayed. */
 export function operationMatchesOperatorContext(
   operation: OutboxOperation,
   context: OperatorContext | null,
 ): boolean {
-  if (!operation.owner_business_portal_id && !operation.owner_trade_code) return true;
   return (
     context != null &&
+    operation.schema_version === OUTBOX_SCHEMA_VERSION &&
+    operation.owner_organization_id === context.organizationId &&
+    operation.owner_actor_id === context.actorId &&
     operation.owner_business_portal_id === context.businessPortalId &&
     operation.owner_trade_code === context.tradeCode
   );
@@ -338,8 +408,9 @@ export function updatePendingFinalizeReview(
   id: string,
   payload: FinalizeReviewPayload,
   now: number = Date.now(),
+  fence?: SessionFence,
 ): Promise<FinalizeReviewOperation | null> {
-  return mutate((ops) => {
+  return mutate<FinalizeReviewOperation | null>((ops) => {
     let updated: FinalizeReviewOperation | null = null;
     const next = ops.map((op) => {
       if (
@@ -362,14 +433,21 @@ export function updatePendingFinalizeReview(
       return op;
     });
     return { ops: next, result: updated };
-  });
+  }, fence);
 }
 
 // ── Status transitions ─────────────────────────────────────────────────────────
 
 /** Claim a pending op for execution. No-op (returns null) if not pending/found. */
-export function markInFlight(id: string, now: number = Date.now()): Promise<OutboxOperation | null> {
-  return mutate((ops) => {
+export function markInFlight(
+  id: string,
+  now: number = Date.now(),
+  fence?: SessionFence,
+): Promise<OutboxOperation | null> {
+  // Reserve before entering the persistence mutex. Recovery uses the same mutex,
+  // so it can never observe our persisted `in_flight` row without its live lease.
+  reserveLiveClaim(id);
+  return mutate<OutboxOperation | null>((ops) => {
     let updated: OutboxOperation | null = null;
     const next = ops.map((op) => {
       if (op.id === id && op.status === 'pending') {
@@ -379,34 +457,47 @@ export function markInFlight(id: string, now: number = Date.now()): Promise<Outb
       return op;
     });
     return { ops: next, result: updated };
-  });
+  }, fence).then(
+    (updated) => {
+      if (!updated) releaseLiveClaim(id);
+      return updated;
+    },
+    (error) => {
+      releaseLiveClaim(id);
+      throw error;
+    },
+  );
 }
 
 /**
  * Mark an in-flight/pending op succeeded, optionally recording its result (e.g.
  * the ingestion_id) for a later batch. Returns null if not found.
  */
-export function markSucceeded(
+export async function markSucceeded(
   id: string,
-  opts: { result?: OutboxResult; now?: number } = {},
+  opts: { result?: OutboxResult; now?: number; fence?: SessionFence } = {},
 ): Promise<OutboxOperation | null> {
   const now = opts.now ?? Date.now();
-  return mutate((ops) => {
-    let updated: OutboxOperation | null = null;
-    const next = ops.map((op) => {
-      if (op.id === id && (op.status === 'in_flight' || op.status === 'pending')) {
-        updated = {
-          ...op,
-          status: 'succeeded',
-          result: opts.result ?? op.result,
-          updated_at: isoAt(now),
-        };
-        return updated;
-      }
-      return op;
-    });
-    return { ops: next, result: updated };
-  });
+  try {
+    return await mutate((ops) => {
+      let updated: OutboxOperation | null = null;
+      const next = ops.map((op) => {
+        if (op.id === id && (op.status === 'in_flight' || op.status === 'pending')) {
+          updated = {
+            ...op,
+            status: 'succeeded',
+            result: opts.result ?? op.result,
+            updated_at: isoAt(now),
+          };
+          return updated;
+        }
+        return op;
+      });
+      return { ops: next, result: updated };
+    }, opts.fence);
+  } finally {
+    releaseLiveClaim(id);
+  }
 }
 
 /**
@@ -414,34 +505,69 @@ export function markSucceeded(
  * schedule a backed-off retry or move to dead_letter (non-retryable error or
  * attempts exhausted). Returns the updated op, or null if not found/active.
  */
-export function markFailed(
+export async function markFailed(
   id: string,
   error: OperationError,
   now: number = Date.now(),
+  fence?: SessionFence,
 ): Promise<OutboxOperation | null> {
+  try {
+    return await mutate((ops) => {
+      let updated: OutboxOperation | null = null;
+      const next = ops.map((op) => {
+        if (op.id !== id || (op.status !== 'in_flight' && op.status !== 'pending')) return op;
+
+        const attempt_count = op.attempt_count + 1;
+        const retriable = error.retriable ?? isRetryableError(error.code, error.status);
+        const exhausted = attempt_count >= MAX_ATTEMPTS;
+        const toDeadLetter = !retriable || exhausted;
+
+        updated = {
+          ...op,
+          attempt_count,
+          status: toDeadLetter ? 'dead_letter' : 'pending',
+          next_attempt_at: toDeadLetter ? isoAt(now) : isoAt(now + backoffDelayMs(attempt_count)),
+          last_error_code: error.code,
+          last_error_message: error.message ? error.message.slice(0, MAX_ERROR_MESSAGE_LEN) : null,
+          updated_at: isoAt(now),
+        };
+        return updated;
+      });
+      return { ops: next, result: updated };
+    }, fence);
+  } finally {
+    releaseLiveClaim(id);
+  }
+}
+
+/** Recover only orphaned claims from a killed process; live leases are untouched. */
+export async function recoverInterruptedInFlight(
+  now: number = Date.now(),
+  fence?: SessionFence,
+): Promise<number> {
+  const context = await getOperatorContext();
   return mutate((ops) => {
-    let updated: OutboxOperation | null = null;
+    let recovered = 0;
     const next = ops.map((op) => {
-      if (op.id !== id || (op.status !== 'in_flight' && op.status !== 'pending')) return op;
-
-      const attempt_count = op.attempt_count + 1;
-      const retriable = error.retriable ?? isRetryableError(error.code, error.status);
-      const exhausted = attempt_count >= MAX_ATTEMPTS;
-      const toDeadLetter = !retriable || exhausted;
-
-      updated = {
+      if (
+        op.status !== 'in_flight' ||
+        liveClaims.has(op.id) ||
+        !operationMatchesOperatorContext(op, context)
+      ) {
+        return op;
+      }
+      recovered += 1;
+      return {
         ...op,
-        attempt_count,
-        status: toDeadLetter ? 'dead_letter' : 'pending',
-        next_attempt_at: toDeadLetter ? isoAt(now) : isoAt(now + backoffDelayMs(attempt_count)),
-        last_error_code: error.code,
-        last_error_message: error.message ? error.message.slice(0, MAX_ERROR_MESSAGE_LEN) : null,
+        status: 'pending' as const,
+        next_attempt_at: isoAt(now),
+        last_error_code: 'INTERRUPTED',
+        last_error_message: null,
         updated_at: isoAt(now),
       };
-      return updated;
     });
-    return { ops: next, result: updated };
-  });
+    return { ops: next, result: recovered };
+  }, fence);
 }
 
 /**
@@ -454,7 +580,12 @@ export function markFailed(
  * Pending / in-flight ops are NEVER touched. Returns the number removed.
  */
 export function purgeTerminalOps(
-  opts: { succeededAfterMs?: number; deadLetterAfterMs?: number; now?: number } = {},
+  opts: {
+    succeededAfterMs?: number;
+    deadLetterAfterMs?: number;
+    now?: number;
+    fence?: SessionFence;
+  } = {},
 ): Promise<number> {
   const now = opts.now ?? Date.now();
   const succeededAfterMs = opts.succeededAfterMs ?? 24 * 60 * 60 * 1_000; // 1 day
@@ -467,11 +598,15 @@ export function purgeTerminalOps(
       return true; // pending / in_flight always kept
     });
     return { ops: keep, result: ops.length - keep.length };
-  });
+  }, opts.fence);
 }
 
 /** Manually return a dead-lettered op to the pending queue with a fresh budget. */
-export function requeueDeadLetter(id: string, now: number = Date.now()): Promise<OutboxOperation | null> {
+export function requeueDeadLetter(
+  id: string,
+  now: number = Date.now(),
+  fence?: SessionFence,
+): Promise<OutboxOperation | null> {
   return mutate((ops) => {
     let updated: OutboxOperation | null = null;
     const next = ops.map((op) => {
@@ -490,5 +625,11 @@ export function requeueDeadLetter(id: string, now: number = Date.now()): Promise
       return op;
     });
     return { ops: next, result: updated };
-  });
+  }, fence);
+}
+
+/** Simulate process death in Jest while preserving the durable AsyncStorage rows. */
+export function _resetOutboxRuntimeForTests(): void {
+  liveClaims.clear();
+  writeQueue = Promise.resolve();
 }

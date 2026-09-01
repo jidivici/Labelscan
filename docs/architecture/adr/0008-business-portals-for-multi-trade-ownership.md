@@ -1,9 +1,11 @@
 # ADR-0008: Business portals as the multi-trade ownership boundary
 
 ## Status
-Accepted & Implemented
+
+Accepted and implemented
 
 ## Context
+
 LabelScan originally treated a store as the only business access boundary and
 assumed a seafood workflow. One organization and one physical store can now run
 several regulated trades with different extraction fields, operational teams,
@@ -20,6 +22,7 @@ The implemented trades are exactly:
 would create incompatible assignments, filters, and historical ownership.
 
 ## Decision
+
 Model a **business portal** as the unique
 `(organization_id, store_id, profession_code)` unit.
 
@@ -73,13 +76,21 @@ Model a **business portal** as the unique
    isolation and enlarge the blast radius of one credential.
 
 ## Trade-offs
+
 The design trades simpler store-only queries for explicit, auditable multi-trade
 ownership. That additional dimension is accepted because it prevents accidental
 cross-profession access and keeps historical traceability stable.
 
 ## Reversibility
+
 **Medium.** New professions can be added additively through a versioned profile
 and portal backfill. Removing or splitting a profession is deliberately harder:
 historical snapshots and assignments must remain interpretable, so such a change
 requires a new ADR and an expand/backfill/contract migration rather than a code
 rename.
+
+## Current implementation note
+
+The three profession codes and the business-portal ownership boundary remain current.
+Any additional or split profession needs a versioned profile, migration plan, authorization
+tests, and a new decision record; it should not be introduced as a label-only change.

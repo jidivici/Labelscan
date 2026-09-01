@@ -1,151 +1,200 @@
-# Rotation des mots de passe et secrets de production
+# Secret and credential rotation
 
-**Statut :** procédure d'exploitation obligatoire
+This runbook explains rotation order and impact without containing real secret values.
+Treat any value copied into a chat, ticket, screenshot, shell history, build log, shared
+export, or unapproved local file as exposed and replace it.
 
-**Dernière révision :** 20 août 2026
+For the historical mobile token-persistence exposure and its release-regression proof,
+see OR-01 and OR-07 in the
+[risk register](THREAT-MODEL.md#confirmed-open-risk-register).
 
-Cette procédure ne contient aucune valeur secrète. Une valeur ayant été copiée dans un
-terminal partagé, une capture, un ticket ou un fichier local en clair doit être considérée
-comme compromise et remplacée.
+The exact storage mechanism depends on the topology:
 
-## Principes
+- managed infrastructure uses external Docker secret objects and should use workload
+  identity or an approved secret manager around them;
+- the Hostinger profile reads root-owned files under `/opt/labelscan/secrets`;
+- mobile users receive session tokens only. Provider, database, and signing credentials
+  must never enter the app bundle or an `EXPO_PUBLIC_*` value.
 
-1. Effectuer une sauvegarde PostgreSQL et des images brutes avant toute rotation.
-2. Tourner un secret à la fois, vérifier le service, puis révoquer l'ancienne valeur.
-3. Générer au moins 48 octets aléatoires avec un gestionnaire de secrets ou, sur le VPS,
-   `openssl rand -hex 48`.
-4. Conserver les fichiers sous `/opt/labelscan/secrets`. Les mots de passe DB bruts non
-   montés restent `root:root` mode `0600`. Les secrets que les conteneurs non privilégiés
-   doivent lire sont `root:10001` mode `0640` et ne sont montés que dans le consommateur
-   prévu par Compose. Ne jamais les placer dans Git, une image Docker ou une variable
-   `EXPO_PUBLIC_*`.
-5. Écrire d'abord un nouveau fichier temporaire de mode `0600`, puis le renommer de façon
-   atomique. Ne jamais modifier un secret partiellement pendant qu'un conteneur le lit.
-6. Après chaque rotation : redémarrer uniquement les composants consommateurs, passer les
-   tests de santé et d'autorisation, puis contrôler les journaux sans afficher la valeur.
+## Safe rotation pattern
 
-## Inventaire et portée
+1. Name an operator, reviewer, change window, rollback point, and incident contact.
+2. Confirm a current database/raw-image backup and its off-host copy. A local VPS archive
+   alone is not disaster recovery.
+3. Identify every consumer and every copy of the old value before changing it.
+4. Create the replacement in the approved secret system. Generate random values with a
+   cryptographic generator; do not invent memorable infrastructure passwords.
+5. Rotate one credential at a time. Update the upstream service and mounted secret in the
+   order described below.
+6. Restart or recreate only the consumers that need the value, then test health,
+   authentication/authorization, and a representative business flow.
+7. Revoke the old value after the new path is proven. Do not leave an indefinite overlap.
+8. Search logs and deployment metadata for accidental disclosure without printing the
+   secret itself.
+9. Record evidence: credential identifier, operator, timestamps, affected components,
+   validation, old-value revocation, and any user impact. Never record the value or a
+   recognizable prefix.
 
-| Secret | Consommateur autorisé | Effet d'une rotation |
+## Current secret inventory
+
+| Credential | Intended consumer | Rotation impact |
 |---|---|---|
-| mot de passe `labelscan_db_admin` | PostgreSQL et job `migrate` seulement | aucune coupure API si l'URL runtime est distincte |
-| mot de passe runtime `labelscan_app` | API, workers et job demo | reconnexion DB des conteneurs applicatifs |
-| `LABELSCAN_JWT_SECRET` | API seulement | invalide tous les jetons et impose une reconnexion |
-| clé Google Vision | workers seulement | suspend l'OCR pendant leur redémarrage |
-| clé Anthropic | workers seulement | suspend l'extraction LLM pendant leur redémarrage |
-| identifiants AWS | seulement les rôles utilisant réellement AWS | réinitialise les connexions au service concerné |
-| mots de passe utilisateurs | identité LabelScan | révoque les sessions du compte modifié |
+| PostgreSQL owner/admin password and URL | PostgreSQL bootstrap plus migration, demo-reset, and credential-maintenance jobs | Blocks maintenance/migrations if files drift; long-running API/worker should be unaffected |
+| PostgreSQL runtime password and URL | API and workers | Existing pooled connections may survive briefly; new connections fail until both DB and mounted URL agree |
+| JWT HS256 signing secret | API | Existing access tokens fail signature verification after replacement; refresh sessions require separate revocation if forced logout is intended |
+| Google Vision key | Workers | OCR fails during a bad cutover; API remains available |
+| Anthropic key | Workers | LLM extraction fails during a bad cutover; API remains available |
+| Demo credential file | One-shot demo/credential-maintenance jobs | Changes synthetic account passwords when the job is deliberately run |
+| User password | Identity service | Revokes that user's sessions when changed through the application flow |
+| VPS root password / SSH keys | Host access, outside LabelScan containers | Can lock out operators; independent of application and database credentials |
+| S3 workload identity or access key | Components using managed object storage | Can block image writes/reads; not mounted by the single-VPS profile |
 
-Le mobile ne reçoit que l'URL publique HTTPS. Les jetons de session sont conservés dans
-SecureStore; aucune clé fournisseur, DB, JWT ou AWS ne doit être compilée dans Android/iOS.
+## Hostinger secret files
 
-## Mot de passe root du VPS
+The deployment script creates or validates these files:
 
-Le mot de passe root est indépendant de tous les secrets LabelScan. Le déploiement ne le
-modifie pas et ne supprime aucune clé SSH existante.
+- `db_runtime_password`: `root:root`, mode `0600`; it is retained for controlled
+  credential maintenance and is not mounted into a long-running service;
+- `db_admin_password`: `root:70`, mode `0640`, so the PostgreSQL container can read its
+  Compose secret through the database-user group;
+- `database_admin_url`, `database_url`, `jwt_secret`, provider keys, and
+  `demo_credentials.json`: `root:10001`, mode `0640`, then mounted only into the services
+  named by Compose.
 
-1. Utiliser **hPanel > VPS > Overview > Reset password**, avec une valeur unique générée
-   dans un gestionnaire et jamais publiée dans un chat, ticket ou dépôt.
-2. Ne jamais réutiliser un mot de passe DB, applicatif ou fournisseur pour root.
-3. Garder au moins une clé SSH existante et la console web hPanel disponibles pendant la
-   rotation; tester le nouvel accès dans une seconde session avant de fermer la première.
-4. Si une valeur a été publiée, ne pas l'installer : la considérer compromise et en
-   générer une nouvelle.
+Write a replacement to a temporary file with restrictive permissions and atomically
+rename it into place. Never edit a mounted secret in place where a reader can observe a
+partial value. Validate owner, group, mode, non-empty content, and Compose service mounts
+without printing contents.
 
-## PostgreSQL sur le VPS
+The deploy script can migrate selected legacy secrets and performs one-time JWT/database
+hardening behind marker files. Marker existence is not proof that a later manual rotation
+was completed correctly.
 
-La production utilise deux rôles séparés :
+## PostgreSQL runtime credential
 
-- `labelscan_db_admin` : rôle de propriété/migration, jamais fourni à l'API;
-- `labelscan_app` : login runtime non propriétaire, sans superuser, `BYPASSRLS`, création
-  de rôle/base ni réplication; il porte seulement les grants applicatifs.
+The single-VPS runtime login is `labelscan_app`. It must remain non-owner, non-superuser,
+without privileged membership, database/role creation, replication, or `BYPASSRLS`.
 
-Sur un ancien cluster initialisé directement avec `labelscan_app`, le déploiement sécurisé
-renomme une fois ce compte bootstrap interne en `labelscan_db_admin`, puis recrée
-`labelscan_app` comme runtime limité. Ce mécanisme est indépendant du rôle applicatif
-`super_admin`, qui reste disponible dans le portail.
+Rotation order:
 
-Les fichiers sont :
+1. Generate a replacement password in a protected channel.
+2. Change the PostgreSQL role through a local owner connection without placing the value
+   in command-line arguments or interactive history.
+3. Build a new `postgresql+psycopg` URL. URL-encode any non-URL-safe password; the
+   deployment-generated hexadecimal format avoids this ambiguity.
+4. Atomically replace `db_runtime_password` and `database_url`, preserving their different
+   ownership/modes.
+5. Recreate API and workers so new connection pools use the replacement.
+6. Check readiness, login/refresh, a protected read, one idempotent ingestion path, and a
+   cross-tenant RLS denial with the actual runtime role.
 
-- `/opt/labelscan/secrets/db_admin_password`, `root:root` mode `0600`;
-- `/opt/labelscan/secrets/db_runtime_password`, `root:root` mode `0600`;
-- `/opt/labelscan/secrets/database_admin_url`, `root:10001` mode `0640`, pour `migrate`;
-- `/opt/labelscan/secrets/database_url`, `root:10001` mode `0640`, pour API/workers/demo.
+Changing PostgreSQL first allows existing connections to finish while preventing a new
+container from starting with a value the database does not yet accept. If validation
+fails, coordinate rollback of both the database role and secret file; do not leave two
+different sources of truth.
 
-### Rotation du runtime sans changer l'administrateur
+## PostgreSQL owner/migration credential
 
-1. Créer un nouveau mot de passe hexadécimal dans un fichier temporaire de mode `0600`.
-2. En session PostgreSQL locale administrateur, exécuter `ALTER ROLE labelscan_app
-   PASSWORD '<nouvelle valeur>';` sans écrire la valeur dans l'historique shell.
-3. Créer la nouvelle URL `postgresql+psycopg://labelscan_app:<mot-de-passe>@db:5432/labelscan`
-   dans un fichier temporaire. Une valeur contenant d'autres caractères que l'hexadécimal
-   doit être encodée pour une URL.
-4. Remplacer atomiquement `db_runtime_password` et `database_url`.
-5. Garder `db_runtime_password` en `root:root` mode `0600`, puis remettre
-   `database_url` en `root:10001` mode `0640` avant de recréer les conteneurs.
-6. Recréer API et workers, vérifier readiness, login, route protégée, ingestion et RLS.
+The Hostinger owner is `labelscan_db_admin`. It must never be mounted into API or worker.
 
-La base doit être changée avant les conteneurs : les connexions existantes continuent
-temporairement, tandis que les nouvelles utilisent immédiatement le nouveau secret.
+1. Change the role through a local controlled database session.
+2. Atomically replace `db_admin_password` and `database_admin_url` with their required
+   permissions.
+3. Run a non-destructive migration connectivity/revision check using the one-shot
+   migration service.
+4. Reconfirm that API and worker mounts still contain only `database_url`.
 
-### Rotation de l'administrateur/migrateur
+The managed Compose profile currently has one shared database secret and therefore cannot
+rotate owner/runtime credentials independently. Fix that deployment contract before using
+the profile as least-privilege production.
 
-1. Générer la nouvelle valeur et exécuter localement `ALTER ROLE labelscan_db_admin
-   PASSWORD '<nouvelle valeur>';` via le socket PostgreSQL du conteneur.
-2. Remplacer atomiquement `db_admin_password` et `database_admin_url`.
-3. Garder `db_admin_password` en `root:root` mode `0600`, puis remettre
-   `database_admin_url` en `root:10001` mode `0640`.
-4. Lancer le job `migrate` en mode vérification et confirmer qu'il peut lire la révision
-   Alembic. Ne jamais redémarrer l'API avec cette URL.
+## JWT signing secret and session revocation
 
-Les valeurs ne doivent pas apparaître sur la ligne de commande. Utiliser un fichier root
-temporaire ou l'outil de rotation contrôlé du déploiement, puis le supprimer.
+The current token format uses one active symmetric HS256 secret; there is no key ID or
+overlap set.
 
-## Secret de signature JWT
+1. Generate at least 32 random bytes; the Hostinger deployment uses a longer generated
+   value.
+2. Atomically replace the API's signing-secret source and recreate the API.
+3. Verify new browser/mobile login, access-token validation, refresh, and logout.
+4. Confirm an access token signed with the old key is rejected.
 
-1. Générer une valeur aléatoire d'au moins 48 octets.
-2. Remplacer atomiquement `/opt/labelscan/secrets/jwt_secret`.
-3. Remettre le fichier en `root:10001` mode `0640`, puis recréer l'API et vérifier login,
-   refresh et route protégée.
-4. Informer les utilisateurs qu'ils doivent se reconnecter : le modèle HS256 actuel ne
-   conserve qu'une clé active et tous les anciens access tokens deviennent invalides.
-5. Révoquer/expirer les sessions serveur existantes si la rotation répond à un incident.
+Replacing the signing key invalidates old **access tokens**, but it does not automatically
+revoke refresh-session rows. A holder of a still-valid refresh token may request a new
+access token signed with the replacement key. If the rotation responds to compromise or
+must force every user to sign in again, revoke the relevant session families (or all active
+sessions) in a reviewed identity/DB operation as well. The repository has no dedicated
+global-revocation CLI, so preserve audit evidence for that maintenance action.
 
-## Google Vision et Anthropic
+## Google Vision and Anthropic
 
-Pour chaque fournisseur, séparément :
+Rotate one provider at a time:
 
-1. Créer une nouvelle clé côté fournisseur, limitée au projet/API requis, aux quotas
-   attendus et, si disponible, aux adresses de sortie du VPS.
-2. Mettre à jour le fichier secret lu uniquement par les workers.
-3. Remettre ce fichier en `root:10001` mode `0640`, puis recréer les workers et valider
-   une image de test contrôlée de bout en bout.
-4. Vérifier les erreurs, quotas et coûts, puis révoquer l'ancienne clé.
+1. Create a replacement credential in the provider project, limited to the required API,
+   quotas, budget, and approved egress identities where supported.
+2. Update only the relevant worker secret file/object.
+3. Recreate workers and process a synthetic label end to end.
+4. Check provider errors, quota/cost telemetry, extraction outcome, and absence of the key
+   from logs/container metadata.
+5. Revoke the old key and prove it no longer works from the production egress path.
 
-Une clé qui a existé en clair dans un poste de développement doit être tournée avant la
-mise en production, même si le fichier était exclu de Git.
+An application test can prove the new key works; it cannot prove the old provider key was
+deleted or that provider-side restrictions are correct. Keep provider-console evidence.
 
-## Identifiants AWS
+## Managed S3 identity
 
-Préférer un rôle temporaire à une clé longue durée. Si une clé est nécessaire : créer une
-nouvelle clé sur un utilisateur dédié à droits minimaux, mettre à jour le fichier
-`aws_credentials`, redémarrer les seuls consommateurs, vérifier l'accès minimal, puis
-désactiver et supprimer l'ancienne clé. Le profil Hostinger avec stockage brut sur volume
-local ne justifie pas de transmettre des identifiants AWS à l'API.
+Prefer short-lived workload identity to a long-lived access key. The managed Compose
+profile does not define an AWS credential secret, so the platform must provide the
+credential chain and scope outside this repository.
 
-## Mots de passe utilisateurs
+When a long-lived key is unavoidable, create a replacement on a dedicated least-privilege
+principal, update only S3-using components, verify read/write on the intended tenant prefix
+and denial elsewhere, then disable and delete the old key. Also verify the KMS grant;
+bucket access without KMS access is an incomplete rotation.
 
-- Chaque utilisateur change son propre mot de passe via `POST /v1/me/password`, avec son
-  mot de passe actuel. La modification révoque ses sessions.
-- Les administrateurs créent/désactivent les managers; chaque manager change ensuite son
-  propre mot de passe avec le mot de passe actuel.
-- Un mot de passe comporte au minimum 12 caractères et au maximum 128; les valeurs exemple
-  connues sont refusées. Utiliser une phrase de passe unique générée par un gestionnaire.
-- Ne jamais modifier directement le hash en base sauf procédure de reprise d'incident
-  approuvée et auditée.
+The Hostinger filesystem topology does not need AWS credentials and must not receive them.
 
-## Preuve après rotation
+## Application user passwords
 
-Conserver uniquement : date, opérateur, identifiant du secret, composants redémarrés,
-résultat des tests et date de révocation de l'ancienne valeur. Ne conserver ni la valeur,
-ni son préfixe, ni une capture du portail fournisseur.
+Users change their own password through `POST /v1/me/password` and must provide the
+current password. The server enforces the role-specific policy and revokes sessions. Use
+the administration flows to deactivate accounts; do not update password hashes directly
+except through an approved, audited incident-recovery procedure.
+
+The server uses salted PBKDF2-HMAC-SHA256 with constant-time verification. Rotating a user
+password creates a new salt. Password-hash algorithm migration is separate from secret
+rotation and must preserve safe verification/rehashing semantics.
+
+## Mobile token exposure response
+
+Older mobile builds could persist/export an access token inside
+`photo_headers.Authorization` and leave share files behind. Current catalogue DTOs
+have no token-bearing header, and temporary export files are deleted on success,
+failure, and cancellation. Treat any artifact produced by an older build as exposed.
+
+If an export was created, shared, backed up, or exposed:
+
+1. identify and revoke the affected session family;
+2. remove the export from every known destination and the device, following evidence
+   preservation requirements;
+3. review access logs for the token lifetime and actor scope;
+4. do not treat access-token expiry as proof that no access occurred;
+5. fix and verify export sanitization plus deletion/retention before reopening the flow.
+
+## VPS and SSH access
+
+Rotate the VPS root password through the Hostinger control plane, not through LabelScan.
+Keep console recovery and one tested SSH key available before changing access. Test a new
+session before closing the existing one.
+
+SSH-key rotation should add and test the new key first, remove the old key second, and
+record which operator/device owns each remaining key. The repository's SSH/fail2ban files
+are reference policies; `deploy.sh` does not install them.
+
+## When rotation fails
+
+Stop and preserve the state if consumers disagree about the active credential, database
+health drops, provider errors rise, or authentication behaves unexpectedly. Restore a
+coherent old or new configuration—never a mixture—and document the interval during which
+both credentials may have worked. Escalate suspected disclosure through the incident
+process rather than retrying rotations blindly.
