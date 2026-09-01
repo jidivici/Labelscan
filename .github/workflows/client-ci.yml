@@ -2,9 +2,9 @@ name: client-ci
 
 on:
   push:
-    paths: ["src/**", "App.tsx", "index.ts", "app.json", "app.config.js", "eas.json", "tsconfig.json", "package.json", "package-lock.json", "web/**", "security/**", "scripts/check-npm-audit.mjs", "scripts/check-android-13.mjs", ".github/workflows/client-ci.yml"]
+    paths: ["src/**", "App.tsx", "index.ts", "app.json", "app.config.js", "eas.json", "tsconfig.json", "package.json", "package-lock.json", "vendor/**", "web/**", "security/**", "scripts/check-npm-audit.mjs", "scripts/check-android-13.mjs", ".github/workflows/client-ci.yml"]
   pull_request:
-    paths: ["src/**", "App.tsx", "index.ts", "app.json", "app.config.js", "eas.json", "tsconfig.json", "package.json", "package-lock.json", "web/**", "security/**", "scripts/check-npm-audit.mjs", "scripts/check-android-13.mjs", ".github/workflows/client-ci.yml"]
+    paths: ["src/**", "App.tsx", "index.ts", "app.json", "app.config.js", "eas.json", "tsconfig.json", "package.json", "package-lock.json", "vendor/**", "web/**", "security/**", "scripts/check-npm-audit.mjs", "scripts/check-android-13.mjs", ".github/workflows/client-ci.yml"]
 
 jobs:
   mobile:
