@@ -16,6 +16,7 @@ dependencies = [
     "anthropic>=0.40",
     "pyjwt>=2.8",
     "boto3>=1.35",
+    "pillow>=12.1",
 ]
 
 [project.optional-dependencies]

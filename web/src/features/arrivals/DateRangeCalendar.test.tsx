@@ -1,9 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { calendarMonthGrid, DateRangeCalendar } from './DateRangeCalendar';
 
 describe('DateRangeCalendar', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-31T12:00:00+02:00'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('uses the same fixed Monday-first 6 × 7 grid as the mobile calendar', () => {
     const cells = calendarMonthGrid(2026, 7);
 

@@ -12,13 +12,24 @@ needs ANTHROPIC_API_KEY, network, and spend. Model facts per the claude-api skil
 
 from __future__ import annotations
 
+import hashlib
 import json
+import math
 import os
+import time
 
 from labelscan.business_profiles import TradeProfile, trade_profile
-from labelscan.contexts.ingestion.application.extraction_ports import LlmResult
+from labelscan.contexts.ingestion.adapters.anthropic_models import anthropic_model
+from labelscan.contexts.ingestion.application.extraction_ports import (
+    LlmResult,
+    PermanentProviderError,
+)
 from labelscan.contexts.ingestion.domain.extraction import LlmField
+from labelscan.contexts.ingestion.domain.input_validation import (
+    validate_human_field_value,
+)
 from labelscan.platform.config import secret_value
+from labelscan.platform.external_api import external_api_monitor
 from labelscan.platform.observability import get_logger
 
 _log = get_logger("ingestion.llm")
@@ -30,16 +41,23 @@ _log = get_logger("ingestion.llm")
 # (LABELSCAN_LLM_ESCALATION_ENABLED=false), so every production extraction runs here.
 # Cost/latency are optimised on Haiku via: (a) the large STATIC seafood-HACCP system
 # prefix cached at ~0.1x on a hit (see _PROMPT_CACHE_*), (b) no thinking/effort tokens
-# (Haiku has neither — see _supports_effort_thinking), (c) GS1 removing exact fields
+# (Haiku has neither — see the explicit model registry), (c) GS1 removing exact fields
 # from the LLM's scope so the prompt + output stay small.
 _DEFAULT_MODEL = "claude-haiku-4-5"
 # Configurable so the model can be pinned/rotated per environment without a code
 # change; defaults to the value above when unset.
-_MODEL = os.environ.get("LABELSCAN_LLM_MODEL", _DEFAULT_MODEL)
+_MODEL = os.environ.get("LABELSCAN_LLM_MODEL", _DEFAULT_MODEL).strip()
+# Validate environment configuration at import/startup, before the worker can
+# dequeue an ingestion and before any billable API call is attempted.
+anthropic_model(_MODEL)
 # Bounded per-request timeout (seconds). The SDK default is 600s; cap it so a
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v3.1.0 — evidence for an absent value is consistently the empty array required by
+# the provider schema; the post-decode contract now enforces bounded values/evidence/
+# warnings plus value-confidence-evidence-status invariants. Cache identity includes
+# model, trade/profile, prompt version and schema hash.
 # v3.0.0 — active trade-profile V2 retires `price`; the closed seafood output now has
 # 16 fields. Historical profile V1 remains resolvable through a compact compatibility
 # prompt, but all new ingestions use this cached V2 prefix.
@@ -68,7 +86,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v3.0.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.1.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -89,7 +107,8 @@ def _env_bool(name: str, default: bool) -> bool:
 _DEFAULT_ESCALATION_MODEL = "claude-opus-4-8"
 ESCALATION_MODEL = os.environ.get(
     "LABELSCAN_LLM_ESCALATION_MODEL", _DEFAULT_ESCALATION_MODEL
-)
+).strip()
+anthropic_model(ESCALATION_MODEL)
 ESCALATION_ENABLED = _env_bool("LABELSCAN_LLM_ESCALATION_ENABLED", False)
 
 
@@ -103,13 +122,27 @@ ESCALATION_ENABLED = _env_bool("LABELSCAN_LLM_ESCALATION_ENABLED", False)
 # are config; when disabled we send no cache_control at all.
 _PROMPT_CACHE_ENABLED = _env_bool("LABELSCAN_LLM_PROMPT_CACHE_ENABLED", True)
 _PROMPT_CACHE_TTL = (
-    os.environ.get("LABELSCAN_LLM_PROMPT_CACHE_TTL") or "1h"
-).strip() or "1h"
+    os.environ.get("LABELSCAN_LLM_PROMPT_CACHE_TTL") or "5m"
+).strip() or "5m"
+if _PROMPT_CACHE_TTL not in {"5m", "1h"}:
+    raise ValueError("LABELSCAN_LLM_PROMPT_CACHE_TTL must be '5m' or '1h'")
+_PROMPT_CACHE_1H_VERIFIED = _env_bool("LABELSCAN_LLM_PROMPT_CACHE_1H_VERIFIED", False)
+# `count_tokens` includes the minimal one-character user turn used by the probe.
+# Requiring a conservative margin prevents that envelope from making a static
+# prefix just below the provider floor look eligible.
+_CACHE_FLOOR_SAFETY_MARGIN = 32
 _FIELD_NAMES = list(trade_profile("poissonnerie").fields)
 
+_MAX_VALUE_CHARS = 512
+_MAX_EVIDENCE_ITEMS = 16
+_MAX_EVIDENCE_CHARS = 1024
+_MAX_WARNING_ITEMS = 16
+_MAX_WARNING_CHARS = 512
 
-# Compact projection of extraction.v1 (the authoritative schema is
-# docs/extraction/schema/extraction.v1.schema.json; keep in sync).
+
+# Provider-compatible projection of extraction.v1. Anthropic structured outputs
+# intentionally does not support constraints such as minimum/maximum/maxLength;
+# `_validated_fields` enforces those bounds and cross-field invariants locally.
 def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
     names = list(field_names)
     return {
@@ -137,10 +170,17 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
                     ],
                     "properties": {
                         "name": {"type": "string", "enum": names},
-                        "value": {"type": ["string", "null"]},
-                        "confidence": {"type": "number"},
+                        "value": {
+                            "type": ["string", "null"],
+                            "description": "Non-empty label value, at most 512 characters, or null.",
+                        },
+                        "confidence": {
+                            "type": "number",
+                            "description": "Finite number in [0, 1]; exactly 0 when value is null.",
+                        },
                         "evidence": {
                             "type": "array",
+                            "description": "At most 16 non-empty OCR substrings; empty iff value is null.",
                             "items": {"type": "string"},
                         },
                         "validation_status": {
@@ -156,6 +196,7 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
                         },
                         "warnings": {
                             "type": "array",
+                            "description": "At most 16 bounded diagnostic strings.",
                             "items": {"type": "string"},
                         },
                     },
@@ -166,6 +207,150 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
 
 
 _OUTPUT_SCHEMA = _output_schema(_FIELD_NAMES)
+
+
+def _schema_hash(schema: dict) -> str:
+    canonical = json.dumps(
+        schema, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _cache_identity(
+    *,
+    model: str,
+    profile: TradeProfile,
+    prompt_version: str,
+    schema_hash: str,
+    cache_enabled: bool,
+) -> str:
+    model_spec = anthropic_model(model)
+    payload = {
+        "model": model,
+        "trade": profile.code,
+        "profile_version": profile.version,
+        "prompt_version": prompt_version,
+        "schema_hash": schema_hash,
+        "thinking": "adaptive" if model_spec.adaptive_thinking else None,
+        "effort": model_spec.effort,
+        "cache_ttl": _PROMPT_CACHE_TTL if cache_enabled else None,
+    }
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
+    """Validate provider output beyond Anthropic's supported schema subset."""
+
+    if not isinstance(data, dict) or set(data) != {"fields"}:
+        raise PermanentProviderError(
+            "Anthropic returned an invalid extraction envelope"
+        )
+    raw_fields = data["fields"]
+    if not isinstance(raw_fields, list) or len(raw_fields) != len(profile.fields):
+        raise PermanentProviderError("Anthropic returned an invalid field count")
+
+    expected_keys = {
+        "name",
+        "value",
+        "confidence",
+        "evidence",
+        "validation_status",
+        "warnings",
+    }
+    allowed_statuses = {
+        "present",
+        "missing",
+        "ambiguous",
+        "normalized",
+        "unnormalizable",
+        "invalid",
+    }
+    names: list[str] = []
+    for field in raw_fields:
+        if not isinstance(field, dict) or set(field) != expected_keys:
+            raise PermanentProviderError("Anthropic returned an invalid field envelope")
+        name = field["name"]
+        value = field["value"]
+        confidence = field["confidence"]
+        evidence = field["evidence"]
+        status = field["validation_status"]
+        warnings = field["warnings"]
+
+        if not isinstance(name, str):
+            raise PermanentProviderError("Anthropic returned an invalid field name")
+        names.append(name)
+        if value is not None and (
+            not isinstance(value, str)
+            or not value.strip()
+            or len(value) > _MAX_VALUE_CHARS
+        ):
+            raise PermanentProviderError("Anthropic returned an invalid field value")
+        if value is not None:
+            try:
+                canonical_value = validate_human_field_value(name, value)
+            except ValueError as exc:
+                raise PermanentProviderError(
+                    f"Anthropic returned a non-canonical value for {name!r}"
+                ) from exc
+            if canonical_value == "NC" or canonical_value != value:
+                raise PermanentProviderError(
+                    f"Anthropic returned a non-canonical value for {name!r}"
+                )
+        if (
+            isinstance(confidence, bool)
+            or not isinstance(confidence, (int, float))
+            or not math.isfinite(float(confidence))
+            or not 0.0 <= float(confidence) <= 1.0
+        ):
+            raise PermanentProviderError("Anthropic returned an invalid confidence")
+        if (
+            not isinstance(evidence, list)
+            or len(evidence) > _MAX_EVIDENCE_ITEMS
+            or any(
+                not isinstance(item, str)
+                or not item.strip()
+                or len(item) > _MAX_EVIDENCE_CHARS
+                for item in evidence
+            )
+        ):
+            raise PermanentProviderError("Anthropic returned invalid evidence")
+        if not isinstance(status, str) or status not in allowed_statuses:
+            raise PermanentProviderError(
+                "Anthropic returned an invalid validation status"
+            )
+        if (
+            not isinstance(warnings, list)
+            or len(warnings) > _MAX_WARNING_ITEMS
+            or any(
+                not isinstance(item, str)
+                or not item.strip()
+                or len(item) > _MAX_WARNING_CHARS
+                for item in warnings
+            )
+        ):
+            raise PermanentProviderError("Anthropic returned invalid warnings")
+
+        if value is None:
+            if (
+                float(confidence) != 0.0
+                or evidence
+                or status not in {"missing", "ambiguous"}
+            ):
+                raise PermanentProviderError(
+                    "Anthropic violated the absent-value extraction invariant"
+                )
+        elif not evidence or status == "missing" or float(confidence) == 0.0:
+            raise PermanentProviderError(
+                "Anthropic violated the grounded-value extraction invariant"
+            )
+
+    if len(set(names)) != len(names) or set(names) != set(profile.fields):
+        raise PermanentProviderError(
+            f"Anthropic returned an invalid {profile.code} field contract"
+        )
+    return raw_fields
+
 
 # STATIC, cacheable system prefix (Work Item B). Authored faithfully to the
 # seafood-label-extraction contract (docs/extraction/PROMPT-CONTRACT.md sec.3) for
@@ -207,7 +392,7 @@ not explicitly present on the label. Every value in this contract is one string 
 "confidence" MUST be 0.0.
 - "evidence": an array of the EXACT verbatim substrings copied from the OCR text that \
 justify "value". Each entry MUST appear character-for-character in the OCR text you \
-were given. If "value" is null, "evidence" MUST be null.
+were given. If "value" is null, "evidence" MUST be the empty array [].
 - "validation_status": one of "present", "normalized", "missing", "ambiguous", \
 "unnormalizable", "invalid" (defined below).
 - "warnings": an array of strings (may be empty) explaining a normalization choice, an \
@@ -331,12 +516,14 @@ are <=12 (e.g. "04/05/2026" could be 4 May or 5 April): then "value" is null, \
 Map FR vocabulary: "emballage" / "conditionnement" -> packaging_date (if both appear, use the \
 conditioning date and record the other in a warning); a "capture" / "abattage" / "production" \
 date maps to NO field (do not force it into packaging_date). For a month+year-only date, \
-"value" is the reduced-precision "YYYY-MM" with a precision warning.
+the day is unknown: return value null, confidence 0, evidence [], validation_status \
+"ambiguous", and explain the reduced precision in a warning.
 - storage_temperature: "value" is a short Celsius string, e.g. "0-4 C", "<=4 C", \
 ">=-18 C", "4 C". If the source is Fahrenheit, convert with C=(F-32)*5/9, set \
 "validation_status" to "normalized", and warn with the original Fahrenheit value and \
-the conversion. If the wording cannot be interpreted, "value" is null, \
-"validation_status" is "unnormalizable", and the original text goes in a warning.
+the conversion. If relevant temperature wording is present but cannot be interpreted, \
+keep that wording verbatim in "value" and "evidence", set "validation_status" to \
+"unnormalizable", and explain the limitation in a warning.
 - weight: "value" is a string with an explicit unit, e.g. "320 g", "1.5 kg". Keep the \
 magnitude the label shows (do not rescale 320 g to 0.32 kg). A comma decimal is normalized \
 to a point ("4,82 Kg" -> "4.82 kg"). Extract weight ONLY from an explicit net-weight \
@@ -388,16 +575,16 @@ allergen. Absence of any allergen statement is "value" null, "validation_status"
 "missing".
 - gtin: when a GS1 human-readable element is printed, extract the COMPLETE payload after \
 AI (01), exactly 14 digits including its check digit; never use only its prefix. For example, \
-"(01)93000502900206" means gtin "93000502900206". The barcode scanner remains the \
+"(01)93000502900204" means gtin "93000502900204". The barcode scanner remains the \
 authoritative source and may override this OCR confirmation. If no complete AI (01) GTIN is \
 printed or scanned, set gtin to "value" null, "validation_status" \
-"missing", "evidence" null, UNLESS a full GTIN digit string is literally printed on the \
+"missing", "evidence" [], UNLESS a full GTIN digit string is literally printed on the \
 label. Never derive a GTIN from other numbers.
 
 EMPTY OR UNREADABLE OCR:
 - If the OCR text is empty, whitespace-only, or has no legible seafood-label content, \
 return the full object with every field's "value" null, "confidence" 0.0, "evidence" \
-null, "validation_status" "missing", "warnings" []. Still return valid JSON - never \
+[], "validation_status" "missing", "warnings" []. Still return valid JSON - never \
 refuse, never apologize.
 
 EXAMPLES (canonical OCR text -> expected JSON). Illustrative: apply the rules above, \
@@ -426,7 +613,7 @@ EXPECTED JSON:
 {"name":"scientific_name","value":"Gadus morhua","confidence":0.96,"evidence":["Gadus morhua"],"validation_status":"present","warnings":[]},\
 {"name":"batch_number","value":"L24-0917","confidence":0.95,"evidence":["Lot: L24-0917"],"validation_status":"present","warnings":[]},\
 {"name":"producer_name","value":"ATLANTIC CATCH LTD","confidence":0.85,"evidence":["ATLANTIC CATCH LTD"],"validation_status":"present","warnings":["Only one operator named, no 'Produit pour'/distributor -> treated as producer; reseller_brand left null (RULE 9)."]},\
-{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
 {"name":"origin_country","value":"Norway","confidence":0.95,"evidence":["Origin: Norway"],"validation_status":"present","warnings":["The 'FR' health-mark country is NOT used as origin (RULE 8)."]},\
 {"name":"FAO_area","value":"27","confidence":0.92,"evidence":["FAO 27 - North East Atlantic"],"validation_status":"present","warnings":["FAO number 27 copied verbatim; the region name 'North East Atlantic' is not used to derive it."]},\
 {"name":"production_method","value":"wild_caught","confidence":0.95,"evidence":["Wild caught"],"validation_status":"normalized","warnings":[]},\
@@ -437,7 +624,7 @@ EXPECTED JSON:
 {"name":"allergens","value":"Fish","confidence":0.95,"evidence":["Allergens: Fish"],"validation_status":"present","warnings":[]},\
 {"name":"health_mark","value":"FR 12.345.678 CE","confidence":0.9,"evidence":["Approval: FR 12.345.678 CE"],"validation_status":"present","warnings":["Sanitary mark; its 'FR' country is the establishment, not the origin (Norway)."]},\
 {"name":"weight","value":"320 g","confidence":0.95,"evidence":["Net weight: 320 g"],"validation_status":"normalized","warnings":["Net basis."]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["GTIN is not printed as readable text; it comes from the scanned barcode."]}\
+{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":["GTIN is not printed as readable text; it comes from the scanned barcode."]}\
 ]}
 (Note: the "Approval: FR 12.345.678 CE" line is the sanitary mark -> health_mark; its 'FR' \
 country must NOT leak into origin_country, which stays Norway, nor into producer_name.)
@@ -461,18 +648,18 @@ EXPECTED JSON:
 {"name":"scientific_name","value":"Salmo sa1ar","confidence":0.55,"evidence":["Salmo sa1ar"],"validation_status":"present","warnings":["OCR garble retained verbatim (likely 'Salmo salar'); not corrected."]},\
 {"name":"batch_number","value":"7741-AB","confidence":0.7,"evidence":["L0T 7741-AB"],"validation_status":"present","warnings":[]},\
 {"name":"producer_name","value":"N0RDIC SEAF00D AS","confidence":0.6,"evidence":["N0RDIC SEAF00D AS"],"validation_status":"present","warnings":["OCR garble retained verbatim; single operator, no distributor -> producer (RULE 9)."]},\
-{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
 {"name":"origin_country","value":"N0rway","confidence":0.4,"evidence":["Origin: N0rway"],"validation_status":"ambiguous","warnings":["Origin token is OCR-garbled; no ISO country is assigned from a corrupted string."]},\
-{"name":"FAO_area","value":null,"confidence":0.0,"evidence":null,"validation_status":"ambiguous","warnings":["Label names a sea ('North Sea') with no FAO area number; not mapped."]},\
-{"name":"production_method","value":null,"confidence":0.0,"evidence":null,"validation_status":"ambiguous","warnings":["'Resp0nsibly s0urced' maps to neither wild_caught nor farmed."]},\
-{"name":"fishing_gear_or_farming_method","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"expiry_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"ambiguous","warnings":["'04/05/2026' is order-ambiguous: 4 May 2026 or 5 April 2026; not resolved."]},\
-{"name":"packaging_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"FAO_area","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["Label names a sea ('North Sea') with no FAO area number; not mapped."]},\
+{"name":"production_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["'Resp0nsibly s0urced' maps to neither wild_caught nor farmed."]},\
+{"name":"fishing_gear_or_farming_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"expiry_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["'04/05/2026' is order-ambiguous: 4 May 2026 or 5 April 2026; not resolved."]},\
+{"name":"packaging_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
 {"name":"storage_temperature","value":"<=3.9 C","confidence":0.7,"evidence":["Store bel0w 39 F"],"validation_status":"normalized","warnings":["Converted 39 F to 3.9 C; 'bel0w' read as an upper bound."]},\
 {"name":"allergens","value":"FlSH","confidence":0.7,"evidence":["Contains: FlSH"],"validation_status":"present","warnings":["Only the declared 'Contains' allergen is listed; the precautionary 'May c0ntain traces 0f S0Y' is recorded here, not as a declared allergen."]},\
-{"name":"health_mark","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"health_mark","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
 {"name":"weight","value":"200 g","confidence":0.7,"evidence":["Wt 200g e"],"validation_status":"normalized","warnings":["Trailing 'e' (estimated-sign) excluded; net/gross unspecified."]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]}\
+{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]}\
 ]}
 
 EXAMPLE 3 - unreadable OCR, required fields missing.
@@ -483,22 +670,22 @@ Lot
 .... %%%
 EXPECTED JSON:
 {"fields":[\
-{"name":"commercial_designation","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"scientific_name","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"batch_number","value":null,"confidence":0.0,"evidence":null,"validation_status":"ambiguous","warnings":["The token 'Lot' is present but no lot value follows it; not invented."]},\
-{"name":"producer_name","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"origin_country","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"FAO_area","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"production_method","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"fishing_gear_or_farming_method","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"expiry_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"packaging_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"storage_temperature","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"allergens","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"health_mark","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"weight","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]}\
+{"name":"commercial_designation","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"scientific_name","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"batch_number","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["The token 'Lot' is present but no lot value follows it; not invented."]},\
+{"name":"producer_name","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"origin_country","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"FAO_area","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"production_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"fishing_gear_or_farming_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"expiry_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"packaging_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"storage_temperature","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"allergens","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"health_mark","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"weight","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]}\
 ]}
 
 EXAMPLE 4 - FRENCH FARMED label: an explicit rearing statement OUTRANKS a stray "pêche" / gear word.
@@ -518,18 +705,18 @@ EXPECTED JSON:
 {"name":"scientific_name","value":"Oncorhynchus Mykiss","confidence":0.93,"evidence":["Oncorhynchus Mykiss"],"validation_status":"present","warnings":[]},\
 {"name":"producer_name","value":"Pisciculture FONT-ROME","confidence":0.9,"evidence":["Pisciculture FONT-ROME"],"validation_status":"present","warnings":["Production cue 'Pisciculture' -> producer; 'COOPERATIVE U' is the retail enseigne -> reseller_brand (RULE 9)."]},\
 {"name":"reseller_brand","value":"COOPERATIVE U VENDARGUES","confidence":0.85,"evidence":["COOPERATIVE U VENDARGUES"],"validation_status":"present","warnings":[]},\
-{"name":"batch_number","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"batch_number","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
 {"name":"origin_country","value":"France","confidence":0.9,"evidence":["Elevée en France"],"validation_status":"present","warnings":[]},\
-{"name":"FAO_area","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["Farmed product; no FAO catch area printed ('Engin de peche / d'elevage' is a gear label, not a zone)."]},\
+{"name":"FAO_area","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":["Farmed product; no FAO catch area printed ('Engin de peche / d'elevage' is a gear label, not a zone)."]},\
 {"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Truite d'aquaculture - Elevée en France"],"validation_status":"normalized","warnings":["Explicit rearing ('aquaculture'/'Elevée'/'Pisciculture') => farmed; the 'peche' in 'Engin de peche / d'elevage' names the gear, NOT a wild capture (PRECEDENCE)."]},\
 {"name":"fishing_gear_or_farming_method","value":"bassins","confidence":0.85,"evidence":["Engin de peche / d'elevage: bassins"],"validation_status":"present","warnings":[]},\
-{"name":"expiry_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
-{"name":"packaging_date","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"expiry_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
+{"name":"packaging_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
 {"name":"storage_temperature","value":"0-2 C","confidence":0.9,"evidence":["A conserver entre 0 et 2 C"],"validation_status":"normalized","warnings":[]},\
-{"name":"allergens","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":[]},\
+{"name":"allergens","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
 {"name":"health_mark","value":"FR 07 019 003 UE","confidence":0.9,"evidence":["FR 07 019 003 UE"],"validation_status":"present","warnings":["Estampille; 'FR' is the establishment country, not used as origin."]},\
 {"name":"weight","value":"2 kg","confidence":0.9,"evidence":["Poids net: 2 kg"],"validation_status":"normalized","warnings":[]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":null,"validation_status":"missing","warnings":["GTIN comes from the scanned barcode, not readable text."]}\
+{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":["GTIN comes from the scanned barcode, not readable text."]}\
 ]}
 
 Return only the JSON object."""
@@ -578,12 +765,6 @@ def _profile_prompt_version(profile: TradeProfile) -> str:
     return f"food-label-extraction/{profile.code}/v{profile.version}"
 
 
-def _supports_effort_thinking(model: str) -> bool:
-    # `output_config.effort` and adaptive thinking are Opus/Sonnet-4.6+ features.
-    # Haiku 4.5 REJECTS effort (400) and has no adaptive thinking — send neither.
-    return not model.startswith("claude-haiku")
-
-
 def _user_prompt(ocr_text: str, known_field_names: tuple[str, ...]) -> str:
     if not known_field_names:
         return f"OCR TEXT:\n{ocr_text}"
@@ -617,10 +798,44 @@ class ClaudeLlmExtractor:
             )
         self._client = client
         self._model = model or _MODEL
+        self._model_spec = anthropic_model(self._model)
+        self._cache_prefix_token_counts: dict[str, int | None] = {}
 
     @property
     def model(self) -> str:
         return self._model
+
+    def _cache_prefix_tokens(self, system_text: str) -> int | None:
+        """Measure the static prefix once and fail closed when it cannot be counted.
+
+        The probe contains no OCR, identifier, tenant data or timestamp.  Its result
+        is process-local and keyed by the exact prefix hash, so a prompt change forces
+        a fresh eligibility measurement without inflating the prompt itself.
+        """
+
+        key = hashlib.sha256(system_text.encode("utf-8")).hexdigest()
+        if key in self._cache_prefix_token_counts:
+            return self._cache_prefix_token_counts[key]
+        try:
+            with external_api_monitor.call("anthropic"):
+                response = self._client.with_options(
+                    timeout=_REQUEST_TIMEOUT_S
+                ).messages.count_tokens(
+                    model=self._model,
+                    system=[{"type": "text", "text": system_text}],
+                    messages=[{"role": "user", "content": "x"}],
+                )
+            measured = getattr(response, "input_tokens", None)
+            if (
+                isinstance(measured, bool)
+                or not isinstance(measured, int)
+                or measured < 0
+            ):
+                measured = None
+        except Exception:  # provider probe failure disables caching, not extraction
+            measured = None
+        self._cache_prefix_token_counts[key] = measured
+        return measured
 
     def run(
         self,
@@ -631,14 +846,54 @@ class ClaudeLlmExtractor:
         trade_profile_version: str = "2",
     ) -> LlmResult:
         profile = trade_profile(trade_code, trade_profile_version)
-        # The system prompt is the stable, >=4096-token static prefix; one explicit
-        # cache_control breakpoint at its end lets Anthropic bill it at ~0.1x on a hit
-        # (Haiku 4.5 caches only >=4096-token prefixes). OCR text + the GS1 hint stay in
-        # the dynamic user message, so the cached prefix is identical across labels.
-        # When caching is disabled, send no cache_control (plain static prefix).
+        # Only the detailed V2 seafood prompt has a measured cacheable prefix.
+        # Historical/compact prompts remain uncached instead of being silently marked
+        # below the model-specific token floor.
         system_text = _system_text_for(profile)
+        prompt_version = _profile_prompt_version(profile)
+        schema = _output_schema(profile.fields)
+        schema_hash = _schema_hash(schema)
+        cache_requested = (
+            _PROMPT_CACHE_ENABLED
+            and profile.code == "poissonnerie"
+            and profile.version == "2"
+        )
+        cache_prefix_tokens: int | None = None
+        if not cache_requested:
+            cache_enabled = False
+            cache_reason = (
+                "disabled_by_config"
+                if not _PROMPT_CACHE_ENABLED
+                else "profile_not_cacheable"
+            )
+        elif _PROMPT_CACHE_TTL == "1h" and not _PROMPT_CACHE_1H_VERIFIED:
+            cache_enabled = False
+            cache_reason = "one_hour_not_verified"
+        else:
+            cache_prefix_tokens = self._cache_prefix_tokens(system_text)
+            cache_enabled = (
+                cache_prefix_tokens is not None
+                and cache_prefix_tokens
+                >= self._model_spec.cache_min_tokens + _CACHE_FLOOR_SAFETY_MARGIN
+            )
+            cache_reason = (
+                "eligible"
+                if cache_enabled
+                else (
+                    "count_tokens_unavailable"
+                    if cache_prefix_tokens is None
+                    else "below_model_floor"
+                )
+            )
+        cache_identity = _cache_identity(
+            model=self._model,
+            profile=profile,
+            prompt_version=prompt_version,
+            schema_hash=schema_hash,
+            cache_enabled=cache_enabled,
+        )
         system_block: dict = {"type": "text", "text": system_text}
-        if _PROMPT_CACHE_ENABLED and profile.code == "poissonnerie":
+        if cache_enabled:
             system_block["cache_control"] = {
                 "type": "ephemeral",
                 "ttl": _PROMPT_CACHE_TTL,
@@ -647,61 +902,94 @@ class ClaudeLlmExtractor:
         output_config: dict = {
             "format": {
                 "type": "json_schema",
-                "schema": _output_schema(profile.fields),
+                "schema": schema,
             }
         }
         kwargs: dict = {
             "model": self._model,
-            "max_tokens": 4096,
+            "max_tokens": self._model_spec.max_tokens,
             "system": system,
             "messages": [
                 {"role": "user", "content": _user_prompt(ocr_text, known_field_names)}
             ],
         }
-        if _supports_effort_thinking(self._model):
+        if self._model_spec.adaptive_thinking:
             kwargs["thinking"] = {"type": "adaptive"}
-            output_config["effort"] = "high"
+        if self._model_spec.effort is not None:
+            output_config["effort"] = self._model_spec.effort
         kwargs["output_config"] = output_config
 
-        resp = self._client.with_options(timeout=_REQUEST_TIMEOUT_S).messages.create(
-            **kwargs
-        )
+        provider_started = time.monotonic()
+        try:
+            with external_api_monitor.call("anthropic"):
+                resp = self._client.with_options(
+                    timeout=_REQUEST_TIMEOUT_S
+                ).messages.create(**kwargs)
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            if isinstance(exc, (TypeError, ValueError)):
+                raise PermanentProviderError(
+                    "Anthropic request configuration is invalid"
+                ) from exc
+            if (
+                isinstance(status_code, int)
+                and 400 <= status_code < 500
+                and status_code not in {408, 409, 429}
+            ):
+                raise PermanentProviderError(
+                    f"Anthropic rejected the extraction request (HTTP {status_code})"
+                ) from exc
+            raise
+        latency_ms = round((time.monotonic() - provider_started) * 1000.0, 3)
         # Prompt-cache observability (Work Item B): emit the two cache token counters
         # per call so the cache hit rate is visible. Allow-listed fields only — never
         # the prompt, OCR text, or any secret. A read>0 across calls proves the cache.
         usage = getattr(resp, "usage", None)
+        input_tokens = getattr(usage, "input_tokens", 0) or 0
+        output_tokens = getattr(usage, "output_tokens", 0) or 0
+        cache_creation_tokens = getattr(usage, "cache_creation_input_tokens", 0) or 0
+        cache_read_tokens = getattr(usage, "cache_read_input_tokens", 0) or 0
+        estimated_cost_usd = self._model_spec.estimated_cost_usd(
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_tokens=cache_creation_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_ttl=_PROMPT_CACHE_TTL,
+        )
         _log.info(
             "llm_cache_usage",
             extra={
                 "model": self._model,
-                "cache_creation_input_tokens": getattr(
-                    usage, "cache_creation_input_tokens", 0
-                )
-                or 0,
-                "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0)
-                or 0,
+                "prompt_version": prompt_version,
+                "schema_hash": schema_hash,
+                "cache_identity": cache_identity,
+                "cache_enabled": cache_enabled,
+                "cache_ttl": _PROMPT_CACHE_TTL if cache_enabled else "disabled",
+                "cache_reason": cache_reason,
+                "cache_prefix_tokens": cache_prefix_tokens,
+                "cache_min_tokens": self._model_spec.cache_min_tokens,
+                "latency_ms": latency_ms,
+                "estimated_cost_usd": estimated_cost_usd,
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "stop_reason": getattr(resp, "stop_reason", "unknown"),
+                "cache_creation_input_tokens": cache_creation_tokens,
+                "cache_read_input_tokens": cache_read_tokens,
             },
         )
-        if resp.stop_reason == "refusal":
-            raise RuntimeError(
-                f"LLM refused extraction: {getattr(resp, 'stop_details', None)}"
+        if resp.stop_reason != "end_turn":
+            raise PermanentProviderError(
+                f"Anthropic extraction stopped without a complete result ({resp.stop_reason})"
             )
 
         text_out = next((b.text for b in resp.content if b.type == "text"), "")
-        data = json.loads(text_out)
-        raw_fields = data.get("fields")
-        expected_names = set(profile.fields)
-        actual_names = (
-            [field.get("name") for field in raw_fields]
-            if isinstance(raw_fields, list)
-            else []
-        )
-        if (
-            len(actual_names) != len(profile.fields)
-            or len(set(actual_names)) != len(actual_names)
-            or set(actual_names) != expected_names
-        ):
-            raise RuntimeError(f"LLM returned an invalid {profile.code} field contract")
+        try:
+            data = json.loads(text_out)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise PermanentProviderError(
+                "Anthropic returned invalid structured JSON"
+            ) from exc
+        raw_fields = _validated_fields(data, profile)
         fields = tuple(
             LlmField(
                 name=f["name"],
@@ -713,7 +1001,6 @@ class ClaudeLlmExtractor:
             )
             for f in raw_fields
         )
-        prompt_version = _profile_prompt_version(profile)
         return LlmResult(
             raw_json=text_out.encode(),
             fields=fields,

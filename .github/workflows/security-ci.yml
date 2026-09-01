@@ -17,3 +17,18 @@ jobs:
           node-version: 22
       - name: Reject tracked credentials and private keys
         run: node scripts/check-tracked-secrets.mjs
+
+  commit-attribution:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 22
+      - name: Reject automated assistant attribution in Git metadata
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: node scripts/check-commit-attribution.mjs "$BASE_SHA" "$HEAD_SHA"

@@ -7,13 +7,14 @@ function dateValue(value: string): string {
 }
 
 function fieldValue(value: string | null | undefined, format: PortalDetailSection['fields'][number]['format']): string {
-  if (!value?.trim()) return '';
-  if (format === 'date') return dateValue(value);
+  const normalized = value?.trim() ?? '';
+  if (!normalized || normalized.toLocaleUpperCase('fr-FR') === 'NC') return 'NC';
+  if (format === 'date') return dateValue(normalized);
   if (format === 'production_method') {
-    if (value === 'wild_caught') return 'Pêche sauvage';
-    if (value === 'farmed') return 'Élevage';
+    if (normalized === 'wild_caught') return 'Pêche sauvage';
+    if (normalized === 'farmed') return 'Élevage';
   }
-  return value;
+  return normalized;
 }
 
 export function DetailSections({ sections, fields }: {
@@ -24,7 +25,10 @@ export function DetailSections({ sections, fields }: {
     .map((section) => ({
       ...section,
       fields: section.fields.filter(
-        (field) => field.key !== 'price' && Boolean(fields[field.key]?.trim()),
+        (field) => field.key !== 'price' && (
+          !['historical-data', 'additional'].includes(section.id)
+          || Boolean(fields[field.key]?.trim())
+        ),
       ),
     }))
     .filter((section) => section.fields.length > 0);

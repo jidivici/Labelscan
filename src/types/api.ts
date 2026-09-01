@@ -92,11 +92,49 @@ export interface FieldProvenance {
   spans: Array<{ page: number; offset_start: number; offset_end: number }>;
 }
 
+/** Versioned validation metadata returned by GET /v1/professions. */
+export type FieldSpecKind =
+  | 'text'
+  | 'date'
+  | 'decimal_unit'
+  | 'temperature_range'
+  | 'enum'
+  | 'gtin'
+  | 'health_mark'
+  | 'fao_area'
+  | 'country';
+
+export interface FieldSpec {
+  kind: FieldSpecKind;
+  format: string | null;
+  max_length: number;
+  enum: string[];
+  units: string[];
+  nullable: boolean;
+}
+
+export type ProfessionCode =
+  | 'poissonnerie'
+  | 'boucherie'
+  | 'charcuterie_traiteur';
+
+/** One server-authoritative profile from GET /v1/professions. */
+export interface Profession {
+  code: ProfessionCode;
+  name: string;
+  version: string;
+  common_fields: string[];
+  specific_fields: string[];
+  required_fields: string[];
+  field_contract_version: string;
+  field_specs: Readonly<Record<string, FieldSpec>>;
+}
+
 /** One extracted field with its confidence + validation shape (server FieldView). */
 export interface ExtractionField {
   field_name: string;
   value: string | null;
-  evidence: string[] | null;
+  evidence: string[];
   provenance: FieldProvenance | null;
   source_raw_artifact_id: string | null;
   validation_status: ValidationStatus;

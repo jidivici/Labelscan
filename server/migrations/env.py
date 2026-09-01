@@ -19,7 +19,10 @@ if not _url:
     raise RuntimeError("DATABASE_URL is not set; cannot run migrations.")
 config.set_main_option("sqlalchemy.url", _url)
 
-target_metadata = None  # raw-DDL migrations; nothing to autogenerate
+# Migrations explicitly own PostgreSQL-only features such as RLS, triggers,
+# roles and partition attachment, so this project deliberately does not use
+# Alembic autogeneration.  See platform.db.models for the ORM mapping.
+target_metadata = None
 
 
 def run_migrations_offline() -> None:

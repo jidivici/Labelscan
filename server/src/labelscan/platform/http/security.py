@@ -19,7 +19,8 @@ import re
 import uuid
 from dataclasses import dataclass
 
-from fastapi import Request
+from fastapi import FastAPI, Request
+from fastapi.routing import APIRoute
 
 from labelscan.platform.config import env_flag, is_production
 from labelscan.platform.http import jwt as jwt_codec
@@ -27,6 +28,20 @@ from labelscan.platform.http.errors import ApiError
 
 _PRODUCTION_ROLES = frozenset({"super_admin", "admin", "manager"})
 _ORGANIZATION_SLUG = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_PUBLIC_API_OPERATIONS = frozenset(
+    {
+        ("POST", "/v1/auth/login"),
+        ("POST", "/v1/o/{organization_slug}/auth/login"),
+        ("POST", "/v1/mobile/auth/login"),
+        ("POST", "/v1/mobile/auth/refresh"),
+        ("POST", "/v1/mobile/auth/logout"),
+        ("POST", "/v1/auth/refresh"),
+        ("POST", "/v1/auth/logout"),
+        ("GET", "/v1/health/live"),
+        ("GET", "/v1/health/ready"),
+        ("GET", "/v1/version"),
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -184,4 +199,47 @@ def require_scope(scope: str):
             raise ApiError("FORBIDDEN", f"requires scope '{scope}'")
         return principal
 
+    # Used by the composition-root security invariant below. Keeping the marker
+    # on the dependency itself means wrappers remain distinguishable without
+    # relying on fragile function names or closure internals.
+    setattr(_dep, "__labelscan_auth_dependency__", True)
     return _dep
+
+
+def _dependency_tree_requires_auth(dependant) -> bool:
+    for dependency in dependant.dependencies:
+        call = dependency.call
+        if call is resolve_principal or getattr(
+            call, "__labelscan_auth_dependency__", False
+        ):
+            return True
+        if _dependency_tree_requires_auth(dependency):
+            return True
+    return False
+
+
+def enforce_api_authentication_surface(app: FastAPI) -> None:
+    """Fail startup if a non-public v1 operation has no authentication gate.
+
+    Authorization remains route-specific (scopes and tenant filters), but this
+    invariant prevents a future router from accidentally exposing an operation
+    merely because its author forgot ``resolve_principal``/``require_scope``.
+    Public credential-exchange and probe operations are an exact method/path
+    allow-list so expanding the anonymous surface requires a reviewed code change.
+    """
+
+    unsecured: list[str] = []
+    for route in app.routes:
+        if not isinstance(route, APIRoute) or not route.path.startswith("/v1/"):
+            continue
+        for method in route.methods:
+            operation = (method, route.path)
+            if operation in _PUBLIC_API_OPERATIONS:
+                continue
+            if not _dependency_tree_requires_auth(route.dependant):
+                unsecured.append(f"{method} {route.path}")
+    if unsecured:
+        raise RuntimeError(
+            "unauthenticated API operations are not allow-listed: "
+            + ", ".join(sorted(unsecured))
+        )

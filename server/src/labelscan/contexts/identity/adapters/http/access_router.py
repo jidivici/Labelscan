@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import threading
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
 
 from labelscan.contexts.identity.application.access_management import (
     AccessDenied,
@@ -24,6 +25,7 @@ from labelscan.contexts.identity.domain.user import (
     MANAGER_ROLE,
     SUPER_ADMIN_ROLE,
     ManagedUser,
+    normalize_identity_text,
 )
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope, resolve_principal
@@ -31,6 +33,23 @@ from labelscan.platform.http.security import Principal, require_scope, resolve_p
 router = APIRouter()
 _SERVICE: AccessManagementService | None = None
 _LOCK = threading.Lock()
+
+
+def _parse_canonical_uuid(value: object) -> UUID:
+    if isinstance(value, UUID):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("UUID value must be a canonical string")
+    try:
+        parsed = UUID(value)
+    except ValueError as exc:
+        raise ValueError("UUID value is invalid") from exc
+    if value != str(parsed):
+        raise ValueError("UUID value must use canonical lowercase form")
+    return parsed
+
+
+CanonicalUUID = Annotated[UUID, BeforeValidator(_parse_canonical_uuid)]
 
 
 def get_access_management_service() -> AccessManagementService:
@@ -128,7 +147,7 @@ class MeResponse(BaseModel):
 
 
 class _StrictRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
 class CreateIdentityRequest(_StrictRequest):
@@ -136,13 +155,27 @@ class CreateIdentityRequest(_StrictRequest):
     display_name: str | None = Field(default=None, min_length=1, max_length=120)
     password: str = Field(min_length=12, max_length=128)
 
+    @field_validator("username", mode="before")
+    @classmethod
+    def validate_username(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return normalize_identity_text(value, field="username", maximum=254)
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def validate_display_name(cls, value: object) -> object:
+        if value is None or not isinstance(value, str):
+            return value
+        return normalize_identity_text(value, field="display_name", maximum=120)
+
 
 class CreateManagerRequest(CreateIdentityRequest):
-    business_portal_ids: list[UUID] = Field(min_length=1, max_length=1)
+    business_portal_ids: list[CanonicalUUID] = Field(min_length=1, max_length=1)
 
 
 class ManagerAssignmentsRequest(_StrictRequest):
-    business_portal_ids: list[UUID] = Field(min_length=1, max_length=1)
+    business_portal_ids: list[CanonicalUUID] = Field(min_length=1, max_length=1)
 
 
 class ActiveRequest(_StrictRequest):
@@ -155,7 +188,7 @@ class ChangePasswordRequest(_StrictRequest):
 
 
 class SetPortalActiveRequest(_StrictRequest):
-    portal_id: UUID = Field(
+    portal_id: CanonicalUUID = Field(
         description="Portal belonging to the store identified by the URL."
     )
     active: bool = Field(

@@ -1,5 +1,25 @@
+jest.mock('../services/authStorage', () => ({
+  captureActiveSession: jest.fn(async () => ({
+    generation: 1,
+    scopeKey: 'org-a:actor-a:portal-a:boucherie',
+    signal: new AbortController().signal,
+  })),
+  getOperatorContext: jest.fn(async () => ({
+    organizationId: 'org-a',
+    actorId: 'actor-a',
+    businessPortalId: 'portal-a',
+    tradeCode: 'boucherie',
+  })),
+  isSessionFenceCurrent: jest.fn(() => true),
+  operatorContextKey: jest.fn((context) =>
+    [context.organizationId, context.actorId, context.businessPortalId, context.tradeCode].join(':'),
+  ),
+}));
+
 import {
+  _resetOutboxRuntimeForTests,
   backoffDelayMs,
+  clearOutbox as purgeOutbox,
   enqueueFinalizeReview,
   isRetryableError,
   listAll,
@@ -8,15 +28,17 @@ import {
   markInFlight,
   MAX_ATTEMPTS,
   operationMatchesOperatorContext,
+  recoverInterruptedInFlight,
   updatePendingFinalizeReview,
 } from '../services/outbox';
 
 async function clearOutbox() {
   const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-  await AsyncStorage.removeItem('@labelscan:outbox');
+  await AsyncStorage.multiRemove(['@labelscan:outbox', '@labelscan:outbox:v2']);
 }
 
 beforeEach(async () => {
+  _resetOutboxRuntimeForTests();
   await clearOutbox();
 });
 
@@ -76,6 +98,9 @@ describe('MAX_ATTEMPTS', () => {
 
 describe('local operator ownership', () => {
   const owned = {
+    schema_version: 2,
+    owner_organization_id: 'org-a',
+    owner_actor_id: 'actor-a',
     owner_business_portal_id: 'portal-a',
     owner_trade_code: 'boucherie',
   } as never;
@@ -83,12 +108,16 @@ describe('local operator ownership', () => {
   it('allows the exact server context and blocks another portal', () => {
     expect(
       operationMatchesOperatorContext(owned, {
+        organizationId: 'org-a',
+        actorId: 'actor-a',
         businessPortalId: 'portal-a',
         tradeCode: 'boucherie',
       }),
     ).toBe(true);
     expect(
       operationMatchesOperatorContext(owned, {
+        organizationId: 'org-a',
+        actorId: 'actor-a',
         businessPortalId: 'portal-b',
         tradeCode: 'boucherie',
       }),
@@ -96,12 +125,72 @@ describe('local operator ownership', () => {
     expect(operationMatchesOperatorContext(owned, null)).toBe(false);
   });
 
-  it('keeps unowned historical operations replayable', () => {
-    expect(operationMatchesOperatorContext({} as never, null)).toBe(true);
+  it('rejects unowned historical operations', () => {
+    expect(operationMatchesOperatorContext({} as never, null)).toBe(false);
   });
 });
 
 describe('pending review updates', () => {
+  it('recovers a killed-process in-flight operation with the same stable keys', async () => {
+    const operation = await enqueueFinalizeReview(
+      {
+        ingestion_id: 'ing-interrupted',
+        fields: { commercial_designation: 'Saumon' },
+      },
+      {
+        id: 'op-stable',
+        idempotencyKey: 'idem-stable',
+        correlationId: 'corr-stable',
+      },
+    );
+    await markInFlight(operation.id);
+
+    // A live request in this process keeps its lease.
+    await expect(recoverInterruptedInFlight()).resolves.toBe(0);
+    expect((await listAll())[0].status).toBe('in_flight');
+
+    // Cold restart: memory lease is gone, durable row remains safe to replay.
+    _resetOutboxRuntimeForTests();
+    await expect(recoverInterruptedInFlight()).resolves.toBe(1);
+    expect((await listAll())[0]).toMatchObject({
+      id: 'op-stable',
+      idempotencyKey: 'idem-stable',
+      correlationId: 'corr-stable',
+      status: 'pending',
+      last_error_code: 'INTERRUPTED',
+    });
+  });
+
+  it('serializes logout purge behind an already-started persistence write', async () => {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const setItem = jest.mocked(AsyncStorage.setItem);
+    const originalSetItem = setItem.getMockImplementation();
+    let releaseWrite!: () => void;
+    let signalWriteStarted!: () => void;
+    const writeStarted = new Promise<void>((resolve) => {
+      signalWriteStarted = resolve;
+    });
+    const writeGate = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    setItem.mockImplementationOnce(async (key, value) => {
+      signalWriteStarted();
+      await writeGate;
+      await originalSetItem?.(key, value);
+    });
+
+    const enqueue = enqueueFinalizeReview({
+      ingestion_id: 'ing-race',
+      fields: { commercial_designation: 'Saumon' },
+    });
+    await writeStarted;
+    const purge = purgeOutbox();
+    releaseWrite();
+    await Promise.all([enqueue, purge]);
+
+    expect(await listAll()).toEqual([]);
+  });
+
   it('keeps the manager-approved photo orientation before a retry is sent', async () => {
     const operation = await enqueueFinalizeReview({
       ingestion_id: 'ing-1',

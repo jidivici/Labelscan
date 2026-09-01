@@ -68,8 +68,21 @@ const SEARCH_OPEN_HEIGHT = 44 + spacing.sm * 2;
 export function ArticleListScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
-  const { signOut, businessPortalId, tradeCode, businessProfile } = useAuth();
-  const { data: articles = [], refetch, isRefetching } = useCatalogArticles();
+  const {
+    signOut,
+    organizationId,
+    actorId,
+    businessPortalId,
+    tradeCode,
+    businessProfile,
+  } = useAuth();
+  const catalogContext = useMemo(
+    () => organizationId && actorId && businessPortalId && tradeCode
+      ? { organizationId, actorId, businessPortalId, tradeCode }
+      : null,
+    [actorId, businessPortalId, organizationId, tradeCode],
+  );
+  const { data: articles = [], refetch, isRefetching } = useCatalogArticles(catalogContext);
   const [exporting, setExporting] = useState(false);
   // Omni-search: lot, espèce, zone FAO, élevage, fournisseur… (services/articleSearch).
   const { query, setQuery, results } = useArticleSearch(articles);
@@ -96,10 +109,14 @@ export function ArticleListScreen() {
     () =>
       sortPendingScansNewestFirst(
         pendingScans.filter(
-          (scan) => !scan.businessPortalId || scan.businessPortalId === businessPortalId,
+          (scan) =>
+            scan.organizationId === organizationId &&
+            scan.actorId === actorId &&
+            scan.businessPortalId === businessPortalId &&
+            scan.tradeCode === tradeCode,
         ),
       ),
-    [businessPortalId, pendingScans],
+    [actorId, businessPortalId, organizationId, pendingScans, tradeCode],
   );
   const [listHeaderHeight, setListHeaderHeight] = useState(0);
   const [pendingSectionCollapsed, setPendingSectionCollapsed] = useState(false);
@@ -344,7 +361,7 @@ export function ArticleListScreen() {
     }
     setExporting(true);
     try {
-      await exportAsJSON(articles);
+      await exportAsJSON();
     } catch (err) {
       Alert.alert('Échec de l’export', 'Vérifiez l’espace disponible et réessayez.');
     } finally {
@@ -359,7 +376,7 @@ export function ArticleListScreen() {
     }
     setExporting(true);
     try {
-      await exportAsCSV(articles);
+      await exportAsCSV();
     } catch {
       Alert.alert('Échec de l’export', 'Vérifiez l’espace disponible et réessayez.');
     } finally {

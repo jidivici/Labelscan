@@ -46,6 +46,13 @@ def client(engine, raw_store):
     return TestClient(app)
 
 
+@pytest.fixture
+def validation_client():
+    app = create_app()
+    app.dependency_overrides[get_engine] = lambda: object()
+    return TestClient(app)
+
+
 def _cmd(content: bytes) -> SubmitIngestionCommand:
     return SubmitIngestionCommand(
         image_bytes=content,
@@ -175,3 +182,39 @@ def test_plain_get_without_params_is_untouched(submit, client):
     assert r.status_code == 200
     assert r.json()["status"] == "raw_stored"
     assert time.monotonic() - t0 < 1.0
+
+
+@pytest.mark.parametrize(
+    "params",
+    [
+        {"wait": "-1", "last_status": "raw_stored"},
+        {"wait": "26", "last_status": "raw_stored"},
+        {"wait": "NaN", "last_status": "raw_stored"},
+        {"wait": "1e1", "last_status": "raw_stored"},
+        {"wait": "1", "last_status": "unknown"},
+        {"wait": "1", "last_status": "raw_stored\u202e"},
+        {"wait": "1", "last_status": "raw_stored\x01"},
+    ],
+)
+def test_long_poll_rejects_noncanonical_or_unsafe_query_values(
+    validation_client, params
+):
+    response = validation_client.get(
+        "/v1/ingestions/00000000-0000-0000-0000-00000000dead",
+        params=params,
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_long_poll_rejects_duplicate_scalar_parameters(validation_client):
+    response = validation_client.get(
+        "/v1/ingestions/00000000-0000-0000-0000-00000000dead",
+        params=[("wait", "1"), ("wait", "2"), ("last_status", "raw_stored")],
+        headers=AUTH,
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"

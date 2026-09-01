@@ -9,7 +9,7 @@ function field(overrides: Partial<ExtractionField> = {}): ExtractionField {
   return {
     field_name: 'commercial_designation',
     value: 'Cabillaud',
-    evidence: null,
+    evidence: [],
     provenance: null,
     source_raw_artifact_id: null,
     validation_status: 'present',

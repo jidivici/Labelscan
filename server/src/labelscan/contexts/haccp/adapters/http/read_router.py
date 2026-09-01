@@ -7,10 +7,13 @@ single lateral join (no N+1). Returns exactly what exists.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+import unicodedata
+from collections import Counter
+from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, BeforeValidator
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
@@ -20,10 +23,109 @@ from labelscan.platform.http.access import (
     postgres_scope,
 )
 from labelscan.platform.http.deps import get_engine
+from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.read_models import AuditEntry
 from labelscan.platform.http.security import Principal, require_scope
 
 router = APIRouter()
+
+_BIDI_CONTROL_CLASSES = frozenset(
+    {"RLE", "LRE", "RLO", "LRO", "PDF", "RLI", "LRI", "FSI", "PDI"}
+)
+_ALERT_QUERY_PARAMETERS = frozenset(
+    {
+        "state",
+        "alert_type",
+        "severity",
+        "batch_id",
+        "business_portal_id",
+        "profession",
+        "limit",
+        "offset",
+    }
+)
+_CANONICAL_UUID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+_TEXT_QUERY_PARAMETERS = frozenset(
+    {
+        "state",
+        "alert_type",
+        "severity",
+        "batch_id",
+        "business_portal_id",
+        "profession",
+    }
+)
+
+
+def _safe_query_token(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("query value must be a string")
+    normalized = unicodedata.normalize("NFC", value)
+    if any(
+        unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+        or unicodedata.bidirectional(character) in _BIDI_CONTROL_CLASSES
+        for character in normalized
+    ):
+        raise ValueError("query value contains invalid characters")
+    return normalized
+
+
+def _parse_canonical_uuid(value: object) -> UUID:
+    value = _safe_query_token(value)
+    try:
+        parsed = UUID(value)
+    except ValueError as exc:
+        raise ValueError("UUID filter is invalid") from exc
+    if value != str(parsed):
+        raise ValueError("UUID filter must use canonical lowercase form")
+    return parsed
+
+
+def _parse_query_integer(value: object) -> int:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if not isinstance(value, str) or not value.isascii() or not value.isdecimal():
+        raise ValueError("pagination value must be an unsigned decimal integer")
+    return int(value)
+
+
+QueryInteger = Annotated[int, BeforeValidator(_parse_query_integer)]
+AlertState = Annotated[
+    Literal["open", "acknowledged", "resolved"], BeforeValidator(_safe_query_token)
+]
+AlertType = Annotated[
+    Literal["expiry", "temperature", "required_field", "inconsistency"],
+    BeforeValidator(_safe_query_token),
+]
+AlertSeverity = Annotated[
+    Literal["low", "medium", "high", "critical"],
+    BeforeValidator(_safe_query_token),
+]
+Profession = Annotated[
+    Literal["poissonnerie", "boucherie", "charcuterie_traiteur"],
+    BeforeValidator(_safe_query_token),
+]
+
+
+def _require_query_shape(request: Request) -> None:
+    pairs = request.query_params.multi_items()
+    keys = [key for key, _ in pairs]
+    unknown = sorted(set(keys) - _ALERT_QUERY_PARAMETERS)
+    duplicates = sorted(key for key, count in Counter(keys).items() if count > 1)
+    if unknown:
+        raise ApiError("VALIDATION_ERROR", "unknown alert query parameter")
+    if duplicates:
+        raise ApiError("VALIDATION_ERROR", "query parameters must be singular")
+    try:
+        for key, value in pairs:
+            if key in _TEXT_QUERY_PARAMETERS:
+                _safe_query_token(value)
+            elif key in {"limit", "offset"}:
+                _parse_query_integer(value)
+    except ValueError as exc:
+        raise ApiError("VALIDATION_ERROR", str(exc)) from exc
 
 
 class AlertItem(BaseModel):
@@ -52,18 +154,26 @@ class AlertPage(BaseModel):
 @router.get("/v1/alerts", response_model=AlertPage)
 def list_alerts(
     request: Request,
-    state: Literal["open", "acknowledged", "resolved"] | None = Query(None),
-    alert_type: Literal["expiry", "temperature", "required_field", "inconsistency"]
-    | None = Query(None),
-    severity: Literal["low", "medium", "high", "critical"] | None = Query(None),
-    batch_id: str | None = Query(None, max_length=128),
-    business_portal_id: str | None = Query(None, max_length=128),
-    profession: str | None = Query(None, max_length=64),
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
+    state: AlertState | None = Query(None),
+    alert_type: AlertType | None = Query(None),
+    severity: AlertSeverity | None = Query(None),
+    batch_id: str | None = Query(
+        None, min_length=36, max_length=36, pattern=_CANONICAL_UUID_PATTERN
+    ),
+    business_portal_id: str | None = Query(
+        None, min_length=36, max_length=36, pattern=_CANONICAL_UUID_PATTERN
+    ),
+    profession: Profession | None = Query(None),
+    limit: QueryInteger = Query(50, ge=1, le=200),
+    offset: QueryInteger = Query(0, ge=0, le=100_000),
     principal: Principal = Depends(require_scope("haccp:read")),
     engine: Engine = Depends(get_engine),
 ) -> AlertPage:
+    _require_query_shape(request)
+    batch_id_text = str(_parse_canonical_uuid(batch_id)) if batch_id else None
+    business_portal_id_text = (
+        str(_parse_canonical_uuid(business_portal_id)) if business_portal_id else None
+    )
     conds, params = [], {"limit": limit, "offset": offset}
     for col, val in (
         ("state", state),
@@ -73,12 +183,12 @@ def list_alerts(
         if val is not None:
             conds.append(f"a.{col} = :{col}")
             params[col] = val
-    if batch_id is not None:
+    if batch_id_text is not None:
         conds.append("a.batch_id::text = :batch_id")
-        params["batch_id"] = batch_id
-    if business_portal_id is not None:
+        params["batch_id"] = batch_id_text
+    if business_portal_id_text is not None:
         conds.append("a.business_portal_id::text = :business_portal_id")
-        params["business_portal_id"] = business_portal_id
+        params["business_portal_id"] = business_portal_id_text
     with engine.connect() as c:
         organization_id = principal.organization_id or str(
             c.execute(
@@ -94,7 +204,7 @@ def list_alerts(
         params.update(scope_params)
         if profession is not None:
             conds.append("portal.profession_code = :profession")
-            params["profession"] = profession.strip().lower()
+            params["profession"] = profession
         where = "WHERE " + " AND ".join(conds)
         sql = text(
             "SELECT a.id::text AS id, a.batch_id::text AS batch_id, a.alert_type, a.severity, a.state, "

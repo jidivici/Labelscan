@@ -127,7 +127,10 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
     display(detail.fields.FAO_area) ? { label: 'Zone FAO', value: display(detail.fields.FAO_area)! } : null,
   ].filter((fact): fact is { label: string; value: string } => fact !== null) : [];
   const fieldCount = detail ? detailSections.reduce(
-    (count, section) => count + section.fields.filter((field) => Boolean(detail.fields[field.key]?.trim())).length,
+    (count, section) => count + section.fields.filter((field) => (
+      field.key !== 'price'
+      && (!['historical-data', 'additional'].includes(section.id) || Boolean(detail.fields[field.key]?.trim()))
+    )).length,
     0,
   ) : 0;
 

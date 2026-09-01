@@ -58,7 +58,7 @@ _INSERT_INGESTION = text(
 _INSERT_RAW = text(
     "INSERT INTO ingestion.raw_artifact "
     "(ingestion_id, organization_id, artifact_kind, storage_ref, checksum_sha256, correlation_id, trace_id) "
-    "VALUES (:iid, :organization_id, 'image', :ref, :ck, :corr, :trace)"
+    "VALUES (:iid, :organization_id, :kind, :ref, :ck, :corr, :trace)"
 )
 # Transactional outbox: enqueued in the SAME transaction as the ingestion write,
 # so the event exists if and only if the ingestion committed. NOT a call into
@@ -93,6 +93,8 @@ class SqlIngestionRepository(IngestionWriteRepository):
         *,
         content_sha256: str,
         storage_ref: str,
+        original_content_sha256: str | None = None,
+        original_storage_ref: str | None = None,
         barcode_raw: str | None,
         client_captured_at: str | None,
         store_code: str | None = None,
@@ -108,7 +110,8 @@ class SqlIngestionRepository(IngestionWriteRepository):
         audit: AuditContext,
         action: str,
     ) -> PersistResult:
-        request_identity = idempotency_key or content_sha256
+        request_fingerprint = original_content_sha256 or content_sha256
+        request_identity = idempotency_key or request_fingerprint
         scope_hash = self._scope_hash(
             principal,
             route,
@@ -156,7 +159,7 @@ class SqlIngestionRepository(IngestionWriteRepository):
 
             claimed = conn.execute(
                 _CLAIM,
-                {"sh": scope_hash, "fp": content_sha256, "iid": ingestion_id},
+                {"sh": scope_hash, "fp": request_fingerprint, "iid": ingestion_id},
             ).scalar_one_or_none()
 
             if claimed is None:
@@ -165,7 +168,7 @@ class SqlIngestionRepository(IngestionWriteRepository):
                 existing = (
                     conn.execute(_FIND_EXISTING, {"sh": scope_hash}).mappings().one()
                 )
-                if existing["request_fingerprint"] != content_sha256:
+                if existing["request_fingerprint"] != request_fingerprint:
                     raise IngestionIdempotencyConflict()
                 return PersistResult(
                     ingestion_id=str(existing["response_body_ref"]), created=False
@@ -193,7 +196,19 @@ class SqlIngestionRepository(IngestionWriteRepository):
                     "captured_by_user_id": captured_by_user_id,
                 },
             )
-            conn.execute(_INSERT_RAW, params)
+            if original_content_sha256 and original_storage_ref:
+                conn.execute(
+                    _INSERT_RAW,
+                    {
+                        **params,
+                        "kind": "image",
+                        "ref": original_storage_ref,
+                        "ck": original_content_sha256,
+                    },
+                )
+                conn.execute(_INSERT_RAW, {**params, "kind": "sanitized_image"})
+            else:
+                conn.execute(_INSERT_RAW, {**params, "kind": "image"})
             conn.execute(
                 _ENQUEUE_OUTBOX,
                 {

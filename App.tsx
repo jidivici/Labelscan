@@ -22,8 +22,33 @@ import {
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { RootNavigator } from './src/navigation/RootNavigator';
 import { AuthProvider } from './src/context/AuthContext';
-import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client';
-import { queryClient, queryPersister } from './src/services/queryClient';
+import { QueryClientProvider } from '@tanstack/react-query';
+import { queryClient } from './src/services/queryClient';
+import { useAuth } from './src/context/AuthContext';
+import { purgeLegacyLocalData } from './src/services/sessionData';
+
+function AuthenticatedLifecycle({ children }: { children: React.ReactNode }) {
+  const { status } = useAuth();
+
+  useEffect(() => {
+    if (status !== 'signedIn') return undefined;
+    let disposed = false;
+    let unregisterQueue: (() => void) | undefined;
+    let unregisterDrain: (() => void) | undefined;
+    void initScanQueue().then(() => {
+      if (disposed) return;
+      unregisterQueue = registerScanQueueLifecycle();
+      unregisterDrain = registerOutboxDrainOnForeground();
+    });
+    return () => {
+      disposed = true;
+      unregisterQueue?.();
+      unregisterDrain?.();
+    };
+  }, [status]);
+
+  return <>{children}</>;
+}
 
 export default function App() {
   const [fontsLoaded, fontError] = useFonts({
@@ -33,17 +58,8 @@ export default function App() {
     Inter_700Bold,
   });
 
-  // P3: replay pending review writes (field overrides / confirms) whenever the app
-  // starts or returns to the foreground — the moment connectivity most plausibly
-  // came back. Server-side Idempotency-Key dedup makes replays safe.
-  useEffect(() => registerOutboxDrainOnForeground(), []);
-
-  // Workflow v1: restore queued scans (they survive a restart) and let the queue
-  // pause/resume its polls with the app state.
   useEffect(() => {
-    const unsubscribe = registerScanQueueLifecycle();
-    void initScanQueue();
-    return unsubscribe;
+    void purgeLegacyLocalData();
   }, []);
 
   // Don't render until fonts are ready (prevents flash of unstyled text).
@@ -53,14 +69,13 @@ export default function App() {
   return (
     <GestureHandlerRootView style={styles.root}>
       <SafeAreaProvider>
-        <PersistQueryClientProvider
-          client={queryClient}
-          persistOptions={{ persister: queryPersister, maxAge: 7 * 24 * 60 * 60 * 1_000 }}
-        >
+        <QueryClientProvider client={queryClient}>
           <AuthProvider>
-            <RootNavigator />
+            <AuthenticatedLifecycle>
+              <RootNavigator />
+            </AuthenticatedLifecycle>
           </AuthProvider>
-        </PersistQueryClientProvider>
+        </QueryClientProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

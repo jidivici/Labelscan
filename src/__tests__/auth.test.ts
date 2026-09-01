@@ -3,8 +3,7 @@ jest.mock('../services/api', () => ({
 }));
 
 jest.mock('../services/authStorage', () => ({
-  clearSessionTokens: jest.fn(),
-  clearUsername: jest.fn(),
+  clearSessionCredentials: jest.fn(),
   getRefreshToken: jest.fn(),
   setOperatorContext: jest.fn(),
   setTokens: jest.fn(),
@@ -14,8 +13,7 @@ jest.mock('../services/authStorage', () => ({
 import { apiRequest } from '../services/api';
 import { login, restoreAuthentication } from '../services/auth';
 import {
-  clearSessionTokens,
-  clearUsername,
+  clearSessionCredentials,
   getRefreshToken,
   setOperatorContext,
   setTokens,
@@ -25,8 +23,7 @@ import {
 const requestMock = jest.mocked(apiRequest);
 const setTokensMock = jest.mocked(setTokens);
 const setUsernameMock = jest.mocked(setUsername);
-const clearSessionTokensMock = jest.mocked(clearSessionTokens);
-const clearUsernameMock = jest.mocked(clearUsername);
+const clearSessionCredentialsMock = jest.mocked(clearSessionCredentials);
 const getRefreshTokenMock = jest.mocked(getRefreshToken);
 const setOperatorContextMock = jest.mocked(setOperatorContext);
 
@@ -38,8 +35,10 @@ function managerResponse(overrides: Record<string, unknown> = {}) {
     expires_in: 3600,
     refresh_expires_in: 604800,
     user: {
+      id: 'actor-manager',
       role: 'manager',
       username: 'manager',
+      organization_id: 'org-labelscan',
       business_portal_id: 'portal-poissonnerie',
       trade_code: 'poissonnerie',
     },
@@ -50,6 +49,7 @@ function managerResponse(overrides: Record<string, unknown> = {}) {
 describe('mobile manager authentication', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    clearSessionCredentialsMock.mockResolvedValue(undefined);
     getRefreshTokenMock.mockResolvedValue('stored-refresh');
   });
 
@@ -58,6 +58,8 @@ describe('mobile manager authentication', () => {
 
     await expect(login('manager', 'secret')).resolves.toEqual({
       username: 'manager',
+      organizationId: 'org-labelscan',
+      actorId: 'actor-manager',
       businessPortalId: 'portal-poissonnerie',
       tradeCode: 'poissonnerie',
     });
@@ -70,6 +72,8 @@ describe('mobile manager authentication', () => {
     expect(setTokensMock).toHaveBeenCalledWith('manager-token', 'manager-refresh');
     expect(setUsernameMock).toHaveBeenCalledWith('manager');
     expect(setOperatorContextMock).toHaveBeenCalledWith({
+      organizationId: 'org-labelscan',
+      actorId: 'actor-manager',
       businessPortalId: 'portal-poissonnerie',
       tradeCode: 'poissonnerie',
     });
@@ -83,8 +87,10 @@ describe('mobile manager authentication', () => {
       expires_in: 3600,
       refresh_expires_in: 604800,
       user: {
+        id: 'actor-admin',
         role: 'admin',
         username: 'admin',
+        organization_id: 'org-labelscan',
         business_portal_id: null,
         trade_code: null,
       },
@@ -101,8 +107,10 @@ describe('mobile manager authentication', () => {
     requestMock.mockResolvedValue(
       managerResponse({
         user: {
+          id: 'actor-manager',
           role: 'manager',
           username: 'manager',
+          organization_id: 'org-labelscan',
           business_portal_id: null,
           trade_code: null,
         },
@@ -119,8 +127,7 @@ describe('mobile manager authentication', () => {
     setOperatorContextMock.mockRejectedValueOnce(new Error('keystore failure'));
 
     await expect(login('manager', 'secret')).rejects.toThrow('keystore failure');
-    expect(clearSessionTokensMock).toHaveBeenCalled();
-    expect(clearUsernameMock).toHaveBeenCalled();
+    expect(clearSessionCredentialsMock).toHaveBeenCalled();
   });
 
   it('restores a cold-start session by rotating the persisted refresh token', async () => {
@@ -131,8 +138,10 @@ describe('mobile manager authentication', () => {
       expires_in: 900,
       refresh_expires_in: 604800,
       user: {
+        id: 'actor-manager',
         role: 'manager',
-          username: 'manager',
+        username: 'manager',
+        organization_id: 'org-labelscan',
         business_portal_id: 'portal-charcuterie',
         trade_code: 'charcuterie_traiteur',
       },
@@ -140,6 +149,8 @@ describe('mobile manager authentication', () => {
 
     await expect(restoreAuthentication()).resolves.toEqual({
       username: 'manager',
+      organizationId: 'org-labelscan',
+      actorId: 'actor-manager',
       businessPortalId: 'portal-charcuterie',
       tradeCode: 'charcuterie_traiteur',
     });
@@ -150,6 +161,8 @@ describe('mobile manager authentication', () => {
     });
     expect(setTokensMock).toHaveBeenCalledWith('access-new', 'refresh-new');
     expect(setOperatorContextMock).toHaveBeenCalledWith({
+      organizationId: 'org-labelscan',
+      actorId: 'actor-manager',
       businessPortalId: 'portal-charcuterie',
       tradeCode: 'charcuterie_traiteur',
     });
@@ -159,6 +172,6 @@ describe('mobile manager authentication', () => {
     requestMock.mockRejectedValue(new Error('expired'));
 
     await expect(restoreAuthentication()).resolves.toBeNull();
-    expect(clearSessionTokensMock).toHaveBeenCalled();
+    expect(clearSessionCredentialsMock).toHaveBeenCalled();
   });
 });

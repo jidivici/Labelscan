@@ -11,6 +11,7 @@ from labelscan.contexts.identity.domain.user import (
     MANAGER_ROLE,
     SUPER_ADMIN_ROLE,
     ManagedUser,
+    normalize_identity_text,
 )
 
 
@@ -132,12 +133,7 @@ class AccessRepository(Protocol):
 
 
 def _bounded_text(value: str, field: str, maximum: int) -> str:
-    normalized = " ".join(value.split())
-    if not normalized:
-        raise ValueError(f"{field} must not be blank")
-    if len(normalized) > maximum:
-        raise ValueError(f"{field} must be at most {maximum} characters")
-    return normalized
+    return normalize_identity_text(value, field=field, maximum=maximum)
 
 
 def _password(value: str, *, role: str) -> str:
@@ -209,7 +205,9 @@ class AccessManagementService:
             username=_bounded_text(username, "username", 254),
             # Display names are no longer part of the product UI.  Keep the
             # non-null legacy column populated with the canonical identifier.
-            display_name=_bounded_text(display_name or username, "username", 254),
+            display_name=_bounded_text(
+                display_name or username, "display_name", 120
+            ),
             role=role,
             portal_ids=tuple(dict.fromkeys(portal_ids)),
             password_hash=_password(password, role=role),

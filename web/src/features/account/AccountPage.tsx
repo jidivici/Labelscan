@@ -9,9 +9,11 @@ function errorMessage(cause: unknown): string {
 }
 
 function hasPrivilegedPasswordPolicy(value: string): boolean {
-  return value.length >= 8
+  return value.length >= 12
     && /[A-Z]/.test(value)
-    && /[^A-Za-z0-9]/.test(value);
+    && /[a-z]/.test(value)
+    && /\d/.test(value)
+    && /[^\p{Alphabetic}\p{Number}]/u.test(value);
 }
 
 export function AccountPage() {
@@ -22,7 +24,7 @@ export function AccountPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const privileged = session?.user.role === 'admin' || session?.user.role === 'super_admin';
-  const validPassword = privileged ? hasPrivilegedPasswordPolicy(newPassword) : newPassword.length > 0;
+  const validPassword = privileged ? hasPrivilegedPasswordPolicy(newPassword) : newPassword.length >= 12;
   const valid = currentPassword.length > 0
     && validPassword
     && newPassword === confirmation;
@@ -49,8 +51,8 @@ export function AccountPage() {
     <IdentityPanel title="Changer mon mot de passe" description="Votre mot de passe actuel est obligatoire. Vous devrez ensuite vous reconnecter.">
       <form className="account-password-form" onSubmit={(event) => void submit(event)}>
         <PasswordField label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" />
-        <PasswordField label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} minLength={1} hint={privileged ? '8 caractères minimum, une majuscule et un caractère spécial.' : undefined} />
-        <PasswordField label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={1} />
+        <PasswordField label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} minLength={12} hint={privileged ? '12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.' : '12 caractères minimum.'} />
+        <PasswordField label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={12} />
         {confirmation && confirmation !== newPassword ? <small className="field-error">Les mots de passe ne correspondent pas.</small> : null}
         <button className="button primary" disabled={saving || !valid}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
       </form>

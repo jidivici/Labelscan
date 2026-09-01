@@ -7,7 +7,9 @@ including `status` ('registered' | 'flagged').
 
 from __future__ import annotations
 
+import unicodedata
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel
@@ -25,6 +27,34 @@ from labelscan.platform.http.read_models import AuditEntry, audit_entries
 from labelscan.platform.http.security import Principal, require_scope
 
 router = APIRouter()
+
+_BIDI_CONTROL_CLASSES = frozenset(
+    {"RLE", "LRE", "RLO", "LRO", "PDF", "RLI", "LRI", "FSI", "PDI"}
+)
+_CANONICAL_UUID_PATTERN = (
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+
+
+def _parse_canonical_uuid(value: object) -> UUID:
+    if isinstance(value, UUID):
+        return value
+    if not isinstance(value, str):
+        raise ValueError("batch_id must be a canonical UUID string")
+    normalized = unicodedata.normalize("NFC", value)
+    if normalized != value or any(
+        unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+        or unicodedata.bidirectional(character) in _BIDI_CONTROL_CLASSES
+        for character in value
+    ):
+        raise ValueError("batch_id must be a canonical UUID string")
+    try:
+        parsed = UUID(value)
+    except ValueError as exc:
+        raise ValueError("batch_id must be a canonical UUID string") from exc
+    if value != str(parsed):
+        raise ValueError("batch_id must use canonical lowercase UUID form")
+    return parsed
 
 
 def _organization_id(conn, principal: Principal) -> str:
@@ -71,10 +101,13 @@ class BatchView(BaseModel):
 @router.get("/v1/batches/{batch_id}", response_model=BatchView)
 def get_batch(
     request: Request,
-    batch_id: str = Path(min_length=1, max_length=128),
+    batch_id: str = Path(min_length=36, max_length=36, pattern=_CANONICAL_UUID_PATTERN),
     principal: Principal = Depends(require_scope("traceability:read")),
     engine: Engine = Depends(get_engine),
 ) -> BatchView:
+    if request.query_params:
+        raise ApiError("VALIDATION_ERROR", "this endpoint accepts no query parameters")
+    batch_id_text = str(_parse_canonical_uuid(batch_id))
     with engine.connect() as c:
         organization_id = _organization_id(c, principal)
         set_tenant_context(c, organization_id)
@@ -97,7 +130,7 @@ def get_batch(
                     "WHERE b.id = :id AND " + scope
                 ),
                 {
-                    "id": batch_id,
+                    "id": batch_id_text,
                     **scope_params,
                 },
             )
@@ -105,7 +138,7 @@ def get_batch(
             .first()
         )
         if row is None:
-            raise ApiError("NOT_FOUND", f"batch {batch_id} not found")
+            raise ApiError("NOT_FOUND", f"batch {batch_id_text} not found")
         alerts = (
             c.execute(
                 text(
@@ -113,11 +146,11 @@ def get_batch(
                     "created_at::text AS created_at, updated_at::text AS updated_at "
                     "FROM haccp.alert WHERE batch_id = :id ORDER BY created_at"
                 ),
-                {"id": batch_id},
+                {"id": batch_id_text},
             )
             .mappings()
             .all()
         )
-        audit = audit_entries(c, batch_id)
+        audit = audit_entries(c, batch_id_text)
 
     return BatchView(**row, alerts=[BatchAlert(**a) for a in alerts], audit=audit)

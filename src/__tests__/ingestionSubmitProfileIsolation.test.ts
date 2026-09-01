@@ -12,6 +12,21 @@ jest.mock('../services/outbox', () => ({
   operationMatchesOperatorContext: jest.fn(() => true),
 }));
 
+jest.mock('../services/authStorage', () => ({
+  captureActiveSession: jest.fn(async () => ({
+    generation: 1,
+    scopeKey: 'org-a:actor-a:portal-a:poissonnerie',
+    signal: new AbortController().signal,
+  })),
+  getOperatorContext: jest.fn(async () => ({
+    organizationId: 'org-a',
+    actorId: 'actor-a',
+    businessPortalId: 'portal-a',
+    tradeCode: 'poissonnerie',
+  })),
+  isSessionFenceCurrent: jest.fn(() => true),
+}));
+
 import { createIngestion } from '../services/api';
 import { markInFlight, markSucceeded } from '../services/outbox';
 import { executeCreateIngestionOp } from '../services/ingestionSubmit';
@@ -68,7 +83,11 @@ describe('ingestion portal isolation', () => {
         barcode_raw: '0123456789012',
         client_captured_at: '2026-08-04T08:00:00Z',
       },
-      { idempotencyKey: 'idem-1', correlationId: 'corr-1' },
+      expect.objectContaining({
+        idempotencyKey: 'idem-1',
+        correlationId: 'corr-1',
+        signal: expect.any(AbortSignal),
+      }),
     );
     expect(createIngestionMock.mock.calls[0][1]).not.toHaveProperty('business_portal_id');
     expect(createIngestionMock.mock.calls[0][1]).not.toHaveProperty('trade_code');

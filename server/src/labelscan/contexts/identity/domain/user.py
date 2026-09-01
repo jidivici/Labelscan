@@ -7,6 +7,7 @@ or a JWT.
 
 from __future__ import annotations
 
+import unicodedata
 from dataclasses import dataclass
 
 SUPER_ADMIN_ROLE = "super_admin"
@@ -55,6 +56,23 @@ _ROLE_SCOPES: dict[str, frozenset[str]] = {
     ADMIN_ROLE: ADMIN_SCOPES,
     MANAGER_ROLE: MANAGER_SCOPES,
 }
+
+
+def normalize_identity_text(value: str, *, field: str, maximum: int) -> str:
+    """Canonicalize a human identity label and reject spoofing characters."""
+
+    normalized = unicodedata.normalize("NFC", value)
+    if any(
+        unicodedata.category(character) in {"Cc", "Cf", "Cs"}
+        for character in normalized
+    ):
+        raise ValueError(f"{field} contains control or direction characters")
+    normalized = " ".join(normalized.split())
+    if not normalized:
+        raise ValueError(f"{field} must not be blank")
+    if len(normalized) > maximum:
+        raise ValueError(f"{field} must be at most {maximum} characters")
+    return normalized
 
 
 def scopes_for_role(role: str) -> frozenset[str]:

@@ -1,370 +1,272 @@
-# LabelScan Server — PG-0 → PG-6
+# LabelScan server
 
-This is the backend modular monolith for the HACCP seafood traceability system.
-**Phase-groups PG-0 … PG-6 are built here** (historical plan:
-`docs/archive/IMPLEMENTATION-PLAN.md`):
+The LabelScan server turns a mobile label capture into a durable, reviewable, and auditable
+traceability record. It serves the FastAPI API and React back office, coordinates OCR/LLM
+workers through a transactional outbox, and stores business state in PostgreSQL.
 
-- **PG-0** — project structure + dependency-boundary enforcement (G-ARCH).
-- **PG-1** — PostgreSQL append-only + audit foundations, installed **before any
-  row-writer exists** so the data-integrity SLO (SLO-3) cannot be violated by
-  code that doesn't exist yet.
-- **PG-2** — the durable ingestion writer (raw payload persisted before ack,
-  content-hash idempotency).
-- **PG-3** — the transactional outbox + relay worker: the boundary that keeps
-  ingestion and extraction strictly decoupled.
-- **PG-4** — the extraction consumer (OCR/LLM via ports), the no-fabrication
-  validation gate, and append-only `extraction_run` / `extracted_field`.
-- **PG-5** — the traceability + HACCP domain: products/suppliers/batches, the
-  control-plan rules engine, alerts, consuming validated extractions, and the
-  provider-failure retry limit → FAILED runs.
-- **PG-6** — the HTTP adapters: the SubmitCapture write (`POST /v1/ingestions`)
-  and the read-only query endpoints (`GET /v1/ingestions/{id}`,
-  `/v1/extraction-runs/{id}`, `/v1/batches/{id}`, `/v1/alerts`), all with
-  problem+json errors per BACKEND §5.2.
+This guide is for backend developers and operators working on the server itself. For the
+shortest full-project setup, start with the [project README](../README.md). For public
+environments, use the separate [deployment guide](../deploy/README.md).
 
-> Enterprise OIDC/SSO reste hors périmètre. L’isolation multi-organisation,
-> PostgreSQL RLS, les JWT tenantés et le stockage objet S3 compatible sont
-> implémentés pour les rôles locaux `super_admin`, `admin` et `manager`.
+## What the server is designed to enforce
 
-## User backoffice
+- **Raw before acknowledgement.** A capture receives HTTP `202` only after the image and
+  ingestion record are durable.
+- **No unsupported machine values.** Every non-null machine value needs evidence that
+  passes the configured structural checks; uncertain or inconsistent fields are routed to
+  human review. Evidence anchoring does not by itself prove semantic truth.
+- **Immutable history.** Raw artifacts, extraction runs, reviewed fields, and audit rows
+  are append-only. Database triggers reject mutation where immutability is required.
+- **Audited writes.** Writes to audited tables and their audit entries commit in the same
+  database transaction. Missing audit context causes those writes to fail.
+- **Bounded server-side replay.** Idempotent requests, committed provider artifacts, and
+  consumer deduplication prevent duplicate business records. A crash after a provider
+  responds but before its artifact commits can still repeat that billable call.
+- **Tenant-scoped application access.** JWT claims, repository filters, and business-portal
+  assignments constrain normal API access by organization and store. PostgreSQL adds
+  defense in depth only when the deployment uses a correctly restricted runtime role;
+  the managed-profile credential gap is tracked as OR-08 in the threat model.
 
-The API serves the authenticated LabelScan web portal at
-`/backoffice/o/{organization_slug}/`. It uses the same-origin tenant login,
-`/v1/users`, and
-`/v1/stores` routes plus the store-scoped `/v1/arrivals` feed.
-It keeps the bearer token in session storage until expiry, so reloads preserve
-the session without surviving a browser restart. Administrators manage accounts
-and stores; managers see only registered products captured for their assigned
-portal/store, searchable by product, lot, GTIN or supplier and filterable by date.
+## From capture to catalogue
 
-In local Docker Compose, open
-[http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
-`LABELSCAN_STATIC_DIR` can override the static asset directory when the server
-is packaged outside the repository or Docker image.
+```text
+POST /v1/ingestions
+        │
+        ├── store original image and ingestion
+        └── append ingestion.raw_stored to the outbox
+                         │
+                         ▼
+                 background worker
+        GS1 reconciliation → OCR → quality gate → LLM
+                         │
+                         ▼
+              append extraction run + fields
+                         │
+               human review when required
+                         │
+                         ▼
+       append reviewed run → update catalogue projection
+```
 
-Provision or reset the initial administrator from the values in `server/.env`:
+External OCR and LLM calls never happen in the ingestion request. After a normalized
+provider artifact commits, later delivery retries reuse it. A crash between a provider
+response and that commit can repeat the billable call. A failed provider is retried up to
+the configured limit and then recorded as a failed extraction rather than looping forever.
+
+### External API capacity
+
+Every real Google Vision and Anthropic call is measured at the SDK boundary. Each worker
+logs an `external_api_metrics` JSON event once per minute with `requests_total`, success /
+failure / rate-limited totals, requests in the last second, in-flight calls, latency average
+and maximum, and its `configured_rps`. Configure `LABELSCAN_GOOGLE_VISION_RPS` and
+`LABELSCAN_ANTHROPIC_RPS` per worker. With two workers, set each value to at most half of
+the account quota; these process-local limits deliberately do not pretend to be a shared
+multi-worker quota.
+
+## Code organization
+
+The backend is a Python 3.11+ modular monolith. The production image currently uses
+Python 3.13. Each business context follows inward-facing
+hexagonal dependencies: adapters may depend on application services and the domain, while
+the domain remains free of FastAPI, SQLAlchemy, and provider SDKs.
+
+```text
+server/
+├── src/labelscan/
+│   ├── app/                    # application composition and process entry points
+│   ├── contexts/               # domain, application, and adapter code by business area
+│   │   ├── identity/           # users, sessions, stores, and portal access
+│   │   ├── ingestion/          # captures, extraction, and human review
+│   │   ├── traceability/       # arrivals, products, suppliers, and batches
+│   │   ├── haccp/              # control plans, readings, and alerts
+│   │   ├── compliance/         # reserved boundary for future governed rules
+│   │   └── audit/              # audit context boundary
+│   └── platform/               # database, HTTP, storage, outbox, and observability
+├── migrations/                 # Alembic migrations; executable data-model history
+├── scripts/                    # local validation, demo seed, calibration, and operations
+├── tests/                      # unit, integration, security, and contract tests
+└── pyproject.toml              # Python dependencies and lint/test configuration
+```
+
+Import Linter enforces both context independence and the
+`adapters → application → domain` direction. Cross-context workflows exchange IDs and
+outbox events instead of importing another context’s implementation.
+
+## Run the complete local stack
+
+From the repository root:
 
 ```bash
-docker compose up -d --build
-docker compose exec server python -m labelscan.contexts.identity.adapters.cli
+cp server/.env.example server/.env
+cp server/demo/credentials.example.json server/demo/credentials.local.json
+docker compose --env-file server/.env up --build
 ```
 
-## Layout (schema-per-context, hexagonal layers)
+Before starting, replace the placeholder passwords, JWT secret, and provider keys in the
+two local files. Compose uses `server/.env` for variable substitution and container
+configuration, then:
 
-```
-server/
-  src/labelscan/
-    contexts/<ctx>/{domain,application,adapters}   # 6 bounded contexts, empty skeletons
-    platform/db/                                   # engine + transaction-local audit context
-    app/                                           # composition root (later)
-  migrations/versions/                             # Alembic: 0001 schemas+role, 0002 foundations
-  tests/                                           # the three PG-1 proofs
-  .importlinter                                    # G-ARCH contracts
-  scripts/run_local_proofs.sh                      # ephemeral PG + migrate + G-ARCH + proofs
-```
+1. starts PostgreSQL 16 on `127.0.0.1:5432`;
+2. applies all Alembic migrations;
+3. seeds the demo in an idempotent one-shot service;
+4. serves the API and compiled back office on port `8000`;
+5. runs two extraction workers.
 
-## PG-0 — dependency boundaries (G-ARCH)
+The back office is available at
+[http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
+The seeded usernames are listed in `server/demo/credentials.example.json`; their real local
+passwords come only from the ignored `credentials.local.json` file.
 
-`.importlinter` encodes the dependency-direction law (ARCHITECTURE §5) and CI
-fails on any violation:
+## Work on the backend without the full stack
 
-1. **Layering** — within every context: `adapters → application → domain` (never the reverse).
-2. **Context independence** — the 6 bounded contexts may not import one another (integrate via events/IDs only).
-3. **Domain purity** — `*.domain` may import nothing framework/DB/provider/platform (`sqlalchemy`, `alembic`, `psycopg`, `fastapi`, `httpx`, `pydantic`, `labelscan.platform`, `labelscan.app`).
-4. **Application purity** — `*.application` may use its own domain + ports, but no frameworks/DB/providers.
+Create a Python environment using Python 3.11 or newer, then install the server in editable
+mode:
 
-Run: `lint-imports` (requires `include_external_packages = True`, already set).
-
-## PG-1 — append-only + audit foundations
-
-### Immutability (cannot be mutated)
-`platform.deny_mutation()` is attached `BEFORE UPDATE OR DELETE` (row-level,
-propagated to all partitions) and `BEFORE TRUNCATE` (statement-level) on the
-three append-only tables: `ingestion.raw_artifact`, `haccp.temperature_log`,
-`audit.audit_log`. The trigger RAISEs for **every** principal — including the
-table owner and superuser — so historical records are immutable regardless of
-privilege. The app role additionally has UPDATE/DELETE/TRUNCATE **revoked**
-(defence in depth).
-
-### Audit (same-transaction, cannot be bypassed or forged)
-`platform.audit_on_insert()` is an `AFTER INSERT` `SECURITY DEFINER` trigger on
-the audited business tables. It writes **exactly one** `audit.audit_log` row in
-the **same transaction**, reading `actor_id`/`action`/`correlation_id`/`trace_id`
-from transaction-local settings (`set_config(..., is_local => true)`, see
-`platform/db/audit_context.py`). If that context is missing it **RAISEs**,
-aborting the insert.
-
-**Design decision (and trade-off).** Audit is enforced at the **database**, not
-only in application code. App-level "co-commit" (the AuditLogPort pattern in
-BACKEND §3.4) can be bypassed by any direct SQL write; a DB trigger cannot.
-- *Gained:* audit is structurally unbypassable, and unforgeable — the app role
-  has **no** direct INSERT on `audit_log`; entries exist only via the
-  `SECURITY DEFINER` trigger.
-- *Given up:* the trigger writes a minimal entry (actor/action/subject/ids). The
-  application layer (later PGs) still sets the context and may enrich audit with
-  before/after snapshot refs on top of this floor. This is consistent with
-  ADR-0004 (append-only audit); it strengthens the unbypassability guarantee.
-
-### Partitioning, roles, idempotency anchor
-- The three append-only tables are `PARTITION BY RANGE` on their server timestamp
-  (monthly + a DEFAULT partition). The audit trigger records the **logical
-  parent** table name (via `pg_partition_root`), never the physical partition.
-- `labelscan_app` is the least-privilege runtime role (tests assume it via `SET ROLE`);
-  production migrations verify it is neither superuser, `BYPASSRLS`, nor owner of
-  application objects. Table ownership stays with the separate migration role.
-- `ingestion.raw_artifact` has a content-addressed unique index
-  `(ingestion_id, artifact_kind, checksum_sha256, occurred_at)` — the idempotency
-  anchor so a duplicate submit never double-appends (used in PG-2).
-- `platform.{idempotency_key, outbox, processed_event}` are **mutable** working
-  tables (state transitions) — deliberately not append-only.
-
-## PG-2 — durable ingestion writer
-
-The internal ingestion entrypoint is the `SubmitIngestion` use case
-(`contexts/ingestion/application/`), wired to adapters by `app/ingestion_factory.py`.
-There is **no public HTTP API** yet — "internal only" means the use case is
-invoked directly; the HTTP binding is PG-6.
-
-Durability contract (`submit_ingestion.py`):
-1. hash the payload (sha256);
-2. **persist the raw bytes durably first** — `FilesystemRawStore` writes to a
-   temp file, `fsync`s it, atomically renames, and `fsync`s the directory, so the
-   bytes survive a crash before any DB row exists (the prod adapter is an
-   object store with the same contract);
-3. record `ingestion.ingestion` + `ingestion.raw_artifact` in **one audited
-   transaction** (the audit context is set first, or the trigger rejects it);
-4. return **202 only after commit**.
-
-Idempotency is keyed on the **content hash** (scope = `principal:route:sha256`)
-via an atomic `INSERT … ON CONFLICT DO NOTHING` claim on `platform.idempotency_key`,
-with the ingestion id generated up front so a duplicate returns the existing id
-and writes nothing. `RawArtifact` is a separate aggregate from `Ingestion`, so
-`raw_artifact.ingestion_id` is a by-ID link (no FK) — keeping raw immutability
-independent of the mutable ingestion lifecycle (ARCHITECTURE §7.2).
-
-### Precondition — SECURITY DEFINER hardening (migration 0003)
-- `platform.audit_on_insert` is re-owned by **`labelscan_auditor`**, a NOLOGIN
-  non-superuser role whose only privileges are USAGE on `audit` + INSERT on
-  `audit_log` (minimal definer role).
-- `SET search_path = ''` on both trigger functions (closes search-path capture).
-- Strict context validation: `actor_id` must be a valid uuid and the text fields
-  are length-bounded, so a malformed/garbage audit actor can never be recorded.
-
-## PG-3 — transactional outbox + relay worker
-
-The outbox (`platform.outbox`) and consumer-dedup (`platform.processed_event`)
-tables were created in PG-1; PG-3 wires the pattern:
-
-- **Atomic enqueue.** `SqlIngestionRepository.persist` inserts the
-  `ingestion.raw_stored` event into `platform.outbox` **in the same transaction**
-  as the ingestion + raw_artifact writes (only on a genuine create — a replay
-  enqueues nothing). The event therefore exists if and only if the ingestion
-  committed: no lost events, no phantom events.
-- **Relay worker** (`platform/outbox/worker.py`). Claims one unpublished row at a
-  time with `FOR UPDATE SKIP LOCKED` (safe for multiple workers), runs the
-  registered consumers, marks it published — **one transaction per row**. It only
-  claims event types it has a handler for.
-- **At-least-once + idempotent consumers.** A crash before commit rolls the row
-  back to unpublished → retried. Each `(consumer, event_id)` is recorded in
-  `platform.processed_event`; a redelivered event a consumer already handled is
-  skipped → no duplicate side-effects.
-- **Strict decoupling.** Producers only ever INSERT an outbox row; the worker is
-  the only reader. Consumers are registered by the **app layer** composition
-  root, so the relay (platform) imports no context and the ingestion context
-  imports no worker — enforced by the G-ARCH `ingestion-decoupled-from-worker`
-  contract. **Ingestion cannot call extraction**, by construction.
-
-PG-3 registers **no consumers** (no extraction, no provider calls — that is PG-4);
-`app/worker_runtime.py` builds the worker and a `poll_forever` loop, ready for
-later phases to `worker.register("ingestion.raw_stored", "extraction", ...)`.
-
-## PG-4 — extraction + validation gates
-
-The extraction consumer (`contexts/ingestion/adapters/extraction_consumer.py`) is
-registered onto the relay for `ingestion.raw_stored` by the app composition root
-(`app/extraction_wiring.py`). It never imports the relay's concrete types (it
-duck-types the message via a local Protocol), so the `ingestion-decoupled-from-worker`
-contract still holds.
-
-Per event it: loads the image → runs OCR → runs the LLM → runs the **domain gate**
-→ persists. The transaction model is what delivers the guarantees:
-
-- **External-call dedup.** OCR and LLM each run in their **own** committed
-  transaction and store the raw provider output as an immutable `raw_artifact`
-  (`ocr_json` / `llm_output`). The existence of that artifact is the guard: on a
-  retry the artifact is already there, so the provider is **not called again**.
-- **Idempotent consumer.** The persist step (run + fields + status) runs on the
-  **worker's** connection, committing atomically with the worker's
-  `processed_event` + `published` marks. A committed event is never reprocessed; a
-  crash before commit rolls the persist back, so a retry produces **exactly one**
-  committed run.
-- **No fabrication (the trust boundary).** The pure `domain/extraction.py` gate
-  grounds every non-null value in the raw OCR text: a value whose evidence is not a
-  verbatim substring is **coerced to null** and flagged `EVIDENCE_NOT_IN_RAW_OCR`.
-  Each stored value carries **provenance** (`raw_artifact_id` + span page/offset),
-  enforced by a DB CHECK (`value IS NULL OR provenance IS NOT NULL`).
-- **Validation gates → HITL.** Missing required fields, low confidence on a
-  required field, out-of-vocab / inconsistent values → outcome `needs_review`,
-  status `needs_review` (the review queue). **No silent acceptance** — any defect
-  routes to review.
-- **Append-only, no overwrite.** `extraction_run` and `extracted_field` are
-  immutable (deny_mutation). A re-extraction is a NEW run (`attempt_no` increments);
-  prior runs are retained. The run is the audited unit; status transitions on
-  `ingestion.ingestion` are audited via an AFTER UPDATE trigger.
-
-Required-field rules are supplied as **data** (`RuleSet`, placeholder pending
-BLOCKER B2 — Compliance owns the real set); the gate never hard-codes regulatory
-truth. The default LLM adapter is **Claude** (`claude-haiku-4-5`, structured
-outputs); `claude-opus-4-8` is the off-by-default escalation tier. It is wired
-but not exercised by the proof suite (which uses deterministic fakes — no
-key/network/spend). Structured output guarantees the *shape*; the gate still
-independently enforces *truth*.
-
-## PG-5 — traceability + HACCP domain
-
-The domain-truth layer consumes **validated** extractions and is fully
-event-driven, so contexts never import one another (verified by G-ARCH
-context-independence):
-
-```
-ingestion.raw_stored ─▶ [ingestion] extraction ─▶ extraction.completed
-extraction.completed ─▶ [traceability] register/flag ─▶ batch.registered | batch.flagged
-batch.registered|flagged ─▶ [haccp] expiry CCP / inconsistency alert
+```bash
+cd server
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[dev]"
 ```
 
-- **Traceability** (`contexts/traceability`): on `extraction.completed` with
-  outcome `extracted`, runs the domain consistency check (dates, controlled
-  vocab, supplier mismatch) and either registers the chain
-  (**product → supplier → batch → source extraction run → source ingestion → raw
-  artifact**, all append-only, all by-ID across contexts) or records a **flagged**
-  batch — inconsistent data is never silently accepted or corrected. Emits
-  `batch.registered` / `batch.flagged`.
-- **HACCP** (`contexts/haccp`): the pure `domain/control.py` rules engine
-  evaluates CCPs against the active **control plan** (versioned, append-only;
-  thresholds are Compliance-owned data, not fabricated). The alerting consumer
-  raises **expiry** alerts on `batch.registered` and **inconsistency** alerts on
-  `batch.flagged`; the temperature recorder logs an immutable reading and raises a
-  **temperature** alert on a CCP breach, atomically. Alerts are mutable
-  (open→acknowledged→resolved) and audited on insert *and* update.
-- **Failure handling:** the extraction consumer retries a failing provider up to
-  a limit, then records a **FAILED** `extraction_run` and consumes the event — so
-  there is no infinite retry loop (proven).
+Point `DATABASE_URL` at a PostgreSQL 16 database before applying migrations or running
+integration tests:
 
-All new records (product/supplier/batch/control_plan) are append-only +
-immutable; only the alert lifecycle mutates. Required-field rules and control-plan
-thresholds are **data** (placeholders pending Compliance — BLOCKER B2), never
-hard-coded regulatory truth.
+```bash
+export DATABASE_URL="postgresql+psycopg://postgres@127.0.0.1:5432/labelscan_test"
+alembic upgrade head
+lint-imports
+ruff check .
+pytest
+```
 
-## PG-6 — HTTP adapter (SubmitCapture exposure)
-
-`POST /v1/ingestions` (`contexts/ingestion/adapters/http/router.py`) is a thin
-adapter over the existing `SubmitIngestion` use case — **no business logic, no new
-behaviour**:
-
-- **Transport validation** at the edge: required `Idempotency-Key` header
-  (→ `VALIDATION_ERROR`), accepted media type (→ `UNSUPPORTED_MEDIA_TYPE`), size
-  (→ `PAYLOAD_TOO_LARGE`).
-- **Audit context established before the use case**: the adapter populates
-  `actor_id` (from the authenticated principal) and `correlation_id`/`trace_id`
-  (from the correlation middleware) into the command; the use case's repository
-  then sets them transactionally, so no audited write runs without context.
-- **Raw-before-ack**: returns **202 only after** the use case commits (the use
-  case stores raw durably + enqueues the outbox in one transaction first).
-- **Idempotency**: required header; an idempotent replay returns the stored 202
-  with `Idempotency-Replayed: true`. (Dedup itself is content-addressed in the
-  repository — a carried PG-2 decision; the header is required and surfaced.)
-- **Does not** call any provider and **does not** touch the outbox directly — it
-  only invokes the use case.
-- **Errors** are RFC 9457 `application/problem+json` with the stable
-  `error_code` catalog (`platform/http/errors.py`, BACKEND §5.2) +
-  `correlation_id`/`trace_id`.
-
-Auth is the BACKEND §6 seam: `platform/http/security.py` verifies the Bearer JWT
-and enforces a per-endpoint scope (fail-closed: `UNAUTHENTICATED` /
-`FORBIDDEN`). Trusted gateway headers remain optional and off by default.
-OIDC validation is a future adapter replacement for `resolve_principal`. Build
-the app with `labelscan.app.http_app:create_app`.
-
-### Read-only query endpoints
-
-`GET /v1/ingestions/{id}` · `/v1/extraction-runs/{id}` · `/v1/batches/{id}` ·
-`/v1/alerts` are a pure query adapter — **no writes, no domain logic, read
-connections only** — returning read models that reflect exactly what is stored:
-
-- **Append-only fidelity:** `GET /v1/ingestions/{id}` returns **all** extraction
-  runs (a re-extraction is a new run, never an overwrite), with the latest marked
-  `is_latest` (a derived read projection, not a mutation).
-- **Provenance:** each extracted field on `GET /v1/extraction-runs/{id}` carries
-  its stored `provenance` (`raw_artifact_id` + spans) and `validation_status`
-  verbatim — nothing is reconstructed or "fixed".
-- **Audit metadata:** every resource view includes its audit entries
-  (`actor_id`, `action`, `occurred_at`) read from the append-only audit log.
-- **Status fields** are returned as-is (`ingestion.status`, `extraction_run.outcome`,
-  `batch.status`, `alert.state`). `GET /v1/alerts` is filterable + paginated, each
-  item joined to its latest audit entry via a single lateral join (no N+1).
-
-Scopes: `ingestion:read` (ingestions/runs), `catalog:read` (store arrivals),
-`traceability:read` (batch detail), `haccp:read` (alerts). Read endpoints use
-read scopes and never the write scope.
-
-### Alert lifecycle endpoints
-
-`POST /v1/alerts/{id}/acknowledge` · `POST /v1/alerts/{id}/resolve` are thin
-adapters that call the application service **only** — no transition logic in the
-adapter:
-
-- **State machine in the domain** (`contexts/haccp/domain/alert.py`):
-  `open → acknowledged → resolved` (resolve may also go directly from `open`). The
-  adapter and repository never decide a transition; they apply the domain's
-  decision.
-- **Atomic + audited:** the SQL repository locks the row (`FOR UPDATE`), runs the
-  domain rule, sets the audit context, and `UPDATE`s — the alert's AFTER UPDATE
-  audit trigger **co-commits** the audit row in the same transaction.
-- **Invalid transitions rejected:** `InvalidAlertTransition` → `409
-  ALERT_INVALID_TRANSITION`, the transaction rolls back, **no state change and no
-  audit row** for the rejected attempt. Unknown id → `404`.
-- Scopes: `alert:ack` / `alert:resolve` (the `supervisor` role).
-
-## Running it
-
-Local (spins up an ephemeral PG-16, migrates, runs G-ARCH + the proofs, cleans up):
+For the repository’s repeatable backend validation, run this command from the project
+root instead:
 
 ```bash
 bash server/scripts/run_local_proofs.sh
 ```
 
-CI: `.github/workflows/backend-ci.yml` runs G-ARCH, ruff, migrate up → **down to base → up** (reversibility), then the proofs against a `postgres:16` service.
+It creates a temporary PostgreSQL environment, migrates from a clean database, checks the
+dependency boundaries, executes the backend test suite, and cleans up afterward. On macOS,
+the script expects Homebrew’s PostgreSQL 16 binaries by default; set `PG_BIN` when they live
+somewhere else. It also installs editable development dependencies into the active Python
+environment and binds PostgreSQL to port `54329` unless `PGPORT` overrides it. Run it from
+a disposable virtual environment and choose a free port.
 
-Manual:
+## Back office and account roles
+
+The API serves the authenticated web portal at `/backoffice/o/{organization_slug}/`.
+The browser keeps its short-lived access token in memory and restores a session through a
+same-origin, `HttpOnly`, `SameSite=Strict` refresh cookie. The server rotates refresh
+sessions and validates their active family on authenticated requests.
+
+| Role | Intended access |
+|---|---|
+| `super_admin` | Organization-wide store, administrator, manager, and arrival management |
+| `admin` | Delegated administration within the stores and portals granted to the account |
+| `manager` | Browser access to assigned arrivals and the signed-in account, plus mobile capture and catalogue access for the assigned portal |
+
+To provision or reset the initial administrator from `server/.env`, run:
 
 ```bash
-cd server
-export DATABASE_URL="postgresql+psycopg://postgres@127.0.0.1:5432/labelscan_test"
-pip install -e ".[dev]"
-alembic upgrade head      # apply foundations
-lint-imports              # G-ARCH
-pytest -v                 # the three proofs
+docker compose --env-file server/.env up -d --build
+docker compose --env-file server/.env exec server \
+  python -m labelscan.contexts.identity.adapters.cli
 ```
 
-## The three proofs (map 1:1 to the PG-1 validation requirements)
+Open the back office afterward, create stores first, and then assign administrators and
+managers. Mobile login intentionally rejects administrator accounts because the app is an
+operator workflow rather than an administration surface.
 
-| File | Proves |
-|------|--------|
-| `tests/test_immutability.py` | UPDATE/DELETE/TRUNCATE fail at the DB level for owner (trigger) and app role (privilege + trigger), incl. on `audit_log`. → *mutation is impossible*. |
-| `tests/test_audit_same_transaction.py` | every audited INSERT yields exactly one matching audit row in the same tx; an insert with no audit context is rejected; the app role cannot insert audit rows directly. → *audit cannot be bypassed or forged*. |
-| `tests/test_rollback.py` | a transaction rollback removes the business row **and** its audit row together. |
-| `tests/test_ingestion_durability.py` | 202 only after the durable write; duplicate ingestion → no duplicate record; crash-before-ack → data present + idempotent retry; DB-fails-after-PUT → bytes not lost, no partial record; no ingestion write without audit context. |
-| `tests/test_secdef_hardening.py` | audit fn is SECURITY DEFINER owned by the minimal non-superuser role with `search_path=''`; a non-uuid actor is rejected. |
-| `tests/test_outbox_worker.py` | ingestion enqueues the outbox row atomically (and not on replay); a failed ingestion leaves no outbox row; worker crash → message retried; redelivery → no duplicate side-effect; crash mid-batch → unprocessed messages retained (no loss) and each processed exactly once. |
-| `tests/test_extraction_gate.py` | (pure domain) happy path → extracted with provenance; fabricated value coerced to null + flagged; missing required / low confidence / out-of-vocab / inconsistent dates → needs_review. |
-| `tests/test_extraction_consumer.py` | end-to-end: produces run + fields + provenance; duplicate event → no duplicate run/calls; crash-then-retry → exactly one run and no repeated external calls; invalid extraction → not marked valid (review queue, value nulled); re-extraction is a new append-only run and prior runs are immutable. |
-| `tests/test_haccp_rules.py` | (pure) temperature above-max/below-min/in-range; expiry passed/approaching/far. |
-| `tests/test_temperature_alerts.py` | temperature breach raises an alert + logs the reading; in-range logs but raises nothing. |
-| `tests/test_traceability_chain.py` | validated extraction → registered batch with a full queryable chain + expiry alert; supplier mismatch → flagged batch + inconsistency alert; batch is append-only. |
-| `tests/test_extraction_failure.py` | provider failure → FAILED run after the retry limit, event consumed, no infinite loop. |
-| `tests/test_ingestion_http.py` | 202 after durable write (row + outbox event present, no extraction_run); duplicate → 202 replay + `Idempotency-Replayed`; missing key → 400; bad media → 415; no auth → 401; missing scope → 403; all errors are problem+json with `error_code` + `correlation_id`. |
-| `tests/test_read_endpoints.py` | ingestion view returns all runs (1 latest) + raw artifacts + audit; run view returns field provenance (raw_artifact_id + spans) + status + audit; batch view returns chain + alerts + status + audit; alerts list filterable with per-item audit; unknown id → 404; read requires a read scope. |
-| `tests/test_alert_lifecycle.py` | open→acknowledged→resolved (and open→resolved) applied with co-committed audit; invalid transitions → 409 with no state change and no audit row; unknown id → 404; missing scope → 403. |
+## API guide
 
-All 69 pass against PostgreSQL 16. The STOP conditions ("if audit can be
-bypassed" / "if mutation is possible") are not reachable.
+The table below is an orientation map, not a substitute for the executable contract. Use
+the [API contracts](../docs/backend/API-CONTRACTS.md) and
+[OpenAPI specification](../docs/backend/openapi.v1.yaml) for request bodies, response
+schemas, scopes, and error codes.
+
+| Area | Representative endpoints | Purpose |
+|---|---|---|
+| Sessions | `/v1/auth/*`, `/v1/mobile/auth/*` | Browser and mobile login, refresh, and logout |
+| Identity | `/v1/stores`, `/v1/admins`, `/v1/managers` | Store and role-based account administration |
+| Capture | `POST /v1/ingestions` | Durably accept an authenticated image and queue extraction |
+| Review | `/v1/ingestions/{id}/fields/*`, `/confirm`, `/reviews` | Override fields or atomically finalize a complete review |
+| Processing status | `/v1/ingestions/{id}`, `/v1/extraction-runs/{id}` | Read extraction progress, fields, provenance, and audit history |
+| Catalogue | `/v1/professions`, `/v1/arrivals`, `/v1/arrivals/{id}` | Discover profiles and browse authorized arrivals |
+| Traceability and HACCP | `/v1/batches/{id}`, `/v1/alerts` | Read batch lineage and manage alert state |
+| Operations | `/v1/health/live`, `/v1/health/ready`, `/v1/version` | Process liveness, dependency readiness, and release identity |
+
+API errors use RFC 9457 `application/problem+json` with a stable `error_code`,
+`correlation_id`, and `trace_id`. Authenticated writes require the appropriate scope, and
+retryable mutation endpoints use an `Idempotency-Key` where the contract requires one.
+
+## Runtime configuration
+
+Copy [`server/.env.example`](.env.example) rather than building an environment file from
+this summary. The example includes defaults, limits, and production alternatives.
+
+| Group | Important variables | Context |
+|---|---|---|
+| Runtime | `LABELSCAN_ENV`, `LABELSCAN_DEPLOYMENT_TOPOLOGY`, `DATABASE_URL` or `DATABASE_URL_FILE` | Selects development/test/production behavior, the `managed` default or `single-vps` topology, and the PostgreSQL connection |
+| Authentication | `LABELSCAN_JWT_SECRET`, issuer, audience, access/refresh TTLs | Defines the token trust boundary; production requires explicit issuer and audience |
+| Providers | `LABELSCAN_OCR_PROVIDER`, Google Vision key, `ANTHROPIC_API_KEY`, LLM model options | Used only by workers; secret-file variants are preferred in production |
+| Storage | `LABELSCAN_OBJECT_STORE`, filesystem path, or `LABELSCAN_S3_*` | Filesystem is for local use; managed production requires private encrypted object storage |
+| Browser and proxy | `LABELSCAN_PUBLIC_ORIGIN`, `LABELSCAN_ALLOWED_HOSTS`, `LABELSCAN_TRUSTED_PROXIES` | Prevents foreign-origin login, host-header abuse, and untrusted forwarding data |
+| Abuse controls | `LABELSCAN_*_RATE_*`, ingestion burst/sustained limits, long-poll limits | Bounds login, mutation, upload, and polling traffic for the single-API runtime |
+| Extraction policy | OCR quality settings and confidence thresholds | Controls review routing; thresholds must be calibrated on labeled data rather than guessed |
+| Observability | `LABELSCAN_LOG_LEVEL`, `LABELSCAN_VERSION` | Configures structured logging and exposes the immutable release identity |
+
+Production startup performs additional validation. It rejects weak or missing secrets,
+untrusted host/proxy settings, header authentication, an invalid deployment topology, and
+database transport or object-storage settings inconsistent with that topology. Database
+role attributes and grants still require explicit live-environment validation before approval.
+
+## Persistence and audit model
+
+PostgreSQL is the business source of truth. Raw images live behind a storage port: the
+filesystem adapter supports local development and the explicitly documented single-VPS
+profile, while the managed production profile requires S3-compatible storage. Object
+checksums link stored bytes to immutable database artifacts.
+
+Business history is append-only where a changed fact must remain explainable. The
+processed-event deduplication ledger is insert-only for the runtime role. Mutable
+working tables—such as the outbox, sessions, and current catalogue projections—exist
+only where state transitions are operationally necessary.
+The rate limiter is separate process-local memory, not a PostgreSQL table. The
+[database reference](../docs/database/DATABASE.md) and Alembic migrations are authoritative
+for the exact schema and trigger behavior.
+
+## Verification strategy
+
+The test suite covers pure domain rules and PostgreSQL-backed guarantees, including:
+
+- append-only enforcement, same-transaction auditing, and rollback behavior;
+- ingestion durability, image validation, idempotency, and upload boundaries;
+- outbox concurrency, retries, dead letters, and worker liveness;
+- GS1 parsing, OCR quality, LLM reconciliation, provenance, and evidence-anchoring gates;
+- human review completeness and atomic catalogue publication;
+- authentication, session rotation, role permissions, rate limiting, and tenant isolation;
+- traceability chains, HACCP control-plan edges, and alert lifecycle transitions;
+- health/version endpoints, S3 behavior, and production runtime configuration.
+
+Avoid documenting a fixed test count here: the suite changes frequently, while the command
+and the guarantees above are the useful contract.
+
+## Production boundaries
+
+The current compliance ruleset is provisional and needs accountable product/legal
+approval. The API topology remains single-process because abuse and long-poll limits are
+process-local. The managed deployment profile still shares one database secret between
+migration and runtime roles, while the single-VPS profile needs external destination
+egress control and off-host backups. These and the mobile release blockers are prioritized
+in the [confirmed open-risk register](../docs/security/THREAT-MODEL.md#confirmed-open-risk-register).
+
+## Further reading
+
+- [Backend architecture](../docs/backend/BACKEND-ARCHITECTURE.md)
+- [Enterprise architecture](../docs/ENTERPRISE-ARCHITECTURE.md)
+- [Database reference](../docs/database/DATABASE.md)
+- [Pipeline architecture](../docs/pipeline/PIPELINE-ARCHITECTURE.md)
+- [Security architecture](../docs/security/SECURITY-ARCHITECTURE.md)
+- [SRE and reliability guide](../docs/operations/SRE-RELIABILITY.md)

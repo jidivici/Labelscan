@@ -36,7 +36,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getArticleById } from '../services/storage';
 import { Article, ArticleField } from '../types/Article';
 import { formatDateShort } from '../services/dates';
-import { fieldLabelFr, displayFieldValue } from '../services/fieldLabels';
+import {
+  fieldLabelFr,
+  displayFieldValue,
+  displayFinalFieldValue,
+} from '../services/fieldLabels';
 import { formatFaoDisplay } from '../services/faoDisplay';
 import { commonName } from '../services/articleGrouping';
 import {
@@ -48,6 +52,8 @@ import {
   parseTemp,
   formatTemp,
   validateTempRange,
+  isDateField,
+  toIsoDate,
 } from '../services/inputMasks';
 import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
 import { queryClient } from '../services/queryClient';
@@ -56,6 +62,17 @@ import { RotatedPhoto } from '../components/RotatedPhoto';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import { useAuth } from '../context/AuthContext';
+import { useAuthenticatedImageSource } from '../hooks/useAuthenticatedImageSource';
+import { catalogQueryKey } from '../services/catalogApi';
+import { operatorContextKey } from '../services/authStorage';
+import {
+  canonicalizeFinalReviewValue,
+  validateFinalReviewValues,
+} from '../services/finalReviewValidation';
+import {
+  normalizeFinalReviewValue,
+  NOT_COMMUNICATED_VALUE,
+} from '../services/fieldCompleteness';
 
 type DetailRoute = RouteProp<ArticlesStackParamList, 'ArticleDetail'>;
 type DetailNav = StackNavigationProp<ArticlesStackParamList, 'ArticleDetail'>;
@@ -64,6 +81,15 @@ type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 const DISMISS_DISTANCE = 112;
 const DISMISS_VELOCITY = 0.8;
 const DRAG_LIMIT = 280;
+
+function canonicalDetailDraft(fieldName: string, draft: string): string {
+  const normalized = normalizeFinalReviewValue(draft);
+  const canonicalDate =
+    normalized !== NOT_COMMUNICATED_VALUE && isDateField(fieldName)
+      ? toIsoDate(normalized)
+      : normalized;
+  return canonicalizeFinalReviewValue(fieldName, canonicalDate);
+}
 
 // A quiet leading icon per field — gives each row a modern, anchored look (and fills the
 // otherwise-bare list). Purely decorative; unknown fields fall back to a generic tag.
@@ -147,11 +173,15 @@ function groupFields(fields: ArticleField[], fieldGroups: readonly FieldGroup[])
   for (const group of fieldGroups) {
     const groupItems: ArticleField[] = [];
     for (const name of group.fields) {
-      const field = byName.get(name);
-      if (field) {
-        groupItems.push(field);
-        byName.delete(name);
-      }
+      const field = byName.get(name) ?? {
+        field_name: name,
+        value: null,
+        validation_status: 'missing' as const,
+        combined_confidence: 0,
+        confidence_band: 'low' as const,
+      };
+      groupItems.push(field);
+      byName.delete(name);
     }
     if (groupItems.length > 0) {
       groups.push({ id: group.id, title: group.title, fields: groupItems });
@@ -234,8 +264,7 @@ function FieldCard({
   last: boolean;
 }) {
   const name = field.field_name;
-  const display = displayFieldValue(name, field.value);
-  const isEmpty = display == null || display.length === 0;
+  const display = displayFinalFieldValue(name, field.value);
   // FAO: show the exact value, with the human "mer + sous-zone" summary as a quiet subtitle.
   const subtitle = name === 'FAO_area' && field.value ? formatFaoDisplay(field.value) : null;
   const showSubtitle = !!subtitle && subtitle !== field.value;
@@ -250,7 +279,7 @@ function FieldCard({
       <View style={styles.cardBody}>
         <Text style={[typography.labelSmall, styles.cardLabel]}>{fieldLabelFr(name)}</Text>
         {editable ? (
-          name === 'storage_temperature' ? (
+          name === 'storage_temperature' && normalizeFinalReviewValue(draft) !== NOT_COMMUNICATED_VALUE ? (
             <TempRangeEditor draft={draft} onChange={emit} />
           ) : (
             <TextInput
@@ -275,9 +304,9 @@ function FieldCard({
           <>
             <Text
               selectable
-              style={[typography.bodyLarge, styles.cardValue, isEmpty && styles.cardEmpty]}
+              style={[typography.bodyLarge, styles.cardValue, display === 'NC' && styles.cardEmpty]}
             >
-              {isEmpty ? 'Non renseigné' : display}
+              {display}
             </Text>
             {showSubtitle ? (
               <Text style={[typography.bodySmall, styles.cardSubtitle]}>{subtitle}</Text>
@@ -319,9 +348,23 @@ export function ArticleDetailScreen() {
   const navigation = useNavigation<DetailNav>();
   const route = useRoute<DetailRoute>();
   const { articleId } = route.params;
-  const { tradeCode } = useAuth();
+  const { organizationId, actorId, businessPortalId, tradeCode } = useAuth();
 
-  const [article, setArticle] = useState<Article | null>(null);
+  const currentScopeKey = useMemo(
+    () =>
+      organizationId && actorId && businessPortalId && tradeCode
+        ? operatorContextKey({ organizationId, actorId, businessPortalId, tradeCode })
+        : null,
+    [actorId, businessPortalId, organizationId, tradeCode],
+  );
+  const latestScopeKey = useRef(currentScopeKey);
+  latestScopeKey.current = currentScopeKey;
+
+  const [loadedArticle, setLoadedArticle] = useState<Article | null>(null);
+  const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
+  const article = loadedScopeKey === currentScopeKey ? loadedArticle : null;
+  const scopeLoading = currentScopeKey != null && loadedScopeKey !== currentScopeKey;
+  const photoSource = useAuthenticatedImageSource(article?.photo_uri);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -337,15 +380,34 @@ export function ArticleDetailScreen() {
 
   useEffect(() => {
     let active = true;
+    setLoadedArticle(null);
+    setLoadedScopeKey(null);
+    setEditing(false);
+    setDrafts({});
+    setViewerOpen(false);
+    if (!currentScopeKey) {
+      setLoading(false);
+      return () => {
+        active = false;
+      };
+    }
     (async () => {
       setLoading(true);
       setLoadError(false);
       try {
         const found = await getArticleById(articleId);
-        if (active) setArticle(found);
+        const belongsToScope =
+          found != null &&
+          found.business_portal_id === businessPortalId &&
+          found.trade_code === tradeCode;
+        if (active) {
+          setLoadedArticle(belongsToScope ? found : null);
+          setLoadedScopeKey(currentScopeKey);
+        }
       } catch {
         if (active) {
-          setArticle(null);
+          setLoadedArticle(null);
+          setLoadedScopeKey(currentScopeKey);
           setLoadError(true);
         }
       } finally {
@@ -355,7 +417,7 @@ export function ArticleDetailScreen() {
     return () => {
       active = false;
     };
-  }, [articleId, reloadNonce]);
+  }, [articleId, businessPortalId, currentScopeKey, reloadNonce, tradeCode]);
 
   useEffect(
     () => () => {
@@ -383,11 +445,10 @@ export function ArticleDetailScreen() {
   );
   const hasUnsavedChanges = useMemo(() => {
     if (!editing || !article) return false;
-    return article.fields.some((field) => {
-      if (!(field.field_name in drafts)) return false;
-      const raw = drafts[field.field_name].trim();
-      const draftValue = raw === '' ? null : raw;
-      return draftValue !== (field.value ?? null);
+    const stored = new Map(article.fields.map((field) => [field.field_name, field.value]));
+    return Object.entries(drafts).some(([fieldName, draft]) => {
+      const draftValue = canonicalDetailDraft(fieldName, draft);
+      return draftValue !== (stored.get(fieldName) ?? null);
     });
   }, [article, drafts, editing]);
 
@@ -491,33 +552,62 @@ export function ArticleDetailScreen() {
   }, []);
 
   const handleSave = useCallback(async () => {
-    if (!article || saving) return;
-    setSaving(true);
+    const requestedScopeKey = currentScopeKey;
+    if (!article || saving || !requestedScopeKey) return;
     setSaveError(null);
 
+    const stored = new Map(article.fields.map((field) => [field.field_name, field.value]));
     const changed: { field_name: string; value: string | null }[] = [];
-    for (const f of article.fields) {
-      if (!(f.field_name in drafts)) continue;
-      const raw = drafts[f.field_name].trim();
-      const value = raw === '' ? null : raw;
-      if (value === (f.value ?? null)) continue;
-      changed.push({ field_name: f.field_name, value });
+    const candidates: Record<string, string | null> = {};
+    for (const [fieldName, draft] of Object.entries(drafts)) {
+      const value = canonicalDetailDraft(fieldName, draft);
+      candidates[fieldName] = value;
+      if (value === (stored.get(fieldName) ?? null)) continue;
+      changed.push({ field_name: fieldName, value });
+    }
+
+    const validationErrors = validateFinalReviewValues(candidates);
+    if (validationErrors.length > 0) {
+      setSaveError(
+        validationErrors
+          .slice(0, 3)
+          .map((error) => `${fieldLabelFr(error.fieldName)} : ${error.message}`)
+          .join('\n'),
+      );
+      return;
     }
 
     if (changed.length === 0) {
       setEditing(false);
-      setSaving(false);
       return;
     }
 
+    setSaving(true);
     try {
       // The API remains authoritative: no confirmed field is written only to the phone.
       const result = await submitFieldOverrides({ ingestionId: article.ingestion_id, fields: changed });
-      await queryClient.invalidateQueries({ queryKey: ['catalog', 'arrivals'] });
+      if (latestScopeKey.current !== requestedScopeKey) return;
+      if (organizationId && actorId && businessPortalId && tradeCode) {
+        await queryClient.invalidateQueries({
+          queryKey: catalogQueryKey({ organizationId, actorId, businessPortalId, tradeCode }),
+        });
+      }
       if (result.pending === 0) {
         // The projection is asynchronous; reload from the API only when it has caught up.
         const refreshed = await getArticleById(article.id);
-        if (refreshed) setArticle(refreshed);
+        if (
+          latestScopeKey.current === requestedScopeKey &&
+          refreshed?.business_portal_id === businessPortalId &&
+          refreshed.trade_code === tradeCode
+        ) {
+          setLoadedArticle(refreshed);
+          setLoadedScopeKey(requestedScopeKey);
+        }
+      } else {
+        setSaveError(
+          `${result.pending} modification${result.pending > 1 ? 's' : ''} en attente de synchronisation. Les corrections restent ouvertes jusqu’à confirmation du serveur.`,
+        );
+        return;
       }
 
       setEditing(false);
@@ -526,13 +616,14 @@ export function ArticleDetailScreen() {
       if (savedFeedbackTimeout.current) clearTimeout(savedFeedbackTimeout.current);
       savedFeedbackTimeout.current = setTimeout(() => setJustSaved(false), 2600);
     } catch {
+      if (latestScopeKey.current !== requestedScopeKey) return;
       setSaveError('Impossible d’enregistrer pour le moment. Vérifiez votre connexion puis réessayez.');
     } finally {
-      setSaving(false);
+      if (latestScopeKey.current === requestedScopeKey) setSaving(false);
     }
-  }, [article, drafts, saving]);
+  }, [actorId, article, businessPortalId, currentScopeKey, drafts, organizationId, saving, tradeCode]);
 
-  if (loading) {
+  if (loading || scopeLoading) {
     return (
       <View style={styles.centered}>
         <ActivityIndicator size="large" color={colors.primary} />
@@ -572,7 +663,7 @@ export function ArticleDetailScreen() {
   const lot = article.fields.find((f) => f.field_name === 'batch_number');
   const fieldValue = (name: string) =>
     article.fields.find((field) => field.field_name === name)?.value?.trim() ?? '';
-  const productName = commonName(article) || 'Produit sans nom';
+  const productName = commonName(article) || 'NC';
   const scientificName = fieldValue('scientific_name');
   const producer = fieldValue('producer_name') || fieldValue('reseller_brand');
   const tradeDescription =
@@ -584,29 +675,43 @@ export function ArticleDetailScreen() {
             .join(' · ')
         : scientificName;
   const fao = fieldValue('FAO_area');
-  const productionMethod = displayFieldValue('production_method', fieldValue('production_method'));
+  const productionMethodRaw = displayFieldValue(
+    'production_method',
+    fieldValue('production_method'),
+  );
+  const productionMethod = displayFinalFieldValue(
+    'production_method',
+    fieldValue('production_method') || null,
+  );
   const origin = fieldValue('origin_country');
-  const expiryDate = displayFieldValue('expiry_date', fieldValue('expiry_date'));
+  const expiryDate = displayFinalFieldValue('expiry_date', fieldValue('expiry_date') || null);
   const explicitDescription = fieldValue('description') || fieldValue('product_description');
   const descriptionParts = [
     tradeDescription,
     producer,
-    productionMethod,
+    productionMethodRaw,
     origin ? `Origine ${origin}` : '',
   ].filter((value, index, values) => Boolean(value) && values.indexOf(value) === index);
-  const productDescription =
-    explicitDescription || descriptionParts.join(' · ') || 'Description non renseignée.';
+  const productDescription = explicitDescription || descriptionParts.join(' · ') || 'NC';
   const summaryFacts = [
     {
       icon: 'identifier' as IconName,
       label: 'N° DE LOT',
-      value: lot?.value?.trim() || 'Non renseigné',
+      value: displayFinalFieldValue('batch_number', lot?.value ?? null),
     },
-    expiryDate
-      ? { icon: 'calendar-alert' as IconName, label: 'DATE LIMITE', value: expiryDate }
+    { icon: 'calendar-alert' as IconName, label: 'DATE LIMITE', value: expiryDate },
+    {
+      icon: 'map-marker-outline' as IconName,
+      label: 'ORIGINE',
+      value: displayFinalFieldValue('origin_country', origin || null),
+    },
+    articleProfile.fields.includes('FAO_area')
+      ? {
+          icon: 'map-outline' as IconName,
+          label: 'ZONE FAO',
+          value: displayFinalFieldValue('FAO_area', fao || null),
+        }
       : null,
-    origin ? { icon: 'map-marker-outline' as IconName, label: 'ORIGINE', value: origin } : null,
-    fao ? { icon: 'map-outline' as IconName, label: 'ZONE FAO', value: fao } : null,
   ].filter((fact): fact is { icon: IconName; label: string; value: string } => fact !== null);
 
   return (
@@ -619,9 +724,9 @@ export function ArticleDetailScreen() {
       {...dismissPanResponder.panHandlers}
     >
       <PhotoViewerModal
-        visible={viewerOpen}
-        photoUri={article.photo_uri}
-        headers={article.photo_headers}
+        visible={viewerOpen && photoSource != null}
+        photoUri={photoSource?.uri}
+        headers={photoSource?.headers}
         halfTurn={article.photo_rotation_degrees === 180}
         baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
         onClose={() => setViewerOpen(false)}
@@ -649,6 +754,23 @@ export function ArticleDetailScreen() {
             <Text style={[typography.titleMedium, styles.topBarHeading]}>Fiche produit</Text>
           </View>
 
+          {!editing ? (
+            <Pressable
+              onPress={() => {
+                setSaveError(null);
+                setEditing(true);
+              }}
+              disabled={saving || !currentScopeKey}
+              hitSlop={8}
+              style={[styles.topBarButton, (saving || !currentScopeKey) && styles.saveBtnDisabled]}
+              accessibilityRole="button"
+              accessibilityLabel="Modifier la fiche"
+              accessibilityState={{ disabled: saving || !currentScopeKey }}
+            >
+              <MaterialCommunityIcons name="pencil-outline" size={20} color={colors.onSurface} />
+            </Pressable>
+          ) : null}
+
         </View>
       </View>
 
@@ -669,7 +791,7 @@ export function ArticleDetailScreen() {
           {/* A restrained product hero: the image, description and key facts form
               one readable unit before the exhaustive traceability record. */}
           <View style={styles.identityCard}>
-            {article.photo_uri ? (
+            {photoSource ? (
               <Pressable
                 onPress={() => setViewerOpen(true)}
                 style={styles.photoCard}
@@ -677,7 +799,7 @@ export function ArticleDetailScreen() {
                 accessibilityLabel="Voir la photo en plein écran"
               >
                 <RotatedPhoto
-                  source={{ uri: article.photo_uri, headers: article.photo_headers }}
+                  source={photoSource}
                   resizeMode="cover"
                   halfTurn={article.photo_rotation_degrees === 180}
                   baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
@@ -718,7 +840,7 @@ export function ArticleDetailScreen() {
                 </Text>
               </View>
 
-              {productionMethod ? (
+              {articleProfile.fields.includes('production_method') ? (
                 <View style={styles.summaryChip}>
                   <MaterialCommunityIcons name="sprout-outline" size={14} color={colors.primary} />
                   <Text style={[typography.labelMedium, styles.summaryChipText]}>
@@ -804,7 +926,10 @@ export function ArticleDetailScreen() {
                       key={field.field_name}
                       field={field}
                       editing={editing}
-                      draft={drafts[field.field_name] ?? ''}
+                      draft={
+                        drafts[field.field_name] ??
+                        displayFinalFieldValue(field.field_name, field.value)
+                      }
                       onChange={handleFieldChange}
                       last={index === group.fields.length - 1}
                     />

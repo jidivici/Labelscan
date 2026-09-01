@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+FIELD_CONTRACT_VERSION = "1"
+
 COMMON_FIELDS_V1 = (
     "commercial_designation",
     "producer_name",
@@ -35,6 +37,45 @@ class TradeProfile:
     @property
     def fields(self) -> tuple[str, ...]:
         return self.common_fields + self.specific_fields
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    kind: str = "text"
+    format: str | None = None
+    max_length: int = 512
+    enum: tuple[str, ...] = ()
+    units: tuple[str, ...] = ()
+    nullable: bool = True
+
+
+_DEFAULT_FIELD_SPEC = FieldSpec()
+FIELD_SPECS: dict[str, FieldSpec] = {
+    "expiry_date": FieldSpec(kind="date", format="YYYY-MM-DD", max_length=10),
+    "packaging_date": FieldSpec(kind="date", format="YYYY-MM-DD", max_length=10),
+    "preparation_date": FieldSpec(kind="date", format="YYYY-MM-DD", max_length=10),
+    "weight": FieldSpec(
+        kind="decimal_unit", format="decimal unit", max_length=32, units=("g", "kg")
+    ),
+    "storage_temperature": FieldSpec(
+        kind="temperature_range", format="celsius", max_length=40, units=("°C",)
+    ),
+    "production_method": FieldSpec(
+        kind="enum", max_length=32, enum=("wild_caught", "farmed")
+    ),
+    "gtin": FieldSpec(kind="gtin", format="GTIN-8/12/13/14", max_length=14),
+    "health_mark": FieldSpec(kind="health_mark", max_length=64),
+    "FAO_area": FieldSpec(kind="fao_area", max_length=120),
+    "origin_country": FieldSpec(kind="country", max_length=80),
+    "birth_country": FieldSpec(kind="country", max_length=80),
+    "rearing_country": FieldSpec(kind="country", max_length=80),
+    "slaughter_country": FieldSpec(kind="country", max_length=80),
+    "cutting_country": FieldSpec(kind="country", max_length=80),
+}
+
+
+def field_spec(name: str) -> FieldSpec:
+    return FIELD_SPECS.get(name, _DEFAULT_FIELD_SPEC)
 
 
 def _profiles(version: str, common_fields: tuple[str, ...]) -> dict[str, TradeProfile]:

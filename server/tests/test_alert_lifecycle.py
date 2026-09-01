@@ -33,6 +33,13 @@ def client(engine):
     return TestClient(app)
 
 
+@pytest.fixture
+def validation_client():
+    app = create_app()
+    app.dependency_overrides[get_alert_service] = lambda: object()
+    return TestClient(app)
+
+
 def _make_alert(engine, state="open") -> str:
     with engine.begin() as c:
         set_audit_context(
@@ -125,3 +132,31 @@ def test_requires_scope(client, engine):
     r = client.post(f"/v1/alerts/{aid}/acknowledge", headers=bearer("haccp:read"))
     assert r.status_code == 403
     assert r.json()["error_code"] == "FORBIDDEN"
+
+
+@pytest.mark.parametrize(
+    "alert_id",
+    [
+        str(uuid.uuid4()).upper(),
+        uuid.uuid4().hex,
+        f"{{{uuid.uuid4()}}}",
+        f"{uuid.uuid4()}\u202e",
+    ],
+)
+def test_alert_lifecycle_rejects_noncanonical_ids(validation_client, alert_id):
+    response = validation_client.post(
+        f"/v1/alerts/{alert_id}/acknowledge", headers=AUTH
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
+
+
+def test_alert_lifecycle_rejects_unknown_query_without_transition(validation_client):
+    alert_id = str(uuid.uuid4())
+    response = validation_client.post(
+        f"/v1/alerts/{alert_id}/acknowledge?unexpected=value", headers=AUTH
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"

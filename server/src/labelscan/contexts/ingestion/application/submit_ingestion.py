@@ -52,6 +52,8 @@ class SubmitIngestionCommand:
     business_portal_id: str | None = None
     trade_code_snapshot: str = "poissonnerie"
     trade_profile_version: str = "2"
+    sanitized_image_bytes: bytes | None = None
+    sanitized_content_type: str = "image/jpeg"
 
 
 @dataclass(frozen=True)
@@ -89,19 +91,33 @@ class SubmitIngestion:
         client_captured_at = validate_client_captured_at(cmd.client_captured_at)
         idempotency_key = validate_idempotency_key(cmd.idempotency_key, required=False)
 
-        checksum = hashlib.sha256(cmd.image_bytes).hexdigest()
+        original_checksum = hashlib.sha256(cmd.image_bytes).hexdigest()
 
-        # (2) DURABLE raw store FIRST — bytes are safe before any DB row exists.
-        storage_ref = self._raw_store.put(
+        # (2) DURABLE raw store FIRST — the exact source stays available for a
+        # restricted audit while OCR/display use only the decoded, metadata-free copy.
+        original_storage_ref = self._raw_store.put(
             cmd.image_bytes,
-            checksum=checksum,
+            checksum=original_checksum,
+            organization_id=cmd.organization_id,
+        )
+        safe_bytes = cmd.sanitized_image_bytes or cmd.image_bytes
+        safe_checksum = hashlib.sha256(safe_bytes).hexdigest()
+        safe_storage_ref = self._raw_store.put(
+            safe_bytes,
+            checksum=safe_checksum,
             organization_id=cmd.organization_id,
         )
 
         # (3) atomic, audited, idempotent DB write.
         result = self._repository.persist(
-            content_sha256=checksum,
-            storage_ref=storage_ref,
+            content_sha256=safe_checksum,
+            storage_ref=safe_storage_ref,
+            original_content_sha256=(
+                original_checksum if cmd.sanitized_image_bytes is not None else None
+            ),
+            original_storage_ref=(
+                original_storage_ref if cmd.sanitized_image_bytes is not None else None
+            ),
             barcode_raw=barcode_raw,
             client_captured_at=client_captured_at,
             store_code=cmd.store_code,

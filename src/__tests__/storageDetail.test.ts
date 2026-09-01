@@ -1,17 +1,23 @@
 import { getCatalogArticle } from '../services/catalogApi';
+import { getOperatorContext } from '../services/authStorage';
 import { queryClient } from '../services/queryClient';
 import { getArticleById } from '../services/storage';
 import type { Article } from '../types/Article';
 
 jest.mock('../services/catalogApi', () => ({
+  catalogQueryKey: jest.fn(() => ['catalog', 'arrivals', 'org-1', 'actor-1', 'portal-1', 'poissonnerie']),
   getCatalogArticle: jest.fn(),
   listCatalogArticles: jest.fn(),
+}));
+jest.mock('../services/authStorage', () => ({
+  getOperatorContext: jest.fn(),
 }));
 jest.mock('../services/queryClient', () => ({
   queryClient: { getQueryData: jest.fn() },
 }));
 
 const mockedGetCatalogArticle = getCatalogArticle as jest.MockedFunction<typeof getCatalogArticle>;
+const mockedGetOperatorContext = getOperatorContext as jest.MockedFunction<typeof getOperatorContext>;
 const mockedGetQueryData = queryClient.getQueryData as jest.Mock;
 
 function article(id: string, fields: Article['fields']): Article {
@@ -35,6 +41,12 @@ describe('getArticleById detail source', () => {
   beforeEach(() => {
     mockedGetCatalogArticle.mockReset();
     mockedGetQueryData.mockReset();
+    mockedGetOperatorContext.mockResolvedValue({
+      organizationId: 'org-1',
+      actorId: 'actor-1',
+      businessPortalId: 'portal-1',
+      tradeCode: 'poissonnerie',
+    });
   });
 
   it('prefers the full server detail over the cached catalogue summary', async () => {

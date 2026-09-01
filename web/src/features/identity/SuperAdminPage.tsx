@@ -19,6 +19,14 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'L’opération a échoué.';
 }
 
+function hasPrivilegedPasswordPolicy(value: string): boolean {
+  return value.length >= 12
+    && /[A-Z]/.test(value)
+    && /[a-z]/.test(value)
+    && /\d/.test(value)
+    && /[^\p{Alphabetic}\p{Number}]/u.test(value);
+}
+
 export function SuperAdminPage() {
   const { session } = useAuth();
   const [admins, setAdmins] = useState<IamUser[]>([]);
@@ -98,8 +106,8 @@ export function SuperAdminPage() {
     <IdentityPanel title="Nouvel administrateur" description="Le compte sera actif dès sa création.">
       <form className="identity-form" onSubmit={(event) => void submit(event)}>
         <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-        <PasswordField value={password} onChange={setPassword} minLength={8} hint="8 caractères minimum, une majuscule et un caractère spécial." />
-        <button className="button primary" disabled={saving || password.length < 8 || !/[A-Z]/.test(password) || !/[^A-Za-z0-9]/.test(password)}>{saving ? 'Création…' : 'Créer le compte'}</button>
+        <PasswordField value={password} onChange={setPassword} minLength={12} hint="12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial." />
+        <button className="button primary" disabled={saving || !hasPrivilegedPasswordPolicy(password)}>{saving ? 'Création…' : 'Créer le compte'}</button>
       </form>
     </IdentityPanel>
 

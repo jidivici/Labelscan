@@ -11,7 +11,11 @@ from __future__ import annotations
 
 from labelscan.contexts.identity.application.ports import UserRepository
 from labelscan.contexts.identity.domain.password import hash_password, verify_password
-from labelscan.contexts.identity.domain.user import AuthenticatedUser, scopes_for_role
+from labelscan.contexts.identity.domain.user import (
+    AuthenticatedUser,
+    normalize_identity_text,
+    scopes_for_role,
+)
 
 # A well-formed hash to verify against when no user is found, so the missing-user
 # path costs the same as the wrong-password path (no timing oracle).
@@ -29,6 +33,14 @@ class Login:
     def __call__(
         self, username: str, password: str, organization_slug: str = "labelscan"
     ) -> AuthenticatedUser:
+        try:
+            username = normalize_identity_text(
+                username, field="username", maximum=254
+            )
+        except ValueError:
+            # Keep malformed and unknown usernames on the same password-cost path.
+            verify_password(password, _DUMMY_HASH)
+            raise InvalidCredentials() from None
         try:
             user = self._users.find_active_by_username(username, organization_slug)
         except TypeError:

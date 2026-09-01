@@ -1,380 +1,528 @@
-# LabelScan — Application mobile (Expo / React Native)
+# LabelScan client applications
 
-**Statut :** Implémenté. Client mince Expo (SDK 54) ; l'extraction « lourde » (OCR + LLM) vit côté
-serveur. Ce document est la **référence du front mobile** — les docs `docs/` étant historiquement
-côté backend, celui-ci comble le manque.
-**Date :** 2026-07-06 (v1.1 — module Calendrier, accueil scopé par journée ; v2.1 la veille).
-**Périmètre :** `src/` uniquement.
+This document explains the two client experiences that ship with LabelScan:
 
-## Contrat de compatibilité
+- the Expo mobile app used by store operators to capture and review labels;
+- the React back office used to search arrivals and manage authorized accounts.
 
-- Expo SDK 54 / React Native 0.81.
-- Android minimum : **Android 13, API 33**, sur un appareil recevant encore les correctifs
-  de son fabricant, avec le même parcours métier qu'iOS
-  (connexion, capture, file hors ligne, revue 16/16, catalogue et déconnexion).
-- Les builds preview et production refusent le trafic HTTP en clair et embarquent
-  obligatoirement `https://label-scan.fr` comme origine API.
-- Les releases Android assemblées localement (hors EAS) utilisent la même origine
-  publique comme repli non secret ; un oubli de variable EAS ne produit donc plus
-  une application installable mais incapable de joindre le serveur.
-- Les permissions réseau Android (`INTERNET` et `ACCESS_NETWORK_STATE`) sont déclarées
-  explicitement et contrôlées par `npm run check:android13`.
-- Les permissions microphone, overlay système et ancien stockage externe ajoutées
-  transitivement par des modules natifs sont explicitement retirées du manifeste final.
-- Les requêtes JSON Android (authentification incluse) utilisent `expo/fetch`, le
-  transport WinterCG natif fourni par Expo SDK 54. iOS conserve son transport déjà
-  validé et les uploads gardent le pont React Native compatible avec les parties
-  fichier `{ uri, name, type }`.
-- La session est stockée dans Android Keystore/iOS Keychain via SecureStore et la
-  sauvegarde applicative Android est désactivée.
-- Aucun certificat racine, contournement TLS ou compatibilité spécifique aux anciens Android
-  n'est embarqué. Le build s'appuie sur le magasin de certificats maintenu par le système.
+The interfaces are written in French for their users. This guide is written in
+English for contributors and operators. It describes the behavior that is present
+in the repository, including known limitations, so that a reader does not need
+historical project context to understand the product.
 
-`npm run check:android13` vérifie le contrat statique. Une release reste bloquée tant
-qu'un test du parcours complet n'a pas réussi sur un appareil ou émulateur API 33.
+The backend remains the source of truth for identity, tenant access, extraction,
+validation, and saved arrival records. Client-side route guards, profile constants,
+and caches improve the experience; they are not authorization boundaries.
 
-> **À lire en regard :**
-> - [`../backend/API-CONTRACTS.md`](../backend/API-CONTRACTS.md) — les endpoints que le client appelle.
-> - [`../ai-pipeline/AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) — OCR + extraction côté serveur.
-> - [`../extraction/PROMPT-CONTRACT.md`](../extraction/PROMPT-CONTRACT.md) — le gate anti-fabrication.
-> - [`../README.md`](../README.md) — index de la documentation vivante.
+## At a glance
 
----
+| Client | Primary users | Main purpose | Technology |
+| --- | --- | --- | --- |
+| Mobile app | Store managers assigned to one active business portal | Capture a label, monitor extraction, review every business field, and save the arrival | Expo SDK 54, React Native 0.81, React 19 |
+| Back office | Managers, administrators, and super administrators | Browse authorized arrivals and manage the identities allowed by the current role | React 19, Vite 7, Wouter |
 
-## 1. Vue d'ensemble
+The normal business flow is:
 
-- **Auth** : JWT manager mono-portail (`POST /v1/mobile/auth/login`), token attaché en `Authorization: Bearer`
-  ([`services/auth.ts`](../../src/services/auth.ts), [`services/api.ts`](../../src/services/api.ts)).
-  Toute l'app est derrière l'écran de connexion ([`context/AuthContext.tsx`](../../src/context/AuthContext.tsx)).
-- **Extraction backend uniquement.** L'ancien chemin OCR sur l'appareil (Google Vision côté client)
-  a été retiré pour des raisons de sécurité (une clé `EXPO_PUBLIC_*` est extractible de tout build) —
-  voir l'ADR historique dans `CLAUDE.md` §P0. Le flux est : recadrage au cadre → capture enchaînée
-  (file de scans) → `POST /v1/ingestions` → extraction asynchrone (worker) → écran de vérification
-  éditable → finalisation durable côté backend et cache local de consultation.
-- **Contrat poissonnerie V2 — 16 champs** (prompt v3.0.0) : `commercial_designation`,
-  `scientific_name`, `producer_name`, `reseller_brand`, `production_method`,
-  `fishing_gear_or_farming_method`, `FAO_area`, `origin_country`, `health_mark`, `batch_number`,
-  `expiry_date`, `packaging_date`, `storage_temperature`, `weight`, `allergens`, `gtin`
-  ([`services/fieldOrder.ts`](../../src/services/fieldOrder.ts) — ordre HACCP partagé Revue ⇄ Détail).
-- **Stockage local** : articles sauvegardés en AsyncStorage indexé par clé
-  ([`services/storage.ts`](../../src/services/storage.ts)), file d'attente de transport (outbox,
-  [`services/outbox.ts`](../../src/services/outbox.ts)) et file de scans en cours (scan queue,
-  [`services/scanQueue.ts`](../../src/services/scanQueue.ts) — voir §3).
+~~~text
+Camera capture
+  → durable local queue
+  → authenticated ingestion
+  → server-side OCR and extraction
+  → operator review
+  → atomic server finalization
+  → mobile catalogue and web back office
+~~~
 
----
+The mobile app never performs the authoritative OCR or business validation itself.
+It prepares the image, provides immediate barcode context, and asks the server to do
+the extraction.
 
-## 2. Nouveau flux — capture enchaînée (workflow v1)
+## Supported trade profiles
 
-**Une pile racine unique** ([`navigation/RootNavigator.tsx`](../../src/navigation/RootNavigator.tsx)) :
-`ArticleList` (accueil) · `ArticleDetail` · `Camera` · `Review`. La capture se lance à la demande via
-un **FAB** en bas-droite de la liste ([`components/CaptureFab.tsx`](../../src/components/CaptureFab.tsx)).
+LabelScan supports three profession codes. A profile controls the field groups,
+labels, completeness indicator, suggestions, filters, and detail presentation.
 
-```
-ArticleList ──(FAB)──▶ Camera ──(tir)──▶ enqueueScan() (arrière-plan) ──▶ tir suivant…
-     ▲                                              │
-     │                                     scanQueue : submitting → extracting → ready
-     │                                              │
-     └────(tap sur une carte « ready » à l'accueil)──▶ Review ──(Enregistrer)──▶ ArticleList
-```
+| Profession code | User-facing name | Information covered |
+| --- | --- | --- |
+| <code>poissonnerie</code> | Poissonnerie | Product and species identification, fishing or farming method, FAO area, origin, sanitary traceability, dates, storage, allergens, and commercial data |
+| <code>boucherie</code> | Boucherie | Product, animal and cut identification, birth/rearing/slaughter/cutting countries, establishment approvals, traceability, dates, storage, allergens, and commercial data |
+| <code>charcuterie_traiteur</code> | Charcuterie / Traiteur | Product and manufacturer identification, ingredients, additives, allergens, instructions, sanitary traceability, preparation/packaging/expiry data, conditioning, storage, and commercial data |
 
-- **Le déclencheur envoie, l'opérateur reste sur la caméra.** Chaque photo prise est recadrée
-  (identique à avant) puis **immédiatement mise en file** (`enqueueScan`, flash + haptique de
-  confirmation) — pas d'écran de revue bloquant, pas de bouton Valider par photo. L'opérateur
-  peut enchaîner N photos ; le serveur accepte les soumissions concurrentes (idempotentes,
-  dédupliquées par hash de contenu).
-- **`ScanTray`** ([`components/ScanTray.tsx`](../../src/components/ScanTray.tsx)) : sur l'écran
-  caméra, une pile de vignettes + compteur + point pulsant tant qu'au moins un scan est
-  `submitting`/`extracting`. Tap → retour à l'accueil. La caméra reste un **viseur pur** : les
-  erreurs se lisent à l'accueil, jamais ici.
-- **Accueil — zone « En cours »** : chaque scan en file est une carte avec un **compteur 3 étapes**
-  (Photo envoyée → Extraction → À valider). Tap sur une carte `ready` → ouvre `Review`. Une fois
-  l'arrivage enregistré, la carte quitte la zone « En cours » et rejoint la liste normale (§4).
-- **Ressource caméra** : `CameraView` n'est montée que lorsque l'écran Camera est **focalisé**
-  (`useIsFocused`), relâchée au retour Articles — `expo-camera` n'autorise qu'**un** aperçu actif
-  à la fois.
+The active mobile presentation contract is profile version 2. The mobile profile
+definitions live in
+[src/services/businessProfiles.ts](../../src/services/businessProfiles.ts).
+The back-office display definitions live in
+[web/src/portals](../../web/src/portals), while the server owns its canonical
+extraction and validation contracts. When a field is added or renamed, these
+surfaces must be reviewed together.
 
-### Recadrage & fidélité (capture)
+The review form requires a decision for every field in the selected profile. The
+operator can enter a value or explicitly mark the field as <code>NC</code>. The
+smaller <code>requiredFields</code> lists in the profile configuration drive
+business emphasis; they are not the complete review gate.
 
-Le **cadre à l'écran est à la fois le guide de placement ET la région de recadrage**
-([`screens/CameraScreen.tsx`](../../src/screens/CameraScreen.tsx),
-[`components/FrameOverlay.tsx`](../../src/components/FrameOverlay.tsx)).
+Review and catalogue detail always render the complete ordered profile. Machine
+extraction keeps an absent value as <code>null</code>. During review, that field
+remains visibly unresolved and does not count as complete until the operator enters
+a value or explicitly chooses <code>NC</code>. Only a finalized human decision and the
+resulting catalogue projection display the exact <code>NC</code> marker; the row is
+never hidden. Machine proposals marked ambiguous, invalid, or unnormalizable follow the
+same rule: they stay visible as suggestions but require an explicit confirmation,
+correction, or <code>NC</code> decision.
 
-- **Couverture** : le cadre fait **≈96 % de la largeur** et occupe la quasi-totalité de la zone
-  utile, pour placer **l'étiquette entière** dedans.
-- **Marge de sécurité** : `computeFrameCrop` élargit le rectangle de **8 % par axe** avant d'inverser
-  la transformation d'affichage « cover », puis **borne** dans les pixels de la photo (jamais hors
-  limites).
-- **Fidélité** : `takePictureAsync({ quality: 1.0 })` + recadrage borné à **≤1600 px** sur le grand
-  côté, `compress: 0.8` (Tier 7 — l'OCR est co-dominant sur un upload lent ; image plus petite =
-  upload et OCR plus rapides sans perte de lisibilité).
-- **Robustesse** : `skipProcessing: false` applique la rotation capteur ; si l'image revient
-  transposée ou le rectangle est dégénéré, on **envoie l'image entière** (repli sans perte).
-- **Zéro cliché perdu (audit prod v2)** : si le pipeline d'arrière-plan échoue (copie durable
-  impossible — disque plein…), un **repli last-ditch** met quand même le scan en file avec l'uri de
-  capture d'origine (non recadrée/pivotée, dégradé mais récupérable) — l'opérateur voit toujours une
-  carte à l'accueil, jamais une photo évaporée. Log `capture … fallback=raw_cache`.
-- **Côté serveur** : aucun sous-échantillonnage (l'image envoyée par le client est prise telle
-  quelle) — voir [`AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md) §2.5.
+The server selects the profile from the authenticated portal. The mobile app does
+not let an operator choose a tenant or profession for an upload.
 
----
+## Mobile app
 
-## 3. Architecture de la file de scans (`scanQueue.ts`)
+### Platform and build contract
 
-Le cœur de la refonte : un **module singleton** (pattern déjà utilisé par `outbox.ts`), consommé
-par les écrans via `useSyncExternalStore` ([`hooks/useScanQueue.ts`](../../src/hooks/useScanQueue.ts)).
-Aucun écran ne possède plus le cycle de vie d'une extraction — la file le fait, qu'un écran soit
-monté ou non.
+The exact installed versions are authoritative in
+[package.json](../../package.json). The current app is pinned to Expo SDK 54 and
+uses the SDK 54-compatible React Native packages.
 
-**Frontière avec l'outbox** : l'**outbox reste le transport durable** (retry, backoff, dead_letter,
-clés d'idempotence — inchangé). La **scan queue est l'état de workflow UI** (quel scan, quelle
-étape, quelle photo) ; elle référence les opérations outbox par id et ne duplique jamais leur logique
-de retry — ses propres reprises sont soit une nouvelle opération (`retryScan` sur `submit_error`),
-soit un nouveau cycle de sondage (`retryScan` sur `extract_error`).
+The native configuration in [app.json](../../app.json),
+[app.config.js](../../app.config.js), and [eas.json](../../eas.json) defines these
+product constraints:
 
-- **Modèle persisté** (`@labelscan:scanQueue`, une entrée par scan) : id local, photo **durable**
-  (`documentDirectory/pending/<id>.jpg` — copiée depuis le cache de recadrage, qui peut être purgé
-  avant la revue), code-barres, id d'ingestion, statut (`submitting` / `extracting` / `ready` /
-  `submit_error` / `extract_error`), indicateur `ocrDone` (vague 2 déterministe, Tier 3). Les
-  résultats (ingestion + run) restent **en mémoire uniquement** — re-récupérés en un `GET` au
-  redémarrage (`latest_fields` embarqué rend ça gratuit ; le serveur est la vérité).
-- **`ingestionResult.ts`** ([`services/ingestionResult.ts`](../../src/services/ingestionResult.ts)) :
-  cœur non-hook de l'ancien `useIngestionResult` — `waitForIngestionResult(ingestionId, opts)`
-  poll → `latest_fields` (chemin rapide) → repli `getExtractionRun` (vieux serveur), callback
-  `onInterim` pour la vague 2 (Tier 3). `ingestionPolling.ts` (long-poll Tier 4) est inchangé.
-- **Scheduler** : cap de **3 sondages (long-poll) concurrents**, le reste attend en FIFO (le
-  long-poll Tier 4 découvre les transitions en ~0 ms, une extraction dure ~10-20 s → la file se
-  vide vite). Un `AbortController` par scan ; pause de tous les sondages au passage en arrière-plan
-  (`AppState`), reprise + réconciliation au premier plan. Budget de ~5 min par scan avant
-  `extract_error` (repris manuellement depuis l'accueil — l'extraction serveur continue de toute
-  façon).
-- **Réconciliation** (`reconcileScanQueue`, appelée au démarrage, au premier plan, et après chaque
-  drain outbox réussi) : un scan `submitting` relit son opération outbox (`succeeded` → passe
-  `extracting` + lance le sondage ; `dead_letter` → `submit_error` ; opération introuvable →
-  `submit_error`). Un scan `extracting`/`ready` sans résultat en mémoire relance un sondage.
-- **Dédoublonnage** : si la soumission revient `replayed: true` sur un `ingestionId` déjà actif
-  dans la file, la nouvelle entrée (et sa photo) est supprimée silencieusement.
-- **Cycle de vie des photos** : dossier `pending/` dédié, balayé au démarrage pour supprimer les
-  fichiers orphelins (crash entre la copie et l'écriture de la file).
+- portrait, phone-oriented experience; iPad support is disabled;
+- Android minimum SDK 33;
+- camera, internet, and network-state permissions;
+- microphone, system-overlay, and legacy external-storage permissions are blocked;
+- Android application backup is disabled;
+- release minification and resource shrinking are enabled;
+- EAS preview and production builds use the HTTPS production API origin and disable
+  cleartext traffic; an absent or unknown build profile also fails closed.
 
----
+Only the explicit `development` profile allows a LAN HTTP endpoint so a physical device
+can reach a local server. The signed release manifest/network policy still requires
+verification; see [Security register and release verification](#security-register-and-release-verification).
 
-## 4. Accueil : compteur 3 étapes et validation
+### Local setup
 
-> **Workflow v2 — un scan « en cours » n'est JAMAIS un article.** Chaque scan reste dans la zone
-> « En cours » tant que ses **16 champs ne sont pas tous remplis** ; il n'entre dans la liste des
-> articles (et n'incrémente le comptage) qu'à l'**enregistrement 16/16** (§5). Plusieurs scans
-> peuvent coexister « en cours » (empilement inchangé). Sur la carte, quand un scan est `ready`
-> mais `< 16/16`, l'étape 3 lit **« À compléter »** (bleu) au lieu de « À valider » (vert) —
-> `PendingScanCard` compare `filledCount` à `CANONICAL_FIELD_COUNT`.
->
-> **Jauge vivante** : le score `n/16` de la carte est calculé run/interim **+ overlay du brouillon
-> persistant** (`scan.edits`) — les fonctions de `fieldCompleteness.ts` prennent un paramètre
-> `edits` optionnel qui prime dans les deux sens (une saisie remplit, un champ vidé dé-remplit).
-> La jauge avance donc à chaque retour de revue, au fil de la session de saisie.
->
-> **Suppression uniforme (v2.1) = swipe gauche.** Chaque carte « En cours » se supprime par un
-> **glissement vers la gauche révélant Supprimer** — exactement le même geste que les fiches
-> articles (`ArticleCard` : Pan gesture, seuil −60, révélateur rouge 80 px). Actif sur TOUS les
-> états (une photo ratée se supprime même pendant l'extraction) ; confirmation systématique, le
-> message signale la perte du brouillon s'il existe. Les cartes en erreur gardent le bouton
-> « Réessayer » ; leur suppression passe aussi par le swipe.
+From the repository root:
 
-- **`scanSteps.ts`** ([`services/scanSteps.ts`](../../src/services/scanSteps.ts)) : mapping **pur**
-  `scanStepFromStatus(status, ocrDone)` → 3 étapes (Photo envoyée / Extraction / À valider) +
-  libellé de l'étape active. Sobre par construction (Clean UI) : pas de pourcentage, pas de
-  confiance — une étape est faite / active / en attente / en erreur.
-- **`PendingScanCard.tsx`** : vignette photo + libellé d'étape issu de `scanStepFromStatus`,
-  ou — en cas d'erreur — boutons
-  **Réessayer** / **Supprimer** (avec confirmation). Hauteur **fixe** (`PENDING_CARD_HEIGHT`) pour
-  que `getItemLayout` de la `FlatList` des articles reste exact malgré la zone « En cours » en
-  `ListHeaderComponent` (la hauteur du header est **mesurée** via `onLayout`, jamais devinée).
-- **Ouverture de la revue** : `navigation.navigate('Review', { pendingScanId })` — `Review` ne lit
-  plus rien depuis les paramètres de navigation à part cet id ; photo, code-barres, résultat
-  d'extraction sont lus **en direct** depuis la file (`useScan`, §5).
+~~~bash
+npm install
+EXPO_PUBLIC_API_BASE_URL=http://YOUR-LAN-IP:8000 npm start
+~~~
 
-### Calendrier — accueil scopé par journée (v1.1, 6 juillet 2026)
+Use a LAN-reachable address for a physical phone. A device cannot reach a server
+through the computer's <code>localhost</code>. The API URL must be HTTP or HTTPS,
+must not contain embedded credentials, and must use HTTPS outside development.
 
-L'accueil est **organisé par journée** : la liste n'affiche que les arrivages de la date
-sélectionnée (**aujourd'hui** par défaut) et le calendrier est le sélecteur de date — jamais une
-page. Icône dans l'app bar **à côté de la loupe**, même patron que la recherche : panneau qui se
-déplie sous le header (hauteur mesurée via une vue interne absolue), exclusion mutuelle entre les
-deux panneaux.
+Useful native commands are:
 
-- **Vue mensuelle compacte, style GitHub Contributions** : chaque case encode le **volume** du
-  jour par une intensité de bleu (rampe dérivée de `colors.primary`, 4 niveaux relatifs au jour
-  le plus chargé). Aucun badge ni compteur — l'intensité EST le signal.
-- **Sélecteur, pas navigation** : tap sur un jour → `selectedDay` change, le panneau se ferme, la
-  MÊME liste se re-rend (filtre **en mémoire** — instantané, aucun rechargement). Indication
-  discrète : libellé au-dessus de la liste (« Aujourd'hui » / « 3 juillet 2026 »), icône teintée
-  primary tant qu'un autre jour qu'aujourd'hui scope la liste. Bouton « Aujourd'hui » + chevrons
-  ‹ › dans l'en-tête du panneau.
-- **La recherche omnisciente reste GLOBALE** : une requête active bypasse le scope jour (on
-  retrouve un lot ancien sans connaître sa date) ; l'effacer restaure la journée sélectionnée.
-- **Zone « En cours » toujours visible** quel que soit le jour sélectionné : un scan non validé
-  n'est pas un article, donc pas rattaché à une journée.
-- **Implémentation** : logique **pure** dans [`services/calendar.ts`](../../src/services/calendar.ts)
-  (`dayKey` jour LOCAL — jamais UTC, `countByDay`, `intensityLevel` 0-4, `monthGrid` **6×7 fixe**
-  lundi-premier → hauteur constante, `formatDayKey` parse local) ; rendu dans
-  [`components/CalendarPanel.tsx`](../../src/components/CalendarPanel.tsx). Le header de liste
-  (En cours + libellé du jour) reste **toujours rendu/mesuré** → `getItemLayout` exact.
+~~~bash
+npm run ios
+npm run android
+~~~
 
----
+If <code>EXPO_PUBLIC_API_BASE_URL</code> is missing during development, the client
+shows a configuration error instead of silently targeting an unrelated server.
+Non-development bundles have the public HTTPS origin as a fallback.
 
-## 5. Revue — tous les champs éditables, visionneuse, carte photo
+### Authentication and tenant context
 
-- **Entrée par la file** : `ReviewScreen` lit `useScan(pendingScanId)` — si le scan est encore
-  `extracting`, l'UI de chargement existante s'affiche telle quelle (skeletons `FIELD_ORDER` +
-  `ExtractionProgress` + `CascadeReveal`, vague GS1 → vague 2 déterministe → LLM) ; si déjà `ready`,
-  tout s'affiche directement, sans saut. Si le scan a disparu de la file pendant que l'écran était
-  ouvert (validé/supprimé ailleurs), retour silencieux à l'accueil.
-- **Les 16 champs sont éditables**, y compris les champs issus du code-barres (GS1 : lot, DLC,
-  poids, GTIN, date d'emballage). Au save, `submitFieldOverrides` tague automatiquement l'override
-  d'un champ GS1 avec `force_gs1` — le serveur l'accepte alors sous une action d'audit dédiée
-  (`ingestion.gs1_field_overridden`, append-only, jamais un écrasement — voir
-  [`API-CONTRACTS.md`](../backend/API-CONTRACTS.md) §3). Sans le flag, le champ reste 409
-  `FIELD_NOT_EDITABLE` (rétrocompatibilité totale avec un serveur non redéployé).
-- **Verrou 16/16 (profil V2)** : « Enregistrer l'arrivage » n'est **actif qu'à 16/16**. Le
-  compteur de complétude est calculé sur les **valeurs effectives** (brouillon prioritaire sur la
-  valeur extraite) via `filledCountFromValues` ([`services/fieldCompleteness.ts`](../../src/services/fieldCompleteness.ts)) —
-  même map que celle affichée, donc zéro divergence compteur ⇄ écran. En dessous, le bouton lit
-  **« Compléter (n/16) »** (désactivé).
-- **Brouillon persistant (« session »)** : l'état d'édition est **seedé depuis `scan.edits`** et
-  **ré-écrit une seule fois** au départ de l'écran (`saveScanEdits`, effet de nettoyage sur unmount).
-  Quitter puis rouvrir une revue partielle **restaure les modifications** ; le scan reste « en cours »
-  tant qu'il n'est pas validé à 16/16. `saveScanEdits` est un no-op si le scan a été validé/supprimé.
-- **Visionneuse plein écran** (`PhotoViewerModal.tsx`) : pinch-to-zoom (bornes ×1–5), pan, double-tap
-  pour zoomer/dézoomer, fermeture par bouton. Aucune dépendance nouvelle (`react-native-gesture-handler`
-  + `react-native-reanimated` déjà utilisés par `ArticleCard`) ; le `Modal` RN a sa propre racine
-  native, donc la visionneuse embarque son propre `GestureHandlerRootView`.
-- **Photo cuite à l'endroit (workflow v2)** : la rotation −90° est désormais **cuite dans le fichier**
-  à la capture (`ImageManipulator`, action `rotate: -90` en fin de pipeline dans `CameraScreen`), au
-  lieu d'une rotation d'affichage. Le composant `RotatedPhoto` est **supprimé** ; Revue, Détail
-  article, vignette « En cours » et visionneuse affichent tous un `Image`/`contain` standard (plus de
-  double rotation). **Caveat** : les articles enregistrés AVANT ce changement (données de test
-  pré-prod) ont un fichier non pivoté → ils s'affichent en portrait ; un re-scan corrige.
-- **Nettoyage Revue** : l'**icône agrandir** et le **bouton retour flottant en haut** sont retirés de
-  `ReviewScreen` (le tap sur la photo ouvre toujours la visionneuse ; le retour se fait par le bouton
-  « Retour » de la barre d'action du bas). `ArticleDetailScreen` conserve son icône d'agrandissement.
-- **Au save** : finalisation serveur atomique (overrides + confirmation via l'outbox), puis
-  `completeScan(scanId)` retire l'entrée de la file (et sa photo `pending/`) — la carte quitte la
-  zone « En cours » et l'article apparaît dans la liste (comptage à jour).
+Mobile login accepts manager accounts only. After credentials are accepted, the
+server returns the authoritative portal and profession context. Mobile access
+requires exactly one active business portal; ambiguous or unsupported assignments
+are rejected instead of being guessed.
 
----
+The access token, refresh credential, username, portal identifier, and trade code
+are stored with Expo SecureStore using
+<code>WHEN_UNLOCKED_THIS_DEVICE_ONLY</code>. On a cold start, the refresh
+credential is validated before the app enters the signed-in state. An authenticated
+request that receives a 401 gets one refresh attempt; if that fails, local session
+state is cleared and the login screen is shown.
 
-## 6. Suggestions d'allergènes — aide à la décision, **pas** de l'extraction
+The API derives tenant access from the authenticated identity. Portal identifiers
+stored locally are used to isolate presentation and queued work; they are not sent
+as an authority that the server should trust.
 
-[`services/allergenSuggestions.ts`](../../src/services/allergenSuggestions.ts) +
-[`screens/ReviewScreen.tsx`](../../src/screens/ReviewScreen.tsx).
+### Navigation and screens
 
-`suggestAllergen(fields)` dérive **déterministiquement** une famille de l'**Annexe II UE**
-(`Poisson` / `Crustacés` / `Mollusques`) à partir de `scientific_name` / `commercial_designation`.
-Règles de conformité :
+One root stack contains:
 
-- **Suggestion, jamais auto-application.** Le chip n'apparaît que sur le champ `allergens` et que s'il
-  est **vide**. L'accepter écrit une **valeur humaine** (`source='human'` à l'enregistrement), jamais
-  une valeur « extraite ». Les allergènes **déclarés sur l'étiquette priment**.
-- **Jamais de devinette.** Mélange ambigu (« fruits de mer ») ou espèce inconnue ⇒ `null` (pas de chip).
-- **Pas de provenance/FAO déduits** : interdit par le PROMPT-CONTRACT. Le gate anti-fabrication de
-  l'extraction est **inchangé**.
+| Screen | Current behavior |
+| --- | --- |
+| Login | Restores or creates the manager session and explains configuration or credential failures |
+| Articles | Shows arrivals for the current day, global search, date selection, pending scans, export actions, sign-out, and the capture button |
+| Camera | Supports chained captures so the operator can photograph several labels without reviewing each one immediately |
+| Review | Shows extraction progress and results, saves drafts, validates edits, and finalizes a complete arrival |
+| Article detail | Displays the full saved record and protected photo |
 
-Couvert par [`__tests__/allergenSuggestions.test.ts`](../../src/__tests__/allergenSuggestions.test.ts).
+The article-detail module contains dormant edit-related code, but the current UI
+does not expose an action that enters edit mode. Saved arrivals are therefore
+read-only in the mobile experience. The home screen also does not expose deletion
+for saved server arrivals. Pending scans can be discarded with confirmation.
 
-### Autocomplétion par champ depuis l'historique (v2.1)
+### Capture behavior
 
-[`services/fieldHistory.ts`](../../src/services/fieldHistory.ts) — les valeurs **récurrentes**
-d'une criée (espèces, producteurs, zones FAO, marques sanitaires…) se resaisissent en un tap :
+The camera is mounted only while its screen is focused. The visible guide frame is
+the required capture area:
 
-- **Source = les articles enregistrés** (`getAllArticles`, vérité validée par un humain) — jamais
-  une valeur machine ni calculée. Index construit au mount de la revue (`buildFieldHistory`) :
-  dédup par forme normalisée (accents/casse — `normalize` partagé avec l'omni-recherche), casse de
-  l'occurrence la plus récente, tri **fréquence puis récence**.
-- **9 champs concernés** (`HISTORY_FIELDS`) : désignation commerciale, nom scientifique,
-  producteur, marque revendeur, méthode de production, engin/méthode d'élevage, zone FAO, pays
-  d'origine, marque sanitaire. **Exclus** : lot/dates/GTIN (uniques par arrivage), poids/température
-  (inputs à affixe), allergènes (suggestion conformité Annexe II dédiée, inchangée).
-- **UX** : jusqu'à 3 **chips neutres** (icône horloge) sous le champ, uniquement quand il est
-  **focalisé** ; champ vide → top 3, sinon complétion **préfixe puis substring** ; la valeur déjà
-  saisie n'est jamais re-suggérée. Tap → remplit le champ = **édition humaine** (même chemin que la
-  frappe ; gate anti-fabrication intact). Couvert par
-  [`__tests__/fieldHistory.test.ts`](../../src/__tests__/fieldHistory.test.ts).
+1. The app takes the photo and normalizes its orientation.
+2. It maps the on-screen frame to image coordinates.
+3. It crops to that frame, forces a landscape result, limits the longest dimension,
+   and writes a compressed JPEG.
+4. It attempts to copy the prepared image to durable pending storage, then creates a
+   queued ingestion. The current fallback to the original temporary URI when that copy
+   fails is an open durability risk described below.
+5. The shutter becomes available for the next label while upload and extraction
+   continue in the background.
 
-### Aide à la saisie des dates (`expiry_date` / `packaging_date`)
+If the frame cannot be mapped or the prepared file is invalid, the app alerts the
+operator and does not upload the uncropped original as a fallback.
 
-Clavier numérique (`number-pad`) + masque **DD/MM/YYYY** (insertion auto du `/`) —
-[`services/inputMasks.ts`](../../src/services/inputMasks.ts). C'est une **aide à la saisie**, pas
-une valeur calculée : **pas** d'« expiry = packaging + N jours ». Dates stockées **canonique ISO**
-(`toIsoDate`), affichées DD/MM/YYYY ; validation neutre et non bloquante (jamais de rouge).
+The camera can recognize EAN-13, EAN-8, UPC-A, UPC-E, Code 128, Code 39, and QR
+codes. The most recently detected value is attached to the next capture. Barcode
+detection does not trigger the shutter automatically.
 
-### Estampille sanitaire (`health_mark`) — toujours en majuscules
+The screen also provides torch control, haptic feedback, a brief capture flash, and
+an explicit permission state.
 
-Le cachet officiel UE est imprimé en majuscules (ex. `FR 34.108.504 CE`, `GB BB004`) —
-[`services/inputMasks.ts`](../../src/services/inputMasks.ts) : `maskHealthMark` force chaque
-frappe en majuscule **sans jamais retirer un caractère** (espaces/points/tirets du format
-d'origine conservés — no-fabrication). `validateHealthMark` ajoute un indice neutre, non
-bloquant, si une valeur qui semble complète (≥3 caractères) ne contient **aucun chiffre** (le
-numéro d'établissement est toujours présent sur un vrai cachet). Portée volontairement limitée
-à la **saisie de l'opérateur** : une valeur extraite par l'IA non modifiée n'est jamais
-retouchée côté client (garde l'invariant « valeur affichée == valeur persistée »).
+### Queue, offline work, and synchronization
 
-### Libellés FR + saisie par unité
+Each capture has a local scan identifier and one of these visible workflow states:
 
-- **Libellés métier** : [`services/fieldLabels.ts`](../../src/services/fieldLabels.ts)
-  (`batch_number` → « N° de lot », `FAO_area` → « Zone de pêche (FAO) »…).
-- **Poids** : champ numérique + affixe d'unité **kg ⇄ g** (tap), aucune conversion automatique.
-- **Température de conservation** : deux champs **[min] – [max] °C**.
-- Le champ **Prix** est retiré du contrat actif V2 et masqué pour les anciennes fiches V1.
-- **Omni-recherche** (liste Articles) : filtre sur tous les champs + code-barres, insensible aux
-  accents/casse — [`hooks/useArticleSearch.ts`](../../src/hooks/useArticleSearch.ts) /
-  [`services/articleSearch.ts`](../../src/services/articleSearch.ts).
-- **Zone FAO (avec sous-zone)** : captée verbatim par l'extraction backend, mise en forme à
-  l'affichage par `formatFaoDisplay` — valeur brute conservée, jamais tronquée.
+| State | Meaning |
+| --- | --- |
+| <code>submitting</code> | The prepared photo is waiting for or performing upload |
+| <code>extracting</code> | The server accepted the image and is processing it |
+| <code>ready</code> | A final extraction is available for review |
+| <code>recapture_required</code> | The server result cannot support a useful review |
+| <code>submit_error</code> | Upload reached a non-recoverable state |
+| <code>extract_error</code> | Extraction failed or could not be completed in the polling budget |
 
----
+The scan queue persists its workflow metadata and pending photo URI. Final and
+interim extraction responses are kept in memory; after a restart the app refetches
+them from the server. Polling is bounded, pauses while the app is in the background,
+and resumes when the app returns to the foreground. Server content deduplication is
+limited to idempotent replay: reconciliation removes a second local card only when the
+same request key returns an ingestion already attached to another card. Each new capture
+receives a new idempotency key, so submitting identical image bytes as a separate capture
+can create another ingestion and card.
 
-## 7. Configuration (variables d'environnement Expo)
+A separate durable outbox stores write operations with stable idempotency and
+correlation identifiers. Due work is replayed at app startup, when the app returns
+to the foreground, and when network connectivity returns. Retryable network, rate
+limit, and server errors use bounded backoff; non-retryable or exhausted operations
+become dead letters.
 
-| Variable | Rôle | Défaut |
+New outbox operations include the local portal and trade owner, and replay requires
+those two values to match. The owner record does not include the organization or actor,
+so a different manager in the same portal and trade can still inherit queued work.
+Historical unowned operations create an additional cross-context risk. Both gaps are
+documented in [Open audit findings](#open-audit-findings).
+
+### Review and finalization
+
+The review screen is opened by local scan ID and reads live queue state rather than
+copying extraction data into navigation parameters. It can show an early GS1 or
+interim preview while extraction is running, then replaces that preview with the
+final run.
+
+The operator can:
+
+- edit every field in the active trade profile;
+- mark unknown information as <code>NC</code>;
+- rotate the photo by half a turn;
+- zoom and pan the protected image;
+- leave and resume a locally saved draft;
+- use selected suggestions from previously saved arrivals.
+
+Client checks provide fast feedback for dates, GTIN values, production methods, and
+profile completeness. Seafood allergen suggestions are deterministic and are never
+applied automatically. The client does not infer FAO area, origin, or expiry values
+that are not supported by the extraction.
+
+If no useful canonical field is available, the screen asks for a new capture rather
+than presenting a misleading blank approval flow.
+
+Finalization sends the complete reviewed field set and chosen photo orientation in
+one idempotent server operation. The pending card remains visible until that
+operation succeeds, so a transient connection failure is not presented as a saved
+arrival.
+
+### Catalogue, search, and export
+
+The home screen opens on the device's current local calendar day. Choosing another
+day filters saved arrivals, while text search remains global across the loaded
+catalogue. Pending work stays visible regardless of the selected day. Pull to
+refresh asks the server for current data.
+
+TanStack Query is the primary catalogue source and persists a cache for offline
+startup. A legacy local article store remains as a fallback for older data. Opening
+a record requests the full server detail and can fall back to the cached summary if
+the detail request is unavailable.
+
+Export acts on the catalogue currently loaded by the client:
+
+- JSON writes the complete in-memory article objects;
+- CSV writes selected identifiers, dates, status, barcode, photo URL, and structured
+  field data.
+
+The system share sheet controls the destination after the file is written. Export
+does not mean that LabelScan has uploaded the file to a third-party service. Local
+retention and the current JSON credential leak are documented below.
+
+### Mobile state and storage
+
+| Data | Storage | Lifecycle and purpose |
+| --- | --- | --- |
+| Access and refresh credentials, username, portal, trade | SecureStore | Restored and validated on startup; cleared on sign-out or unrecoverable authentication failure |
+| Catalogue query cache | AsyncStorage | Offline catalogue hydration with a configured maximum age |
+| Scan queue and review drafts | AsyncStorage | Survive navigation and restarts until a scan is finalized or discarded |
+| Outbox operations | AsyncStorage | Survive transient failures until success, dead-letter cleanup, or explicit discard |
+| Interim and final extraction snapshots | Memory | Refetched during queue reconciliation after a restart |
+| Pending capture JPEGs | Expo document directory | Removed after successful finalization/discard; orphan files are swept during queue initialization |
+| Confirmed-photo copies | Expo document directory | Support the optimistic saved card; no explicit lifecycle cleanup is currently implemented |
+| JSON and CSV export files | Expo document directory | Fixed filenames are overwritten by the next export of the same format, but are not deleted after sharing or sign-out |
+
+AsyncStorage and the Expo document directory are application-private storage, not a
+cryptographic secret store. They can contain business records and label images and
+must be treated as sensitive device data.
+
+The installed Android AsyncStorage adapter keeps a 6 MB default limit for its complete
+database. Splitting legacy articles into per-record keys avoids one growing JSON entry and
+full-list rewrites, but it does not remove that global capacity limit. Catalogue cache,
+queues, drafts, outbox entries, and legacy records therefore need bounded retention,
+visible quota-error handling, and capacity testing; sustained record storage should move
+to a database designed for that workload.
+
+## React back office
+
+### Delivery and local development
+
+The browser application lives in [web](../../web). Its production base path is
+<code>/backoffice/</code>. The server image builds the Vite bundle and serves it
+alongside the FastAPI application, so browser calls to <code>/v1</code> remain on
+the same origin.
+
+For a frontend-only development session:
+
+~~~bash
+cd web
+npm install
+npm run dev
+~~~
+
+The Vite development configuration does not proxy <code>/v1</code>. A standalone
+Vite page therefore cannot complete real authenticated API calls unless a
+same-origin reverse proxy or equivalent local environment is provided. Use the
+repository's full-stack container setup for the integrated experience.
+
+### Browser session
+
+Login includes the organization slug, username, and password. The browser keeps the
+short-lived access token in React memory only. Session renewal uses a same-origin,
+HttpOnly refresh cookie with strict same-site behavior and the Secure flag in
+production. Access tokens are not written to localStorage or sessionStorage.
+
+After login or refresh, <code>/v1/me</code> provides the authoritative role, scopes,
+active stores, active portals, and profession assignments. The client converts
+those scopes into navigation capabilities. The API must still authorize every
+request independently.
+
+### Access by role
+
+| Role | Back-office experience |
+| --- | --- |
+| Manager | Read authorized arrivals for assigned active portals and manage the signed-in account |
+| Administrator | Read arrivals and manage stores, profession portals, and manager assignments only within the account’s assigned scope and granted capabilities |
+| Super administrator | Organization-wide access plus administrator-account management when the corresponding capabilities are present |
+
+Unknown professions, inactive portals, missing capabilities, and inaccessible
+routes are rejected or redirected. The aggregate “all professions” arrivals view
+requires the administrator workspace capability and still respects the account’s
+server-enforced data scope.
+
+### Arrival workspace
+
+The arrival workspace is an online, read-only view of server records. It provides:
+
+- profession-specific and aggregate workspaces;
+- server-backed search, filters, sorting, and pagination;
+- card and table presentations;
+- URL-backed filters and selected-arrival state;
+- a route-backed detail drawer that survives refresh and browser navigation;
+- authenticated image loading and a full photo viewer;
+- complete field sections for all supported trade profiles.
+
+Empty values and price data are not presented as useful traceability information.
+Additional server fields are preserved in the detail view instead of being silently
+dropped.
+
+### Identity administration
+
+The administrator workspace can create stores with their profession portals,
+soft-deactivate or reactivate stores, enable or disable portals, create managers
+with one selected portal, reassign managers, and remove access while preserving
+historical records.
+
+The super-administration workspace can create and soft-deactivate administrator
+accounts. The account page lets the signed-in user change a password and then signs
+the browser session out.
+
+These screens submit requests to the identity API; hiding a button is never the
+security control.
+
+## Accessibility and responsive behavior
+
+Both clients include deliberate accessibility work, but neither should currently
+be described as formally WCAG-certified.
+
+Mobile controls commonly provide accessibility roles, labels, state, live status
+announcements, readable completeness feedback, and safe-area-aware touch layouts.
+The login animation respects reduced-motion preference. Known gaps include the
+camera shutter's missing explicit accessibility label/role and incomplete
+reduced-motion handling outside login.
+
+The back office supports keyboard navigation in its shell, menus, profession
+selector, detail drawer, and confirmation dialog. It provides visible focus styles,
+responsive card/table layouts, focus restoration, Escape handling, and CSS
+reduced-motion rules. The full-screen product photo viewer restores focus and closes
+with Escape, but it does not currently trap Tab focus.
+
+The browser end-to-end suite exercises configured desktop and mobile Chromium
+viewports. Manual VoiceOver/TalkBack and screen-reader browser checks are still
+required for a release.
+
+## Security boundaries
+
+Implemented controls include:
+
+- server-authoritative tenant, role, scope, and profession checks;
+- SecureStore for direct mobile credentials and memory-only browser access tokens;
+- HttpOnly browser refresh cookies;
+- HTTPS-only EAS preview and production configuration;
+- no client-side OCR vendor secret;
+- Android backup disabled and unnecessary native permissions blocked;
+- idempotency keys for replayable writes;
+- authenticated catalogue photos;
+- server-side validation repeated after client feedback.
+
+The mobile bundle and browser JavaScript are public artifacts. Any value placed in
+<code>EXPO_PUBLIC_*</code> or frontend source code must be considered readable by an
+end user. Client validation improves usability; it must never replace backend
+validation.
+
+### Security register and release verification
+
+The [risk register](../security/THREAT-MODEL.md#confirmed-open-risk-register) owns the full
+impact, priority, remediation, and closure evidence. Repository controls now cover the
+historical token-bearing catalogue, ownerless replay, cross-account hydration, stale
+claims, residual export files, password-form mismatch, incomplete local ownership, and
+protected-header override risks. Each remains marked “verify at release” until the signed
+application has been exercised on a shared device.
+
+| Area | Risk IDs | Release action |
 |---|---|---|
-| `EXPO_PUBLIC_API_BASE_URL` | Base URL du backend | vide → l'API lève une erreur claire |
+| Account and token isolation | `OR-01`, `OR-02`, `OR-03`, `OR-16`, `OR-21` | Verify logout, token rotation, portal/trade change, and a two-account shared-device sequence against the signed build |
+| Crash recovery and photo durability | `OR-04`, `OR-05` | Verify claim recovery on the signed build; add atomic scan-card persistence or outbox reconstruction before production |
+| Device storage capacity | `OR-07`, `OR-19` | Verify temporary-export cleanup; define and test storage quotas for retained offline work |
+| Android release transport | `OR-06` | Verify the fail-closed source configuration in the generated manifest/network policy and reject any signed release that permits cleartext |
+| Browser password experience | `OR-14` | Re-run every role form against the production-equivalent backend policy |
 
-L'extraction est **backend uniquement** — aucune clé tierce n'est embarquée dans le bundle mobile.
-(L'ancienne variable `EXPO_PUBLIC_GOOGLE_VISION_KEY`, liée au chemin OCR sur l'appareil, a été
-retirée avec ce chemin — audit §7.3.)
+`OR-05` and `OR-19` remain client-side release work. The repository
+mitigations for the other client findings do not replace signed-artifact and shared-device
+verification.
 
----
+## Architecture map
 
-## 8. Carte du code (`src/`)
+### Mobile
 
-- **`navigation/`** — `RootNavigator` (pile unique ; `Review` ne prend plus qu'un `pendingScanId`).
-- **`screens/`** — `ArticleList` (accueil, FAB, export, zone « En cours »), `ArticleDetail`, `Camera`
-  (viseur + capture enchaînée + `ScanTray`), `Review` (entrée par la file, tous champs éditables),
-  `Login`.
-- **`components/`** — `CaptureFab`, `FrameOverlay`, `CaptureButton`, `FlashOverlay`, `ArticleCard`,
-  `EmptyState`, `ScanTray`, `PendingScanCard`, `CalendarPanel`, `PhotoViewerModal`,
-  `ExtractionProgress`, `PulseDot`, `SkeletonValue`.
-- **`services/`** — I/O : `api`, `auth`/`authStorage`, `ingestionSubmit`, `ingestionResult`,
-  `ingestionPolling`, `scanQueue`, `storage`, `outbox`, `outboxDrain`, `export`,
-  `fieldOverrideSubmit`. Helpers **purs** (testables) : `dates`, `calendar`, `inputMasks`,
-  `fieldLabels`, `fieldOrder`, `scanSteps`, `extractionStage`, `allergenSuggestions`,
-  `articleSearch`, `articleGrouping`, `fieldHistory`, `fieldCompleteness`, `gs1`, `faoDisplay`.
-- **`hooks/`** — `useArticleSearch`, `useScanQueue` (`useScanQueue`/`useScan`).
-- **`types/`** — `api.ts` (miroir des contrats backend), `Article.ts`.
-- **`theme/`** — tokens Material You (couleurs, espacements, typographie, élévation).
+| Area | Main source |
+| --- | --- |
+| Application providers | [App.tsx](../../App.tsx) |
+| Authentication state | [src/context/AuthContext.tsx](../../src/context/AuthContext.tsx) |
+| Navigation | [src/navigation/RootNavigator.tsx](../../src/navigation/RootNavigator.tsx) |
+| API and token refresh | [src/services/api.ts](../../src/services/api.ts), [src/services/auth.ts](../../src/services/auth.ts) |
+| Trade profiles | [src/services/businessProfiles.ts](../../src/services/businessProfiles.ts) |
+| Capture preparation | [src/screens/CameraScreen.tsx](../../src/screens/CameraScreen.tsx), [src/services/frameCrop.ts](../../src/services/frameCrop.ts) |
+| Scan lifecycle | [src/services/scanQueue.ts](../../src/services/scanQueue.ts) |
+| Durable writes | [src/services/outbox.ts](../../src/services/outbox.ts), [src/services/outboxDrain.ts](../../src/services/outboxDrain.ts) |
+| Review | [src/screens/ReviewScreen.tsx](../../src/screens/ReviewScreen.tsx) |
+| Catalogue and protected images | [src/services/catalogApi.ts](../../src/services/catalogApi.ts) |
+| Local files and records | [src/services/storage.ts](../../src/services/storage.ts), [src/services/export.ts](../../src/services/export.ts) |
 
----
+### Back office
 
-## 9. Tests
+| Area | Main source |
+| --- | --- |
+| Routes and access wrappers | [web/src/router/AppRouter.tsx](../../web/src/router/AppRouter.tsx) |
+| Browser session and capabilities | [web/src/auth](../../web/src/auth) |
+| API client | [web/src/api.ts](../../web/src/api.ts) |
+| Arrival workspace | [web/src/features/arrivals](../../web/src/features/arrivals) |
+| Profession presentation | [web/src/portals](../../web/src/portals) |
+| Account and identity workspaces | [web/src/features/account](../../web/src/features/account), [web/src/features/identity](../../web/src/features/identity) |
+| Responsive application shell | [web/src/layouts/AppShell.tsx](../../web/src/layouts/AppShell.tsx) |
 
-`npx jest --config jest.config.js` (ts-jest, environnement node) — 26 suites, **221 tests** ;
-notables : `scanQueue` (transitions, cap de sondages, hydratation/réconciliation, dédoublonnage,
-nettoyage photo, **`saveScanEdits` persiste + ré-hydrate le brouillon**), `ingestionResult`,
-`scanSteps` (mapping 5 statuts × `ocrDone`), `fieldCompleteness` (**`filledCountFromValues` = verrou
-16/16**), `fieldOverrideSubmit` (force_gs1). Vérification de types : `npx tsc --noEmit`.
+## Verification
 
----
+Run these checks from the repository root after changing mobile behavior or shared
+contracts:
 
-## 10. Liens
+~~~bash
+npm run typecheck
+npm test -- --runInBand
+npm run check:android13
+npm run security:tracked-secrets
+~~~
 
-- [`../backend/API-CONTRACTS.md`](../backend/API-CONTRACTS.md), [`../ai-pipeline/AI-PIPELINE.md`](../ai-pipeline/AI-PIPELINE.md).
-- `CLAUDE.md` (racine) — roadmap et backlog vivants.
-- [`../archive/README.md`](../archive/README.md) — synthèses et audits de chantiers clos.
+The production security probe is a release check, not a local mobile test. It sends
+network requests, including a synthetic login attempt and an oversized anonymous upload,
+to the URL you provide. Run it only against an explicitly approved target:
+
+~~~bash
+npm run security:production -- https://reviewed-target.example
+~~~
+
+The helper currently falls back to the public production origin when no URL is supplied.
+Always provide the exact approved target; never rely on that fallback.
+
+Run the back-office checks from <code>web</code>:
+
+~~~bash
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
+~~~
+
+Dependency audits are also useful before a release:
+
+~~~bash
+npm audit --omit=dev
+cd web
+npm audit
+~~~
+
+Automated checks do not replace these focused release exercises:
+
+- login, token refresh, logout, and a second-account sign-in on a shared device;
+- several chained captures, including crop failure and denied camera permission;
+- offline capture, app termination, foreground recovery, and network recovery;
+- extraction failure, recapture, draft restoration, and successful finalization;
+- every supported trade profile with values and explicit <code>NC</code> decisions;
+- date selection, global search, pull to refresh, detail image, JSON/CSV export, and
+  export-file cleanup expectations;
+- manager, administrator, and super-administrator browser access;
+- profession filters, pagination, route-backed arrival details, and protected images;
+- keyboard-only, reduced-motion, VoiceOver/TalkBack, and representative screen sizes;
+- an EAS preview or production build on Android API 33 or later and a supported
+  iPhone.
+
+Do not record a fixed test total in this document. Test discovery changes as the
+product evolves; the command exit status and CI result are the durable evidence.
+
+## Related documentation
+
+- [Documentation index](../README.md)
+- [API contracts](../backend/API-CONTRACTS.md)
+- [AI extraction pipeline](../ai-pipeline/AI-PIPELINE.md)
+- [Prompt and anti-fabrication contract](../extraction/PROMPT-CONTRACT.md)
+- [Security architecture](../security/SECURITY-ARCHITECTURE.md)
+- [Production security validation](../security/PRODUCTION-VALIDATION.md)
+- [Developer guide](../DEVELOPER-GUIDE.md)

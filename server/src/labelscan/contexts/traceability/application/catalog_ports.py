@@ -38,6 +38,7 @@ class CatalogFilter:
     field_filters: tuple[tuple[str, str], ...] = ()
     sort_by: str = "recorded_at"
     sort_direction: str = "desc"
+    include_total: bool = True
 
 
 class CatalogRepository(Protocol):

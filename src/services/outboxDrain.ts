@@ -33,12 +33,18 @@ import {
   markSucceeded,
   operationMatchesOperatorContext,
   purgeTerminalOps,
+  recoverInterruptedInFlight,
   type OperationError,
   type OutboxOperation,
   type OutboxResult,
 } from './outbox';
 import { reconcileScanQueue } from './scanQueue';
-import { getOperatorContext } from './authStorage';
+import {
+  captureActiveSession,
+  getOperatorContext,
+  isSessionFenceCurrent,
+  type SessionFence,
+} from './authStorage';
 
 export interface DrainResult {
   succeeded: number;
@@ -57,12 +63,16 @@ type ExecuteOutcome =
   | { handled: false }
   | { handled: true; result?: OutboxResult }; // result recorded on the op (create_ingestion)
 
-async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
+async function executeOperation(
+  op: OutboxOperation,
+  fence: SessionFence,
+): Promise<ExecuteOutcome> {
   if (op.type === 'override_field') {
     await overrideField(op.payload.ingestion_id, op.payload.field_name, op.payload.value, op.payload.note, {
       idempotencyKey: op.idempotencyKey,
       correlationId: op.correlationId,
       forceGs1: op.payload.force_gs1,
+      signal: fence.signal,
     });
     return { handled: true };
   }
@@ -70,6 +80,7 @@ async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
     await confirmIngestion(op.payload.ingestion_id, {
       idempotencyKey: op.idempotencyKey,
       correlationId: op.correlationId,
+      signal: fence.signal,
     });
     return { handled: true };
   }
@@ -83,6 +94,7 @@ async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
       {
         idempotencyKey: op.idempotencyKey,
         correlationId: op.correlationId,
+        signal: fence.signal,
       },
     );
     return { handled: true };
@@ -94,7 +106,11 @@ async function executeOperation(op: OutboxOperation): Promise<ExecuteOutcome> {
         barcode_raw: op.payload.barcode_raw,
         client_captured_at: op.payload.client_captured_at,
       },
-      { idempotencyKey: op.idempotencyKey, correlationId: op.correlationId },
+      {
+        idempotencyKey: op.idempotencyKey,
+        correlationId: op.correlationId,
+        signal: fence.signal,
+      },
     );
     // The ingestion_id must land on the op — reconcileScanQueue reads it there.
     return {
@@ -128,11 +144,18 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
   try {
     do {
       rerunRequested = false;
+      const fence = await captureActiveSession();
+      if (!fence) break;
+      // Stable idempotency keys make a killed process safe to resume. Process-local
+      // live leases are skipped, so this never steals an HTTP attempt still running.
+      await recoverInterruptedInFlight(Date.now(), fence);
+      if (!isSessionFenceCurrent(fence)) break;
       // Fresh clock each pass: an op enqueued MID-drain has next_attempt_at after
       // the drain's start time — a frozen `now` would never see it due.
       const due = await listPendingDue(Math.max(now, Date.now()));
       const operatorContext = await getOperatorContext();
       for (const op of due) {
+        if (!isSessionFenceCurrent(fence)) break;
         if (
           op.type !== 'override_field' &&
           op.type !== 'confirm_ingestion' &&
@@ -146,21 +169,26 @@ export async function drainOutbox(now: number = Date.now()): Promise<DrainResult
           result.skipped += 1;
           continue;
         }
-        const claimed = await markInFlight(op.id);
+        const claimed = await markInFlight(op.id, Date.now(), fence);
         if (!claimed) continue; // raced by another executor — skip
         try {
-          const exec = await executeOperation(claimed);
-          await markSucceeded(claimed.id, exec.handled && exec.result ? { result: exec.result } : {});
+          const exec = await executeOperation(claimed, fence);
+          if (!isSessionFenceCurrent(fence)) continue;
+          await markSucceeded(claimed.id, {
+            ...(exec.handled && exec.result ? { result: exec.result } : {}),
+            fence,
+          });
           result.succeeded += 1;
         } catch (err) {
-          await markFailed(claimed.id, toOperationError(err));
+          if (!isSessionFenceCurrent(fence)) continue;
+          await markFailed(claimed.id, toOperationError(err), Date.now(), fence);
           result.failed += 1;
         }
       }
       // Keep housekeeping inside the coalescing loop. If another trigger arrives
       // while this storage write is in progress, rerunRequested stays observable by
       // the loop and its newly queued review cannot miss the trailing pass.
-      await purgeTerminalOps({ now });
+      if (isSessionFenceCurrent(fence)) await purgeTerminalOps({ now, fence });
     } while (rerunRequested);
   } catch {
     // Storage failure reading the queue — nothing to do; the next trigger retries.

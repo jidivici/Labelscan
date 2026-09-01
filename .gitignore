@@ -1,15 +1,52 @@
-# Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
-
-# dependencies
+# Dependencies
 node_modules/
 
-# Expo
+# Local agent and developer state
+.agents/
+.claude/
+.codex*/
+.idea/
+.vscode/
+.tmp/
+.local-archive/
+
+# Expo and generated native projects
 .expo/
 dist/
 web-build/
 expo-env.d.ts
+/ios/
+/android/
 
-# Native
+# Build, test and diagnostic output
+build/
+coverage/
+test-results/
+playwright-report/
+.nyc_output/
+output/
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.metro-health-check*
+
+# Local presentation, office and install artifacts
+*.apk
+*.aab
+*.ipa
+*.xcarchive/
+*.ppt
+*.pptx
+*.doc
+*.docx
+/*.pdf
+/LabelScan-*/
+/LabelScan_*/
+/Fiche_*/
+/build_labelscan_summary.py
+
+# Native credentials and local secrets
 .kotlin/
 *.orig.*
 *.jks
@@ -17,42 +54,22 @@ expo-env.d.ts
 *.p12
 *.key
 *.mobileprovision
-
-# Metro
-.metro-health-check*
-
-# debug
-npm-debug.*
-yarn-debug.*
-yarn-error.*
-
-# macOS
-.DS_Store
 *.pem
-
-# local env files (never commit real secrets — only *.example is tracked)
 .env
 .env.*
 !.env.example
 !.env*.example
 
-# typescript
-*.tsbuildinfo
-
-# generated native folders
-/ios
-/android
-
-# IDE / editors
-.idea/
-.vscode/
-
-# Claude Code: ignore local agent state + nested git worktrees, but keep the shared
-# project settings (settings.json, already tracked) under version control.
-.claude/*
-!.claude/settings.json
-
-# Python tooling caches (root level; server/ has its own ignore too)
+# Python tooling and caches
+.venv/
+venv/
+*.egg-info/
 .pytest_cache/
 .ruff_cache/
+.import_linter_cache/
 __pycache__/
+*.py[cod]
+
+# TypeScript and operating-system metadata
+*.tsbuildinfo
+.DS_Store

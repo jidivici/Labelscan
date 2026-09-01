@@ -6,6 +6,8 @@
  */
 
 export const documentDirectory = 'file:///mock-documents/';
+export const cacheDirectory = 'file:///mock-cache/';
+export const EncodingType = { UTF8: 'utf8' } as const;
 
 const files = new Set<string>();
 const dirs = new Set<string>();
@@ -23,17 +25,29 @@ export async function copyAsync({ to }: { from: string; to: string }): Promise<v
   files.add(to);
 }
 
+export async function writeAsStringAsync(uri: string): Promise<void> {
+  files.add(uri);
+}
+
 export async function deleteAsync(uri: string): Promise<void> {
-  files.delete(uri);
-  dirs.delete(uri);
+  for (const file of [...files]) {
+    if (file === uri || file.startsWith(uri.endsWith('/') ? uri : `${uri}/`)) files.delete(file);
+  }
+  for (const dir of [...dirs]) {
+    if (dir === uri || dir.startsWith(uri.endsWith('/') ? uri : `${uri}/`)) dirs.delete(dir);
+  }
 }
 
 export async function readDirectoryAsync(dirUri: string): Promise<string[]> {
-  const names: string[] = [];
-  for (const f of files) {
-    if (f.startsWith(dirUri)) names.push(f.slice(dirUri.length));
+  const names = new Set<string>();
+  const prefix = dirUri.endsWith('/') ? dirUri : `${dirUri}/`;
+  for (const entry of [...files, ...dirs]) {
+    if (!entry.startsWith(prefix) || entry === prefix) continue;
+    const relative = entry.slice(prefix.length);
+    const directName = relative.split('/')[0];
+    if (directName) names.add(directName);
   }
-  return names;
+  return [...names];
 }
 
 // Test-only helpers to seed/reset the fake filesystem between suites.
@@ -43,4 +57,7 @@ export function __reset(): void {
 }
 export function __seedFile(uri: string): void {
   files.add(uri);
+}
+export function __seedDirectory(uri: string): void {
+  dirs.add(uri);
 }

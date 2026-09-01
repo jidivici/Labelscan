@@ -11,17 +11,31 @@ import time
 
 import jwt
 import pytest
+from pydantic import ValidationError
 
+from labelscan.contexts.identity.adapters.http.access_router import (
+    CreateIdentityRequest,
+    CreateManagerRequest,
+)
+from labelscan.contexts.identity.adapters.http.router import LoginRequest
+from labelscan.contexts.identity.adapters.http.store_admin_router import (
+    CreateStoreRequest,
+)
 from labelscan.contexts.identity.application.login import InvalidCredentials, Login
 from labelscan.contexts.identity.application.sessions import refresh_ttl_seconds
 from labelscan.contexts.identity.domain.password import hash_password, verify_password
-from labelscan.contexts.identity.domain.store import normalize_store_code
+from labelscan.contexts.identity.domain.store import (
+    normalize_store_code,
+    normalize_store_name,
+    normalize_store_query,
+)
 from labelscan.contexts.identity.domain.user import (
     ADMIN_SCOPES,
     MANAGER_SCOPES,
     SUPER_ADMIN_SCOPES,
     USER_ROLES,
     StoredUser,
+    normalize_identity_text,
     scopes_for_role,
 )
 from labelscan.platform.http import jwt as jwt_codec
@@ -224,3 +238,73 @@ def test_store_code_is_canonical_and_rejects_unsafe_characters():
     assert normalize_store_code(" paris-01 ") == "PARIS-01"
     with pytest.raises(ValueError):
         normalize_store_code("Paris centre")
+
+
+@pytest.mark.parametrize("value", ["safe\nname", "safe\x00name", "safe\u202ename"])
+def test_identity_and_store_labels_reject_controls_and_bidi(value: str) -> None:
+    with pytest.raises(ValueError):
+        normalize_identity_text(value, field="username", maximum=254)
+    with pytest.raises(ValueError):
+        normalize_store_name(value)
+    with pytest.raises(ValueError):
+        normalize_store_query(value)
+
+
+def test_identity_and_store_labels_are_nfc_canonical() -> None:
+    assert (
+        normalize_identity_text("Cafe\u0301", field="display_name", maximum=120)
+        == "Café"
+    )
+    assert normalize_store_name("Marche\u0301 central") == "Marché central"
+
+
+def test_login_maps_spoofed_username_to_generic_invalid_credentials() -> None:
+    with pytest.raises(InvalidCredentials):
+        Login(_FakeRepo(None))("admin\u202etxt", "not-the-password")
+
+
+@pytest.mark.parametrize(
+    "model,payload",
+    [
+        (
+            LoginRequest,
+            {"username": "admin\n", "password": "password"},
+        ),
+        (
+            CreateIdentityRequest,
+            {
+                "username": "manager",
+                "display_name": "visible\u202etxt",
+                "password": "manager-password-123",
+            },
+        ),
+        (
+            CreateStoreRequest,
+            {
+                "name": "Store\x00hidden",
+                "profession_codes": ["poissonnerie"],
+            },
+        ),
+    ],
+)
+def test_http_identity_models_reject_controls_before_whitespace_stripping(
+    model, payload
+) -> None:
+    with pytest.raises(ValidationError):
+        model.model_validate(payload)
+
+
+def test_manager_body_accepts_only_canonical_typed_uuid_strings() -> None:
+    payload = {
+        "username": "manager",
+        "display_name": "Manager",
+        "password": "manager-password-123",
+        "business_portal_ids": ["22222222-2222-2222-2222-222222222222"],
+    }
+    assert str(
+        CreateManagerRequest.model_validate(payload).business_portal_ids[0]
+    ) == payload["business_portal_ids"][0]
+
+    payload["business_portal_ids"] = ["22222222-2222-2222-2222-22222222222A"]
+    with pytest.raises(ValidationError):
+        CreateManagerRequest.model_validate(payload)

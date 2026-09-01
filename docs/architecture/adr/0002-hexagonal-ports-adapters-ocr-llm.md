@@ -1,16 +1,24 @@
-# ADR-0002: Hexagonal ports & adapters for OCR/LLM (and persistence)
+# ADR-0002: Hexagonal ports and adapters for OCR/LLM and persistence
 
 ## Status
-Accepted & Implemented
+
+Accepted and implemented
+
+The context and alternatives below preserve the conditions recorded when this decision
+was made. The current runtime is summarized at the end.
 
 ## Context
-Today the OCR provider (Google Cloud Vision) is hardwired: `extractTextFromImage` in
-`src/services/ocr.ts` is imported and called directly from `src/screens/CameraScreen.tsx`
-([initial audit](../../archive/AUDIT.md), A1). Persistence is hardwired to AsyncStorage. The brief requires that OCR and LLM
-providers be **replaceable** and that the **domain layer not depend on** frameworks, DB, HTTP, or
-OCR/LLM providers (constraints #5, #6).
+
+At decision time, the Google Cloud Vision OCR provider was hardwired:
+`extractTextFromImage` in `src/services/ocr.ts` was imported and called directly from
+`src/screens/CameraScreen.tsx`. Persistence was also hardwired to AsyncStorage.
+The brief required OCR and LLM providers to be **replaceable** and the **domain layer to
+remain independent of** frameworks, databases, HTTP, and provider SDKs. The original
+detailed audit and target-architecture source material is retained in Git history; the
+archived landing pages no longer reproduce its numbered findings and sections.
 
 ## Decision
+
 Apply **hexagonal architecture (ports & adapters)** in the contexts where domain rules need
 isolation — primarily **Ingestion & Extraction** and **HACCP**. The domain defines **outbound
 ports** as interfaces: `OcrPort`, `LlmExtractorPort`, `RawArtifactRepository`,
@@ -21,15 +29,18 @@ the vendor's response into the domain's own types (e.g. normalized per-token con
 vendor shape leaks inward.
 
 ## Consequences
+
 - **Easier:** swapping OCR or LLM providers (new adapter, no domain change); unit-testing the
   domain and use cases with in-memory fakes (no network, no DB); keeping the bundled API-key
-  problem ([initial audit](../../archive/AUDIT.md), A3) out of the client entirely.
+  problem that existed in the mobile-only application out of the client entirely.
 - **Harder:** more indirection and a little boundary-mapping code; developers must resist calling
   SDKs directly from use cases.
 
 ## Alternatives considered
-1. **Direct SDK calls from application/services (status quo, server-side).** Rejected: violates
-   #5/#6; provider change becomes a multi-site edit; untestable without the network.
+
+1. **Direct SDK calls from application/services (status quo, server-side).** Rejected: it
+   violates the framework-independence and provider-replaceability constraints; provider
+   change becomes a multi-site edit and tests require a network.
 2. **A thin facade/wrapper module without inverted ownership.** Rejected: a facade the domain
    *calls outward* still couples the domain to an outward module; ports owned by the domain keep
    the dependency arrow pointing inward.
@@ -37,34 +48,35 @@ vendor shape leaks inward.
    ADR-0006; layered modules suffice there.
 
 ## Trade-offs
+
 We trade *some indirection and mapping code* for *provider independence, testability, and a
 framework-free domain*. For simple CRUD this indirection would be waste; it is applied only where
 a real coupling/change problem exists.
 
 ## Reversibility
+
 **High.** Ports are interfaces; a wrong adapter choice is a localized rewrite of one adapter. If a
 port proves to add no value in a given context, that context can drop to a layered design without
 affecting others (the boundary is per-context).
 
-## Notes — two-tier extraction & prompt caching (2026-06-19)
-Two capabilities ship entirely **behind the existing `LlmExtractorPort`** (and
-`platform/observability`), so **no new ADR is required** — both are adapter/config choices this
-port was designed to absorb (see *Reversibility* above):
+## Current implementation note
 
-- **Two-tier escalation.** `claude-haiku-4-5` is the primary extractor; `claude-opus-4-8` is the
-  escalation tier (SYNTHESIS C12 — supersedes the older `claude-sonnet-4-6` placeholder). The tier
-  is a *second* `ClaudeLlmExtractor` instance bound to the stronger model, injected at the
-  composition root and called **at most once per ingestion**, only when the gated primary would
-  force `needs_review` on a rule-set-required free-text field that GS1 cannot supply. The domain
-  gate (`evaluate`) and GS1 precedence are untouched: the escalated output is re-gated (no
-  relaxation) and reconciled with GS1 (GS1 still wins). Config: `LABELSCAN_LLM_ESCALATION_ENABLED`
-  (default off), `LABELSCAN_LLM_ESCALATION_MODEL` (default `claude-opus-4-8`).
-- **Prompt caching.** The large static system prefix carries one `cache_control` breakpoint so
-  Anthropic bills it at ~0.1× on a hit; the per-label OCR text + GS1 hint stay in the dynamic user
-  message. Haiku 4.5 caches only a ≥4096-token prefix, so the prefix is authored above that floor.
-  Config: `LABELSCAN_LLM_PROMPT_CACHE_ENABLED` (default on), `LABELSCAN_LLM_PROMPT_CACHE_TTL`
-  (default `1h`).
+The decision remains active. Ports live in the context application packages, Google Vision
+and Anthropic are adapters, and composition is split across `server/src/labelscan/app/`
+rather than one `app/main.py`.
 
-Persistence is additive/nullable only (migration `0010`: `raw_artifact.model`,
-`extraction_run.escalation_model`); `extraction_run` stays append-only and `is_latest` intact.
-</content>
+The current Anthropic adapter defaults the primary extractor to `claude-haiku-4-5`. An
+optional second `ClaudeLlmExtractor` defaults to `claude-opus-4-8`; it is disabled unless
+`LABELSCAN_LLM_ESCALATION_ENABLED` is true. When enabled, it can run once for a required
+free-text field that the primary gate leaves unresolved and GS1 cannot supply. The merged
+result goes through the same evidence gate and GS1 reconciliation, so escalation does not
+relax domain validation. Model IDs remain configurable through `LABELSCAN_LLM_MODEL` and
+`LABELSCAN_LLM_ESCALATION_MODEL`.
+
+Prompt caching is an adapter option controlled by `LABELSCAN_LLM_PROMPT_CACHE_ENABLED` and
+`LABELSCAN_LLM_PROMPT_CACHE_TTL`. The current adapter marks only the fishmonger profile's
+static system block as cacheable; label-specific OCR and GS1 data remain in the dynamic
+message. Migration `0010` added nullable model metadata while preserving append-only
+extraction runs. Model availability, cache eligibility, pricing, and provider limits can
+change independently of this ADR, so the adapter source, runtime configuration, and provider
+contract are the operational source of truth.

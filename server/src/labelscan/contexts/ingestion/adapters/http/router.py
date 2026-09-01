@@ -15,6 +15,7 @@ It calls NO external provider and does NOT touch the outbox directly.
 from __future__ import annotations
 
 import threading
+from collections import Counter
 from uuid import UUID
 
 import sqlalchemy.exc
@@ -31,6 +32,7 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from labelscan.business_profiles import trade_profile
 from labelscan.contexts.ingestion.adapters.http.schemas import IngestionAcceptedResponse
@@ -72,13 +74,16 @@ from labelscan.contexts.ingestion.domain.input_validation import (
 from labelscan.platform.http.access import access_context_for_principal
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.security import Principal, require_scope
-from labelscan.platform.image_validation import InvalidImage, validate_image
+from labelscan.platform.image_validation import InvalidImage, sanitize_image
 
 router = APIRouter()
 
 _ACCEPTED_MEDIA = {"image/jpeg", "image/png", "image/webp"}
 _MAX_BYTES = 10 * 1024 * 1024
 _READ_CHUNK_BYTES = 64 * 1024
+_INGESTION_FORM_FIELDS = frozenset(
+    {"image", "barcode_raw", "client_captured_at"}
+)
 
 
 _DEFAULT_USE_CASE: SubmitIngestion | None = None
@@ -122,6 +127,31 @@ def get_submit_ingestion() -> SubmitIngestion:
     return _DEFAULT_USE_CASE
 
 
+async def _require_strict_ingestion_form(request: Request) -> None:
+    """Reject ambiguous multipart inputs before FastAPI selects field values.
+
+    Starlette's form object deliberately preserves duplicate entries, while a
+    normal mapping lookup does not.  Inspecting ``multi_items`` prevents an
+    attacker from smuggling a second value whose selection could differ between
+    the API gateway, framework and application.
+    """
+
+    try:
+        form = await request.form(
+            max_files=2,
+            max_fields=3,
+            max_part_size=128 * 1024,
+        )
+    except StarletteHTTPException as exc:
+        raise ApiError("VALIDATION_ERROR", "invalid multipart form") from exc
+    counts = Counter(name for name, _value in form.multi_items())
+    unknown = sorted(set(counts) - _INGESTION_FORM_FIELDS)
+    if unknown:
+        raise ApiError("VALIDATION_ERROR", "multipart form contains unknown fields")
+    if any(count != 1 for count in counts.values()):
+        raise ApiError("VALIDATION_ERROR", "multipart form contains duplicate fields")
+
+
 @router.post(
     "/v1/ingestions",
     status_code=status.HTTP_202_ACCEPTED,
@@ -130,6 +160,7 @@ def get_submit_ingestion() -> SubmitIngestion:
 def submit_ingestion(
     request: Request,
     response: Response,
+    _strict_form: None = Depends(_require_strict_ingestion_form),
     image: UploadFile = File(...),
     barcode_raw: str | None = Form(None, max_length=128),
     client_captured_at: str | None = Form(None, max_length=64),
@@ -137,6 +168,7 @@ def submit_ingestion(
     principal: Principal = Depends(require_scope("ingestion:write")),
     use_case: SubmitIngestion = Depends(get_submit_ingestion),
 ) -> IngestionAcceptedResponse:
+    del _strict_form
     idempotency_key = _bounded_idempotency_key(idempotency_key, required=True)
     try:
         barcode_raw = validate_barcode_raw(barcode_raw)
@@ -166,7 +198,7 @@ def submit_ingestion(
     if not data:
         raise ApiError("VALIDATION_ERROR", "empty image payload")
     try:
-        validate_image(data, media_type)
+        sanitized = sanitize_image(data, media_type)
     except InvalidImage as exc:
         raise ApiError("VALIDATION_ERROR", str(exc))
 
@@ -178,6 +210,8 @@ def submit_ingestion(
     command = SubmitIngestionCommand(
         image_bytes=data,
         content_type=media_type,
+        sanitized_image_bytes=sanitized.content,
+        sanitized_content_type=sanitized.media_type,
         actor_id=principal.actor_id,  # audit context: who
         correlation_id=request.state.correlation_id,  # audit context: correlation
         trace_id=request.state.trace_id,  # audit context: trace
@@ -245,7 +279,7 @@ def get_override_field() -> OverrideField:
 
 
 class OverrideFieldRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     value: str | None = Field(None, max_length=512)
     note: str | None = Field(None, max_length=2000)
@@ -425,7 +459,7 @@ def get_finalize_review() -> FinalizeReview:
 
 
 class FinalizeReviewRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
     fields: dict[str, str | None]
     note: str | None = Field(None, max_length=2000)

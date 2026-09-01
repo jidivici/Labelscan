@@ -27,12 +27,30 @@ jest.mock('../services/api', () => ({
   confirmIngestion: jest.fn(),
 }));
 
+jest.mock('../services/authStorage', () => ({
+  captureActiveSession: jest.fn(async () => ({
+    generation: 1,
+    scopeKey: 'org-a:actor-a:portal-a:poissonnerie',
+    signal: new AbortController().signal,
+  })),
+  getOperatorContext: jest.fn(async () => ({
+    organizationId: 'org-a',
+    actorId: 'actor-a',
+    businessPortalId: 'portal-a',
+    tradeCode: 'poissonnerie',
+  })),
+  isSessionFenceCurrent: jest.fn(() => true),
+  operatorContextKey: jest.fn((context) =>
+    [context.organizationId, context.actorId, context.businessPortalId, context.tradeCode].join(':'),
+  ),
+}));
+
 const mockedOverride = overrideField as jest.MockedFunction<typeof overrideField>;
 const mockedConfirm = confirmIngestion as jest.MockedFunction<typeof confirmIngestion>;
 
 async function clearOutbox() {
   const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
-  await AsyncStorage.removeItem('@labelscan:outbox');
+  await AsyncStorage.multiRemove(['@labelscan:outbox', '@labelscan:outbox:v2']);
 }
 
 describe('drainOutbox', () => {

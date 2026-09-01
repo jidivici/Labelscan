@@ -80,7 +80,7 @@ type NavProp = StackNavigationProp<RootStackParamList, 'Camera'>;
 type RouteType = RouteProp<RootStackParamList, 'Camera'>;
 
 export function CameraScreen() {
-  const { businessPortalId, businessProfile } = useAuth();
+  const { businessProfile } = useAuth();
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const navigation = useNavigation<NavProp>();
@@ -290,19 +290,17 @@ export function CameraScreen() {
               });
 
               // Only the verified, cropped JPEG may enter the scan queue and reach OCR.
-              const scan = await enqueueScan({
+              await enqueueScan({
                 id: scanId,
                 tempUri: out.uri,
                 barcodeRaw,
                 capturedAt,
-                tradeCode: businessProfile.code,
-                businessPortalId: businessPortalId ?? undefined,
                 photoBaseRotationDegrees: 0,
               });
               logLatency('capture', { framed: 'true' });
-              // Clean up the raw intermediate — UNLESS enqueueScan's own persist failed and
-              // fell back to this exact uri (then it's the scan's only copy; keep it).
-              if (scan.photoUri !== durableRawUri) void deletePendingPhoto(durableRawUri);
+              // enqueueScan has committed its own durable cropped copy; the raw
+              // intermediate is no longer part of the offline operation.
+              void deletePendingPhoto(durableRawUri);
             } finally {
               outputImage.release();
               rotationContext.release();
@@ -335,7 +333,6 @@ export function CameraScreen() {
     frameGeometry,
     screenWidth,
     screenHeight,
-    businessPortalId,
     businessProfile.code,
   ]);
 

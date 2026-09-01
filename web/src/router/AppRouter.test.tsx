@@ -1,4 +1,5 @@
 import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
@@ -64,5 +65,33 @@ describe('capability based routing', () => {
 
     expect(await screen.findByRole('heading', { name: 'Mon compte' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Métier Tous les métiers' })).toBeInTheDocument();
+  });
+
+  it.each([
+    ['une lettre accentuée', 'Abcdefghij1é'],
+    ['un chiffre Unicode', 'Abcdefghij1٢'],
+  ])('does not treat %s as a special character on the account page', async (_case, password) => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/compte', superAdminFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+
+    await user.type(screen.getByLabelText('Mot de passe actuel'), 'CurrentPassword1!');
+    await user.type(screen.getByLabelText('Nouveau mot de passe'), password);
+    await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), password);
+
+    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeDisabled();
+  });
+
+  it('accepts punctuation as a special character on the account page', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/compte', superAdminFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+    const password = 'Abcdefghi1é!';
+
+    await user.type(screen.getByLabelText('Mot de passe actuel'), 'CurrentPassword1!');
+    await user.type(screen.getByLabelText('Nouveau mot de passe'), password);
+    await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), password);
+
+    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
   });
 });

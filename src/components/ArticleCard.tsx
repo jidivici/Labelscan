@@ -25,9 +25,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Article } from '../types/Article';
 import { formatDateShort } from '../services/dates';
 import { commonName } from '../services/articleGrouping';
-import { displayFieldValue } from '../services/fieldLabels';
+import { displayFieldValue, displayFinalFieldValue } from '../services/fieldLabels';
+import { businessProfileFor } from '../services/businessProfiles';
 import { colors, spacing, radius, typography } from '../theme';
 import { RotatedPhoto } from './RotatedPhoto';
+import { useAuthenticatedImageSource } from '../hooks/useAuthenticatedImageSource';
 
 interface ArticleCardProps {
   article: Article;
@@ -50,6 +52,8 @@ export const ArticleCard = React.memo(function ArticleCard({
 }: ArticleCardProps) {
   const translateX = useSharedValue(0);
   const scale = useSharedValue(1);
+  const photoSource = useAuthenticatedImageSource(article.photo_uri);
+  const showFao = businessProfileFor(article.trade_code).fields.includes('FAO_area');
 
   const fieldValue = (name: string) =>
     article.fields.find((field) => field.field_name === name)?.value?.trim() ?? '';
@@ -59,10 +63,10 @@ export const ArticleCard = React.memo(function ArticleCard({
   const producer = fieldValue('producer_name') || fieldValue('reseller_brand');
   const productionMethod = displayFieldValue('production_method', fieldValue('production_method'));
   const origin = fieldValue('origin_country');
-  const title = commonName(article) || article.barcode_raw || 'Produit sans nom';
+  const title = commonName(article) || article.barcode_raw || 'NC';
   const description =
     [scientificName || producer, productionMethod, origin].filter(Boolean).join(' · ') ||
-    'Description non renseignée';
+    'NC';
   const dateStr = formatDateShort(article.saved_at);
 
   const confirmDelete = useCallback(() => {
@@ -145,9 +149,9 @@ export const ArticleCard = React.memo(function ArticleCard({
           >
             {/* Product image stays in one fixed frame for a stable list rhythm. */}
             <View style={styles.thumbnail}>
-              {article.photo_uri ? (
+              {photoSource ? (
                 <RotatedPhoto
-                  source={{ uri: article.photo_uri, headers: article.photo_headers }}
+                  source={photoSource}
                   style={[
                     styles.thumbnailImage,
                   ]}
@@ -186,28 +190,18 @@ export const ArticleCard = React.memo(function ArticleCard({
               </Text>
 
               <View style={styles.chipRow}>
-                {lot || fao ? (
-                  <>
-                    {lot ? (
-                      <View style={styles.metaChip}>
-                        <Text style={[typography.labelSmall, styles.metaChipText]} numberOfLines={1}>
-                          Lot {lot}
-                        </Text>
-                      </View>
-                    ) : null}
-                    {fao ? (
-                      <View style={styles.metaChip}>
-                        <Text style={[typography.labelSmall, styles.metaChipText]} numberOfLines={1}>
-                          FAO {fao}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </>
-                ) : (
-                  <Text style={[typography.labelSmall, styles.missingMeta]}>
-                    Traçabilité à compléter
+                <View style={styles.metaChip}>
+                  <Text style={[typography.labelSmall, styles.metaChipText]} numberOfLines={1}>
+                    Lot {displayFinalFieldValue('batch_number', lot || null)}
                   </Text>
-                )}
+                </View>
+                {showFao ? (
+                  <View style={styles.metaChip}>
+                    <Text style={[typography.labelSmall, styles.metaChipText]} numberOfLines={1}>
+                      FAO {displayFinalFieldValue('FAO_area', fao || null)}
+                    </Text>
+                  </View>
+                ) : null}
               </View>
 
               <View style={styles.footerRow}>

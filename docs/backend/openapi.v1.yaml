@@ -761,20 +761,23 @@ paths:
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           title: Ingestion Id
       - name: wait
         in: query
         required: false
         schema:
           type: number
-          description: Long-poll hold in seconds (Tier 4), clamped to 25. Requires last_status; the response
+          maximum: 25.0
+          minimum: 0.0
+          description: Long-poll hold in seconds (Tier 4), bounded to 25. Requires last_status; the response
             returns as soon as the status differs from last_status, or when the hold expires (with the
             current state).
           default: 0.0
           title: Wait
-        description: Long-poll hold in seconds (Tier 4), clamped to 25. Requires last_status; the response
+        description: Long-poll hold in seconds (Tier 4), bounded to 25. Requires last_status; the response
           returns as soon as the status differs from last_status, or when the hold expires (with the current
           state).
       - name: last_status
@@ -782,8 +785,7 @@ paths:
         required: false
         schema:
           anyOf:
-          - type: string
-            maxLength: 64
+          - $ref: '#/components/schemas/IngestionStatus'
           - type: 'null'
           description: The status the client last observed (long-poll baseline).
           title: Last Status
@@ -813,8 +815,9 @@ paths:
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           title: Run Id
       responses:
         '200':
@@ -841,8 +844,9 @@ paths:
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           title: Batch Id
       responses:
         '200':
@@ -905,7 +909,7 @@ paths:
         schema:
           anyOf:
           - type: string
-            maxLength: 64
+            format: uuid
           - type: 'null'
           title: Business Portal Id
       - name: profession
@@ -986,7 +990,7 @@ paths:
         schema:
           anyOf:
           - type: string
-            maxLength: 64
+            format: uuid
           - type: 'null'
           title: Captured By User Id
       - name: date_from
@@ -1074,6 +1078,7 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100000
           minimum: 0
           default: 0
           title: Offset
@@ -1092,6 +1097,90 @@ paths:
                 $ref: '#/components/schemas/Problem'
       security:
       - bearerAuth: []
+  /v1/arrivals/export:
+    get:
+      summary: Export Arrivals
+      operationId: export_arrivals_v1_arrivals_export_get
+      parameters:
+      - name: format
+        in: query
+        required: false
+        schema:
+          enum:
+          - json
+          - csv
+          type: string
+          default: json
+          title: Format
+      - name: q
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            maxLength: 120
+          - type: 'null'
+          title: Q
+      - name: store_code
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: array
+            items:
+              type: string
+          - type: 'null'
+          title: Store Code
+      - name: business_portal_id
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: uuid
+          - type: 'null'
+          title: Business Portal Id
+      - name: profession
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - enum:
+            - poissonnerie
+            - boucherie
+            - charcuterie_traiteur
+            type: string
+          - type: 'null'
+          title: Profession
+      - name: date_from
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date From
+      - name: date_to
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Date To
+      responses:
+        '200':
+          description: Successful Response
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
   /v1/arrivals/{batch_id}:
     get:
       summary: Get Arrival
@@ -1102,8 +1191,7 @@ paths:
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
+          format: uuid
           title: Batch Id
       responses:
         '200':
@@ -1130,8 +1218,7 @@ paths:
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
+          format: uuid
           title: Batch Id
       responses:
         '200':
@@ -1193,7 +1280,9 @@ paths:
         schema:
           anyOf:
           - type: string
-            maxLength: 128
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           - type: 'null'
           title: Batch Id
       - name: business_portal_id
@@ -1202,7 +1291,9 @@ paths:
         schema:
           anyOf:
           - type: string
-            maxLength: 128
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           - type: 'null'
           title: Business Portal Id
       - name: profession
@@ -1210,8 +1301,11 @@ paths:
         required: false
         schema:
           anyOf:
-          - type: string
-            maxLength: 64
+          - enum:
+            - poissonnerie
+            - boucherie
+            - charcuterie_traiteur
+            type: string
           - type: 'null'
           title: Profession
       - name: limit
@@ -1228,6 +1322,7 @@ paths:
         required: false
         schema:
           type: integer
+          maximum: 100000
           minimum: 0
           default: 0
           title: Offset
@@ -1256,8 +1351,9 @@ paths:
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           title: Alert Id
       responses:
         '200':
@@ -1284,8 +1380,9 @@ paths:
         required: true
         schema:
           type: string
-          minLength: 1
-          maxLength: 128
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
           title: Alert Id
       responses:
         '200':
@@ -2013,8 +2110,10 @@ components:
             - boucherie
             - charcuterie_traiteur
           type: array
+          maxItems: 3
           minItems: 1
           title: Profession Codes
+      additionalProperties: false
       type: object
       required:
       - name
@@ -2153,6 +2252,43 @@ components:
       - fields
       - audit
       title: ExtractionRunView
+    FieldSpecResponse:
+      properties:
+        kind:
+          type: string
+          title: Kind
+        format:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Format
+        max_length:
+          type: integer
+          exclusiveMinimum: 0.0
+          title: Max Length
+        enum:
+          items:
+            type: string
+          type: array
+          title: Enum
+        units:
+          items:
+            type: string
+          type: array
+          title: Units
+        nullable:
+          type: boolean
+          title: Nullable
+      additionalProperties: false
+      type: object
+      required:
+      - kind
+      - format
+      - max_length
+      - enum
+      - units
+      - nullable
+      title: FieldSpecResponse
     FieldView:
       properties:
         field_name:
@@ -2160,17 +2296,18 @@ components:
           title: Field Name
         value:
           anyOf:
-          - {}
+          - type: string
           - type: 'null'
           title: Value
         evidence:
-          anyOf:
-          - {}
-          - type: 'null'
+          items:
+            type: string
+          type: array
           title: Evidence
         provenance:
           anyOf:
-          - {}
+          - additionalProperties: true
+            type: object
           - type: 'null'
           title: Provenance
         source_raw_artifact_id:
@@ -2182,6 +2319,11 @@ components:
           type: string
           title: Validation Status
         warnings:
+          anyOf:
+          - items:
+              type: string
+            type: array
+          - type: 'null'
           title: Warnings
         llm_confidence:
           anyOf:
@@ -2303,6 +2445,22 @@ components:
       - replayed
       - correlation_id
       title: IngestionAcceptedResponse
+    IngestionStatus:
+      type: string
+      enum:
+      - raw_stored
+      - ocr_running
+      - ocr_done
+      - ocr_failed
+      - ocr_skipped_garbage
+      - extraction_running
+      - extracted
+      - extraction_failed
+      - needs_review
+      - confirmed
+      - rejected
+      - halted_missing_context
+      title: IngestionStatus
     IngestionView:
       properties:
         ingestion_id:
@@ -2653,6 +2811,14 @@ components:
             type: string
           type: array
           title: Required Fields
+        field_contract_version:
+          type: string
+          title: Field Contract Version
+        field_specs:
+          additionalProperties:
+            $ref: '#/components/schemas/FieldSpecResponse'
+          type: object
+          title: Field Specs
       type: object
       required:
       - code
@@ -2661,6 +2827,8 @@ components:
       - common_fields
       - specific_fields
       - required_fields
+      - field_contract_version
+      - field_specs
       title: ProfessionResponse
     RawArtifactView:
       properties:
@@ -2767,6 +2935,7 @@ components:
           - type: boolean
           - type: 'null'
           title: Active
+      additionalProperties: false
       type: object
       title: UpdateStoreRequest
     UserResponse:

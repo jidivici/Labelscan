@@ -57,6 +57,8 @@ class IngestionWriteRepository(Protocol):
         *,
         content_sha256: str,
         storage_ref: str,
+        original_content_sha256: str | None = None,
+        original_storage_ref: str | None = None,
         barcode_raw: str | None,
         client_captured_at: str | None,
         store_code: str | None = None,
