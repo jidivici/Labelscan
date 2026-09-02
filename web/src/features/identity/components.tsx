@@ -64,37 +64,52 @@ export function ActiveBadge({ active }: { active: boolean }) {
 export function PasswordField({
   value,
   onChange,
+  name,
   label = 'Mot de passe',
   autoFocus = false,
   minLength = 1,
   hint,
   autoComplete = 'new-password',
+  passwordRules,
+  preserveAutofill = false,
 }: {
   value: string;
   onChange: (value: string) => void;
+  name?: string;
   label?: string;
   autoFocus?: boolean;
   minLength?: number;
   hint?: string;
   autoComplete?: 'current-password' | 'new-password';
+  passwordRules?: string;
+  preserveAutofill?: boolean;
 }) {
   const [visible, setVisible] = useState(false);
   const inputId = useId();
+  const valueProps = preserveAutofill ? { defaultValue: value } : { value };
   return <div className="field password-field">
     <label htmlFor={inputId}>{label}</label>
     <span className="password-input">
       <input
         id={inputId}
+        name={name}
         type={visible ? 'text' : 'password'}
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+        {...valueProps}
+        onInput={(event) => onChange(event.currentTarget.value)}
         minLength={minLength}
         maxLength={128}
         autoComplete={autoComplete}
         autoFocus={autoFocus}
+        {...(passwordRules ? { passwordrules: passwordRules } : {})}
         required
       />
-      <button type="button" onClick={() => setVisible((current) => !current)} aria-label={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}>
+      <button
+        type="button"
+        onPointerDown={(event) => event.preventDefault()}
+        onClick={() => setVisible((current) => !current)}
+        aria-label={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+        aria-pressed={visible}
+      >
         {visible ? 'Masquer' : 'Afficher'}
       </button>
     </span>

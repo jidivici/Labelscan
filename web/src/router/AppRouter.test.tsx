@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { Router } from 'wouter';
@@ -93,5 +93,37 @@ describe('capability based routing', () => {
     await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), password);
 
     expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
+  });
+
+  it('exposes password-change semantics to Safari AutoFill', async () => {
+    renderAt('/o/labelscan/compte', superAdminFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+
+    expect(screen.getByLabelText('Identifiant')).toHaveAttribute('autocomplete', 'username');
+    expect(screen.getByLabelText('Mot de passe actuel')).toHaveAttribute('autocomplete', 'current-password');
+    expect(screen.getByLabelText('Nouveau mot de passe')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('Nouveau mot de passe')).toHaveAttribute('passwordrules');
+    expect(screen.getByLabelText('Confirmer le nouveau mot de passe')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('Confirmer le nouveau mot de passe')).not.toHaveAttribute('passwordrules');
+  });
+
+  it('keeps a Safari-generated password when revealing it and reacts to native input events', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/compte', superAdminFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+    const current = screen.getByLabelText('Mot de passe actuel');
+    const password = screen.getByLabelText('Nouveau mot de passe');
+    const confirmation = screen.getByLabelText('Confirmer le nouveau mot de passe');
+    const generatedPassword = 'Strong-Apple-Password-42';
+
+    fireEvent.input(current, { target: { value: 'CurrentPassword1!' } });
+    fireEvent.input(password, { target: { value: generatedPassword } });
+    fireEvent.input(confirmation, { target: { value: generatedPassword } });
+
+    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
+    await user.click(screen.getAllByRole('button', { name: 'Afficher le mot de passe' })[1]);
+    expect(password).toHaveAttribute('type', 'text');
+    expect(password).toHaveValue(generatedPassword);
+    expect(screen.getByRole('button', { name: 'Masquer le mot de passe' })).toHaveAttribute('aria-pressed', 'true');
   });
 });

@@ -319,7 +319,8 @@ tbody tr:hover { background: #fafcfb; }
 .manager-form > .button { justify-self: start; margin: 0; }
 .password-input { position: relative; display: block; }
 .password-input input { padding-right: 74px; }
-.password-input button { position: absolute; top: 50%; right: 6px; min-height: 30px; padding: 0 7px; transform: translateY(-50%); border: 0; border-radius: 5px; background: var(--surface-soft); color: var(--primary); font-size: 9px; font-weight: 750; }
+.password-input button { position: absolute; top: 50%; right: 6px; min-height: 32px; padding: 0 9px; transform: translateY(-50%); border: 0; border-radius: 7px; background: var(--surface-soft); color: var(--primary); font-size: 10px; font-weight: 750; }
+.password-input button:hover, .password-input button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary-dark); }
 .choice-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .choice-fieldset legend { margin-bottom: 8px; color: #465450; font-size: 12px; font-weight: 700; }
 .portal-choices { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -380,7 +381,8 @@ tbody tr:hover { background: #fafcfb; }
 .manager-portal-option.placeholder { color: #73817e; font-weight: 550; }
 .manager-portal-check { flex: 0 0 auto; color: var(--primary); font-weight: 800; }
 .account-password-form { display: grid; max-width: 520px; gap: 15px; }
-.account-password-form > .button { justify-self: start; margin-top: 4px; }
+.account-password-form > .button { width: 100%; min-height: 48px; margin-top: 7px; font-size: 14px; box-shadow: 0 8px 20px rgb(8 127 114 / 20%); }
+.account-password-form > .button:disabled { box-shadow: none; }
 .field-error { color: var(--danger); }
 .account-link { display: block; padding: 8px 10px; border-radius: 6px; color: var(--primary); font-size: 10px; font-weight: 750; text-decoration: none; }
 .account-link:hover { background: var(--primary-soft); }

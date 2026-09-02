@@ -50,11 +50,22 @@ export function AccountPage() {
     <ErrorNotice message={error} />
     <IdentityPanel title="Changer mon mot de passe" description="Votre mot de passe actuel est obligatoire. Vous devrez ensuite vous reconnecter.">
       <form className="account-password-form" onSubmit={(event) => void submit(event)}>
-        <PasswordField label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" />
-        <PasswordField label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} minLength={12} hint={privileged ? '12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.' : '12 caractères minimum.'} />
-        <PasswordField label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={12} />
+        <label className="sr-only" htmlFor="account-username">Identifiant</label>
+        <input id="account-username" className="sr-only" name="username" type="text" autoComplete="username" value={session?.user.username ?? ''} readOnly tabIndex={-1} />
+        <PasswordField name="currentPassword" label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" preserveAutofill />
+        <PasswordField
+          name="newPassword"
+          label="Nouveau mot de passe"
+          value={newPassword}
+          onChange={setNewPassword}
+          minLength={12}
+          passwordRules={privileged ? 'minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: [-];' : 'minlength: 12; maxlength: 128;'}
+          hint={privileged ? '12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.' : '12 caractères minimum.'}
+          preserveAutofill
+        />
+        <PasswordField name="newPasswordConfirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={12} preserveAutofill />
         {confirmation && confirmation !== newPassword ? <small className="field-error">Les mots de passe ne correspondent pas.</small> : null}
-        <button className="button primary" disabled={saving || !valid}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
+        <button className="button primary account-password-submit" disabled={saving || !valid}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
       </form>
     </IdentityPanel>
   </section>;
