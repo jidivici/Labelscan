@@ -243,6 +243,37 @@ describe('IAM credentials', () => {
 });
 
 describe('IAM bounded actions', () => {
+  it('filters team results when the global store and profession scopes change', async () => {
+    const user = userEvent.setup();
+    const parisFishManager = iamUser({
+      id: 'manager-paris-fish',
+      username: 'manager.paris.poissonnerie',
+      role: 'manager',
+      business_portal_ids: ['portal-fish-paris'],
+    });
+    const parisMeatManager = iamUser({
+      id: 'manager-paris-meat',
+      username: 'manager.paris.boucherie',
+      role: 'manager',
+      business_portal_ids: ['portal-meat-paris'],
+    });
+    vi.mocked(listManagers).mockResolvedValueOnce([manager, parisFishManager, parisMeatManager]);
+
+    renderAt('/o/labelscan/administration', adminSession);
+    await screen.findByText('manager.lyon');
+
+    await user.click(screen.getByRole('button', { name: 'Magasin Tous les magasins' }));
+    await user.click(screen.getByRole('option', { name: 'Paris Centre' }));
+    await waitFor(() => expect(screen.queryByText('manager.lyon')).not.toBeInTheDocument());
+    expect(screen.getByText('manager.paris.poissonnerie')).toBeInTheDocument();
+    expect(screen.getByText('manager.paris.boucherie')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Métier Tous les métiers' }));
+    await user.click(screen.getByRole('option', { name: 'Boucherie' }));
+    await waitFor(() => expect(screen.queryByText('manager.paris.poissonnerie')).not.toBeInTheDocument());
+    expect(screen.getByText('manager.paris.boucherie')).toBeInTheDocument();
+  });
+
   it('saves a manager assignment immediately without an Enregistrer action', async () => {
     const user = userEvent.setup();
     renderAt('/o/labelscan/administration', adminSession);

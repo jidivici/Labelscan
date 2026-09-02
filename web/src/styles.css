@@ -380,9 +380,27 @@ tbody tr:hover { background: #fafcfb; }
 .manager-portal-option[aria-selected="true"] { background: #ddf4ef; color: #07554e; }
 .manager-portal-option.placeholder { color: #73817e; font-weight: 550; }
 .manager-portal-check { flex: 0 0 auto; color: var(--primary); font-weight: 800; }
-.account-password-form { display: grid; max-width: 520px; gap: 15px; }
-.account-password-form > .button { width: 100%; min-height: 48px; margin-top: 7px; font-size: 14px; box-shadow: 0 8px 20px rgb(8 127 114 / 20%); }
-.account-password-form > .button:disabled { box-shadow: none; }
+.account-security-summary { max-width: 620px; display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 13px 14px; border: 1px solid #cfe3de; border-radius: 12px; background: #f3faf8; }
+.account-security-summary > span:last-child { display: grid; gap: 3px; }
+.account-security-summary strong { color: var(--primary-dark); font-size: 12px; }
+.account-security-summary small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.account-security-mark { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; font-weight: 850; }
+.account-password-form { display: grid; max-width: 620px; gap: 16px; }
+.password-requirements { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: #fafcfb; }
+.password-requirements-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
+.password-requirements-heading strong { font-size: 11px; }
+.password-requirements-heading > span { color: var(--muted); font-size: 9px; font-weight: 700; }
+.password-requirements ul { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px 14px; margin: 0; padding: 0; list-style: none; }
+.password-requirements li { display: flex; align-items: center; gap: 7px; color: #75837f; font-size: 10px; font-weight: 600; transition: color .15s ease; }
+.password-requirements li > span { width: 16px; height: 16px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 50%; background: #e9eeec; color: #7b8985; font-size: 9px; }
+.password-requirements li.met { color: #176553; }
+.password-requirements li.met > span { background: #dff3e9; color: #176553; }
+.password-requirements li.unmet { color: var(--danger); }
+.password-requirements li.unmet > span { background: #fde8e8; color: var(--danger); }
+.account-password-form > .button { width: 100%; min-height: 50px; margin-top: 3px; font-size: 14px; transition: background .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease, transform .15s ease; }
+.account-password-submit.is-incomplete { border-color: #d6dfdc; background: #e9eeec; color: #788681; opacity: 1; box-shadow: none; }
+.account-password-submit.is-valid { border-color: var(--primary); background: var(--primary); color: #fff; box-shadow: 0 9px 22px rgb(8 127 114 / 24%); }
+.account-password-submit.is-valid:hover { background: var(--primary-dark); transform: translateY(-1px); }
 .field-error { color: var(--danger); }
 .account-link { display: block; padding: 8px 10px; border-radius: 6px; color: var(--primary); font-size: 10px; font-weight: 750; text-decoration: none; }
 .account-link:hover { background: var(--primary-soft); }
@@ -473,6 +491,7 @@ tbody tr:hover { background: #fafcfb; }
   .catalog-toolbar { flex-wrap: wrap; }
   .search-field { flex-basis: 100%; }
   .filter-panel, .identity-form { grid-template-columns: 1fr; }
+  .password-requirements ul { grid-template-columns: 1fr; }
   .filter-panel .button, .identity-form > .button { width: 100%; }
   .manager-form .choice-fieldset { grid-column: auto; }
   .topbar-context { max-width: 52%; }

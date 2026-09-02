@@ -3,6 +3,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react
 import { useAuth } from '../../auth/AuthContext';
 import { hasCapability } from '../../auth/capabilities';
 import { PORTALS } from '../../portals/registry';
+import { useScope } from '../../scope/ScopeContext';
 import { CAPABILITIES, type ProfessionCode } from '../../types';
 import {
   createStore,
@@ -70,6 +71,7 @@ function ManagerRow({
 
 export function AdminPage() {
   const { session, refreshAccess } = useAuth();
+  const { selectedStoreCode, selectedProfessionCode } = useScope();
   const canManageManagers = hasCapability(session, CAPABILITIES.MANAGER_ASSIGNMENTS_MANAGE);
   const canManagePortals = hasCapability(session, CAPABILITIES.STORES_MANAGE);
   const [overview, setOverview] = useState<IamOverview | null>(null);
@@ -95,10 +97,27 @@ export function AdminPage() {
     [overview],
   );
   const portals = overview?.business_portals ?? [];
-  const managerPageCount = Math.max(1, Math.ceil(managers.length / IDENTITY_PAGE_SIZE));
-  const storePageCount = Math.max(1, Math.ceil(stores.length / IDENTITY_PAGE_SIZE));
-  const visibleManagers = managers.slice((managerPage - 1) * IDENTITY_PAGE_SIZE, managerPage * IDENTITY_PAGE_SIZE);
-  const visibleStores = stores.slice((storePage - 1) * IDENTITY_PAGE_SIZE, storePage * IDENTITY_PAGE_SIZE);
+  const scopedPortals = portals.filter((portal) =>
+    (!selectedStoreCode || portal.store_code === selectedStoreCode)
+    && (!selectedProfessionCode || portal.profession_code === selectedProfessionCode),
+  );
+  const scopedPortalIds = new Set(scopedPortals.map((portal) => portal.id));
+  const scopedManagers = managers.filter((manager) =>
+    (!selectedStoreCode && !selectedProfessionCode)
+    || manager.business_portal_ids.some((id) => scopedPortalIds.has(id)),
+  );
+  const scopedStores = stores.filter((store) =>
+    (!selectedStoreCode || store.code === selectedStoreCode)
+    && (!selectedProfessionCode || portals.some((portal) => portal.store_code === store.code && portal.profession_code === selectedProfessionCode)),
+  );
+  const visibleStorePortals = storePortals.filter((portal) =>
+    !selectedProfessionCode || portal.profession_code === selectedProfessionCode,
+  );
+  const managerPageCount = Math.max(1, Math.ceil(scopedManagers.length / IDENTITY_PAGE_SIZE));
+  const storePageCount = Math.max(1, Math.ceil(scopedStores.length / IDENTITY_PAGE_SIZE));
+  const visibleManagers = scopedManagers.slice((managerPage - 1) * IDENTITY_PAGE_SIZE, managerPage * IDENTITY_PAGE_SIZE);
+  const visibleStores = scopedStores.slice((storePage - 1) * IDENTITY_PAGE_SIZE, storePage * IDENTITY_PAGE_SIZE);
+  const scopeActive = Boolean(selectedStoreCode || selectedProfessionCode);
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -129,8 +148,18 @@ export function AdminPage() {
   }, [storePage, storePageCount]);
 
   useEffect(() => {
-    if (!selectedStoreId && stores[0]) setSelectedStoreId(stores[0].id);
-  }, [selectedStoreId, stores]);
+    if (scopedStores.some((store) => store.id === selectedStoreId)) return;
+    setSelectedStoreId(scopedStores[0]?.id ?? '');
+  }, [scopedStores, selectedStoreId]);
+
+  useEffect(() => {
+    setManagerPage(1);
+    setStorePage(1);
+  }, [selectedProfessionCode, selectedStoreCode]);
+
+  useEffect(() => {
+    if (selectedPortalId && !scopedPortalIds.has(selectedPortalId)) setSelectedPortalId('');
+  }, [scopedPortalIds, selectedPortalId]);
 
   useEffect(() => {
     if (!session || !selectedStoreId || !canManagePortals) return;
@@ -265,19 +294,19 @@ export function AdminPage() {
   return <section className="page-stack">
     <header className="page-header">
       <div><h1>Équipe et magasins</h1><p>Attribuez un magasin et un métier à chaque manager.</p></div>
-      <div className="heading-stat"><strong>{managers.length}</strong><span>manager{managers.length > 1 ? 's' : ''}</span></div>
+      <div className="heading-stat"><strong>{scopedManagers.length}</strong><span>manager{scopedManagers.length > 1 ? 's' : ''}{scopeActive ? ' affichés' : ''}</span></div>
     </header>
     <ErrorNotice message={error} />
     <SuccessNotice message={success} />
 
     {canManageManagers &&
       <IdentityPanel title="Nouveau manager" description="Le compte sera actif dès sa création.">
-        {portals.length === 0
-          ? <IdentityEmpty title="Créez d’abord un magasin" description="Ajoutez un magasin et activez au moins un métier avant de créer votre premier manager." />
+        {scopedPortals.length === 0
+          ? <IdentityEmpty title={scopeActive ? 'Aucun portail dans ce périmètre' : 'Créez d’abord un magasin'} description={scopeActive ? 'Modifiez le magasin ou le métier sélectionné pour créer un manager.' : 'Ajoutez un magasin et activez au moins un métier avant de créer votre premier manager.'} />
           : <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
           <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
           <PasswordField value={password} onChange={setPassword} minLength={12} hint="12 caractères minimum." />
-          <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={portals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
+          <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={scopedPortals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
           <button className="button primary" disabled={saving || !selectedPortalId || password.length < 12}>{saving ? 'Création…' : 'Créer le compte'}</button>
         </form>}
       </IdentityPanel>
@@ -297,14 +326,14 @@ export function AdminPage() {
     </IdentityPanel>}
 
     {canManageManagers && <>
-      {managers.length === 0
-        ? <IdentityEmpty title="Aucun manager" description="Créez un manager et attribuez-lui un magasin et un métier." />
+      {scopedManagers.length === 0
+        ? <IdentityEmpty title={scopeActive ? 'Aucun manager dans ce périmètre' : 'Aucun manager'} description={scopeActive ? 'Aucun compte ne correspond au magasin et au métier sélectionnés.' : 'Créez un manager et attribuez-lui un magasin et un métier.'} />
         : <IdentityPanel title="Managers" description="Un manager est rattaché à un seul magasin et un seul métier.">
           <div className="table-scroll paged-content" key={`managers-${managerPage}`}><table className="identity-admin-table">
             <thead><tr><th>Identifiant</th><th>Magasin et métier</th><th>Statut</th><th>Actions</th></tr></thead>
-            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={portals} saving={saving} onAssignments={saveAssignments} onDelete={(item) => { setDeletionError(''); setPendingDeletion({ kind: 'manager', item }); }} />)}</tbody>
+            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={scopedPortals} saving={saving} onAssignments={saveAssignments} onDelete={(item) => { setDeletionError(''); setPendingDeletion({ kind: 'manager', item }); }} />)}</tbody>
           </table></div>
-          <CompactPager page={managerPage} total={managers.length} onChange={setManagerPage} label="des managers" />
+          <CompactPager page={managerPage} total={scopedManagers.length} onChange={setManagerPage} label="des managers" />
         </IdentityPanel>}
     </>}
 
@@ -320,16 +349,16 @@ export function AdminPage() {
             </div></td>
           </tr>)}</tbody>
         </table></div>
-        <CompactPager page={storePage} total={stores.length} onChange={setStorePage} label="des magasins" />
+        <CompactPager page={storePage} total={scopedStores.length} onChange={setStorePage} label="des magasins" />
       </IdentityPanel>
 
       <IdentityPanel title="Métiers par magasin" description="Activez uniquement les métiers utilisés dans chaque magasin.">
-      <div className="field compact-field panel-control"><span>Magasin</span><StoreSelect stores={stores} selected={selectedStoreId} onChange={setSelectedStoreId} disabled={stores.length === 0} /></div>
-      {storePortals.length === 0
+      <div className="field compact-field panel-control"><span>Magasin</span><StoreSelect stores={scopedStores} selected={selectedStoreId} onChange={setSelectedStoreId} disabled={scopedStores.length === 0} /></div>
+      {visibleStorePortals.length === 0
         ? <IdentityEmpty title="Aucun portail" description="Aucun portail métier n’est disponible pour ce magasin." />
         : <div className="table-scroll"><table className="identity-admin-table identity-portal-table">
           <thead><tr><th>Métier</th><th>Statut</th><th>Actions</th></tr></thead>
-          <tbody>{storePortals.map((portal) => <tr key={portal.id}>
+          <tbody>{visibleStorePortals.map((portal) => <tr key={portal.id}>
             <td><strong>{portal.profession_name}</strong></td>
             <td><ActiveBadge active={portal.active} /></td>
             <td><div className="table-actions"><button className="button secondary small" type="button" disabled={saving} onClick={() => void togglePortal(portal)}>{portal.active ? 'Désactiver' : 'Activer'}</button></div></td>

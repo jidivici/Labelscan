@@ -26,7 +26,14 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function ShellContent({ children }: { children: ReactNode }) {
   const { session, logout } = useAuth();
-  const { stores, storesLoading, selectedStoreCode, setSelectedStoreCode } = useScope();
+  const {
+    stores,
+    storesLoading,
+    selectedStoreCode,
+    selectedProfessionCode,
+    setSelectedStoreCode,
+    setSelectedProfessionCode,
+  } = useScope();
   const { organizationSlug = 'labelscan', profession: routeProfession } = useParams();
   const [location, navigate] = useLocation();
   const profession = routeProfession ?? (location.includes('/portails/tous/') ? 'tous' : undefined);
@@ -100,6 +107,10 @@ function ShellContent({ children }: { children: ReactNode }) {
   const availablePortals = Object.values(PORTALS).filter((portal) => canAccessProfession(session, portal.code));
   const base = `/o/${organizationSlug}`;
   const retainStore = selectedStoreCode ? `?store=${encodeURIComponent(selectedStoreCode)}` : '';
+  const administrationScope = new URLSearchParams();
+  if (selectedStoreCode) administrationScope.set('store', selectedStoreCode);
+  if (selectedProfessionCode) administrationScope.set('profession_scope', selectedProfessionCode);
+  const retainAdministrationScope = administrationScope.size ? `?${administrationScope.toString()}` : '';
   const defaultProfession = firstAccessibleProfession(session);
   const canSelectScope = session.user.role === 'admin' || session.user.role === 'super_admin';
   const arrivalsPath = allProfessions
@@ -119,6 +130,10 @@ function ShellContent({ children }: { children: ReactNode }) {
       : `${base}/portails${retainStore}`;
 
   function changeProfession(next: ProfessionCode | 'tous') {
+    if (administrationWorkspace) {
+      setSelectedProfessionCode(next === 'tous' ? '' : next);
+      return;
+    }
     navigate(`${base}/portails/${next}/arrivages${retainStore}`);
     setMobileOpen(false);
   }
@@ -138,7 +153,7 @@ function ShellContent({ children }: { children: ReactNode }) {
           ? <SidebarScopeSelect
               label="Métier"
               placeholder="Choisir un métier"
-              value={administrationWorkspace || allProfessions || !currentPortal ? 'tous' : currentPortal.code}
+              value={administrationWorkspace ? selectedProfessionCode || 'tous' : allProfessions || !currentPortal ? 'tous' : currentPortal.code}
               options={[{ value: 'tous', label: 'Tous les métiers' }, ...availablePortals.map((portal) => ({ value: portal.code, label: portal.shortLabel }))]}
               onChange={(next) => changeProfession(next as ProfessionCode | 'tous')}
             />
@@ -158,7 +173,7 @@ function ShellContent({ children }: { children: ReactNode }) {
       <nav className="sidebar-nav" aria-label="Navigation principale">
         <ActiveLink href={`${arrivalsPath}${retainStore}`} onClick={closeNavigation}>Arrivages</ActiveLink>
 
-        {hasCapability(session, CAPABILITIES.ADMIN_WORKSPACE_VIEW) && <ActiveLink href={`${base}/administration${retainStore}`} onClick={closeNavigation}>Équipe & portails</ActiveLink>}
+        {hasCapability(session, CAPABILITIES.ADMIN_WORKSPACE_VIEW) && <ActiveLink href={`${base}/administration${retainAdministrationScope}`} onClick={closeNavigation}>Équipe & portails</ActiveLink>}
         {hasCapability(session, CAPABILITIES.ADMINS_MANAGE) && <ActiveLink href={`${base}/super-administration${retainStore}`} onClick={closeNavigation}>Administrateurs</ActiveLink>}
       </nav>
 

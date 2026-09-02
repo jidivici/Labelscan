@@ -16,6 +16,24 @@ function hasPrivilegedPasswordPolicy(value: string): boolean {
     && /[^\p{Alphabetic}\p{Number}]/u.test(value);
 }
 
+type Requirement = { label: string; met: boolean; touched: boolean };
+
+function PasswordRequirements({ requirements }: { requirements: Requirement[] }) {
+  return <section className="password-requirements" aria-label="Critères du nouveau mot de passe" aria-live="polite">
+    <div className="password-requirements-heading">
+      <strong>Critères de sécurité</strong>
+      <span>{requirements.every((item) => item.met) ? 'Tous les critères sont respectés' : 'À compléter'}</span>
+    </div>
+    <ul>{requirements.map((requirement) => {
+      const state = requirement.met ? 'met' : requirement.touched ? 'unmet' : 'pending';
+      return <li className={state} key={requirement.label}>
+        <span aria-hidden="true">{requirement.met ? '✓' : '•'}</span>
+        {requirement.label}
+      </li>;
+    })}</ul>
+  </section>;
+}
+
 export function AccountPage() {
   const { session, logout } = useAuth();
   const [currentPassword, setCurrentPassword] = useState('');
@@ -28,6 +46,16 @@ export function AccountPage() {
   const valid = currentPassword.length > 0
     && validPassword
     && newPassword === confirmation;
+  const passwordRequirements: Requirement[] = [
+    { label: '12 caractères minimum', met: newPassword.length >= 12, touched: newPassword.length > 0 },
+    ...(privileged ? [
+      { label: 'Une lettre majuscule', met: /[A-Z]/.test(newPassword), touched: newPassword.length > 0 },
+      { label: 'Une lettre minuscule', met: /[a-z]/.test(newPassword), touched: newPassword.length > 0 },
+      { label: 'Un chiffre', met: /\d/.test(newPassword), touched: newPassword.length > 0 },
+      { label: 'Un caractère spécial', met: /[^\p{Alphabetic}\p{Number}]/u.test(newPassword), touched: newPassword.length > 0 },
+    ] : []),
+    { label: 'Les deux nouveaux mots de passe correspondent', met: confirmation.length > 0 && newPassword === confirmation, touched: confirmation.length > 0 },
+  ];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -49,6 +77,10 @@ export function AccountPage() {
     </header>
     <ErrorNotice message={error} />
     <IdentityPanel title="Changer mon mot de passe" description="Votre mot de passe actuel est obligatoire. Vous devrez ensuite vous reconnecter.">
+      <div className="account-security-summary">
+        <span className="account-security-mark" aria-hidden="true">✓</span>
+        <span><strong>Sécurité du compte</strong><small>Choisissez un mot de passe unique que vous n’utilisez sur aucun autre service.</small></span>
+      </div>
       <form className="account-password-form" onSubmit={(event) => void submit(event)}>
         <label className="sr-only" htmlFor="account-username">Identifiant</label>
         <input id="account-username" className="sr-only" name="username" type="text" autoComplete="username" value={session?.user.username ?? ''} readOnly tabIndex={-1} />
@@ -63,9 +95,9 @@ export function AccountPage() {
           hint={privileged ? '12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.' : '12 caractères minimum.'}
           preserveAutofill
         />
+        <PasswordRequirements requirements={passwordRequirements} />
         <PasswordField name="newPasswordConfirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={12} preserveAutofill />
-        {confirmation && confirmation !== newPassword ? <small className="field-error">Les mots de passe ne correspondent pas.</small> : null}
-        <button className="button primary account-password-submit" disabled={saving || !valid}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
+        <button className={`button account-password-submit ${valid ? 'is-valid' : 'is-incomplete'}`} disabled={saving || !valid}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
       </form>
     </IdentityPanel>
   </section>;

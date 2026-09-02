@@ -93,6 +93,24 @@ describe('capability based routing', () => {
     await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), password);
 
     expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toHaveClass('is-valid');
+    expect(screen.getByText('Tous les critères sont respectés')).toBeInTheDocument();
+  });
+
+  it('shows each unmet password requirement before enabling the account action', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/compte', superAdminFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+
+    await user.type(screen.getByLabelText('Nouveau mot de passe'), 'abcdefghijk');
+    await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), 'autre-valeur');
+
+    const requirements = screen.getByRole('region', { name: 'Critères du nouveau mot de passe' });
+    expect(within(requirements).getByText('12 caractères minimum').closest('li')).toHaveClass('unmet');
+    expect(within(requirements).getByText('Une lettre majuscule').closest('li')).toHaveClass('unmet');
+    expect(within(requirements).getByText('Un chiffre').closest('li')).toHaveClass('unmet');
+    expect(within(requirements).getByText('Les deux nouveaux mots de passe correspondent').closest('li')).toHaveClass('unmet');
+    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toHaveClass('is-incomplete');
   });
 
   it('exposes password-change semantics to Safari AutoFill', async () => {

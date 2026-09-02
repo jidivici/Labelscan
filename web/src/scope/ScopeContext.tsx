@@ -2,13 +2,15 @@ import { createContext, type ReactNode, useCallback, useContext, useMemo } from 
 import { useSearchParams } from 'wouter';
 
 import { useAuth } from '../auth/AuthContext';
-import type { Store } from '../types';
+import { PROFESSION_CODES, type ProfessionCode, type Store } from '../types';
 
 interface ScopeContextValue {
   stores: Store[];
   storesLoading: boolean;
   selectedStoreCode: string;
+  selectedProfessionCode: ProfessionCode | '';
   setSelectedStoreCode: (code: string) => void;
+  setSelectedProfessionCode: (code: ProfessionCode | '') => void;
 }
 
 const ScopeContext = createContext<ScopeContextValue | null>(null);
@@ -21,6 +23,10 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
     [session?.user.accessible_stores],
   );
   const selectedStoreCode = searchParams.get('store') ?? '';
+  const professionParam = searchParams.get('profession_scope') ?? '';
+  const selectedProfessionCode: ProfessionCode | '' = PROFESSION_CODES.includes(professionParam as ProfessionCode)
+    ? professionParam as ProfessionCode
+    : '';
 
   const setSelectedStoreCode = useCallback((code: string) => {
     setSearchParams((current) => {
@@ -31,12 +37,23 @@ export function ScopeProvider({ children }: { children: ReactNode }) {
     }, { replace: true });
   }, [setSearchParams]);
 
+  const setSelectedProfessionCode = useCallback((code: ProfessionCode | '') => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (code) next.set('profession_scope', code); else next.delete('profession_scope');
+      next.delete('page');
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
+
   const value = useMemo(() => ({
     stores,
     storesLoading: false,
     selectedStoreCode,
+    selectedProfessionCode,
     setSelectedStoreCode,
-  }), [selectedStoreCode, setSelectedStoreCode, stores]);
+    setSelectedProfessionCode,
+  }), [selectedProfessionCode, selectedStoreCode, setSelectedProfessionCode, setSelectedStoreCode, stores]);
 
   return <ScopeContext.Provider value={value}>{children}</ScopeContext.Provider>;
 }
