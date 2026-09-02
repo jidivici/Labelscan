@@ -24,14 +24,14 @@ RUN git init \
     && git config user.name "LabelScan Security" \
     && git config user.email "security@label-scan.fr" \
     && git commit -am "Backport Caddy security and dependency compatibility fixes" \
-    && git tag "v2.11.4+labelscan.2"
+    && git tag "v2.11.4+labelscan.3"
 
 RUN go get \
       github.com/google/cel-go@v0.29.2 \
       golang.org/x/crypto@v0.55.0 \
       golang.org/x/net@v0.57.0 \
       golang.org/x/text@v0.41.0 \
-      google.golang.org/grpc@v1.82.1 \
+      google.golang.org/grpc@v1.83.1 \
     && go mod tidy \
     && go test ./modules/caddyhttp/reverseproxy
 
@@ -45,12 +45,14 @@ RUN go mod init labelscan.local/caddy-build \
     && go list -deps . > /tmp/caddy-dependencies \
     && if grep -E '^golang.org/x/crypto/openpgp(/|$)' /tmp/caddy-dependencies; then exit 1; fi \
     && CGO_ENABLED=0 go build -trimpath \
-      -ldflags='-s -w -buildid= -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4+labelscan.2' \
+      -ldflags='-s -w -buildid= -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4+labelscan.3' \
       -o /usr/bin/caddy . \
     && go version -m /usr/bin/caddy \
       | grep -E 'github\.com/caddyserver/caddy/v2[[:space:]]+v2\.11\.4' \
     && go version -m /usr/bin/caddy \
-      | grep -E 'golang\.org/x/crypto[[:space:]]+v0\.55\.0'
+      | grep -E 'golang\.org/x/crypto[[:space:]]+v0\.55\.0' \
+    && go version -m /usr/bin/caddy \
+      | grep -E 'google\.golang\.org/grpc[[:space:]]+v1\.83\.1'
 
 
 FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
@@ -59,7 +61,7 @@ ARG LABELSCAN_VERSION=unknown
 LABEL org.opencontainers.image.title="LabelScan Caddy edge" \
       org.opencontainers.image.revision="$LABELSCAN_VERSION" \
       org.opencontainers.image.source="https://github.com/jidivici/Labelscan" \
-      org.opencontainers.image.version="2.11.4+labelscan.2"
+      org.opencontainers.image.version="2.11.4+labelscan.3"
 
 RUN apk upgrade --no-cache \
     && apk add --no-cache ca-certificates tzdata \
