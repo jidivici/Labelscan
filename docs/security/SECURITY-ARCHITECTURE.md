@@ -176,16 +176,17 @@ by role/scope or an explicit out-of-assignment request.
 
 The server is authoritative:
 
-- all new passwords are 12–128 characters and known placeholders are rejected;
-- administrator and super-administrator passwords must also contain uppercase,
+- all new passwords are capped at 128 characters and known placeholders are rejected;
+- administrator and super-administrator passwords must contain at least 12 characters, uppercase,
   lowercase, digit, and non-alphanumeric characters;
-- manager passwords use the length and placeholder policy;
+- manager passwords have no minimum length or complexity requirement beyond being non-empty;
 - password hashes use PBKDF2-HMAC-SHA256 with a per-password random salt and 600,000
   iterations; verification uses a constant-time comparison;
 - changing a password requires the current password and revokes sessions.
 
-Back-office forms mirror these rules, including the 12-character minimum and Unicode-safe
-letter/number/special-character checks for privileged roles. The server remains
+Back-office forms mirror these rules: manager forms do not advertise a minimum or
+complexity rule, while privileged forms use the 12-character minimum and Unicode-safe
+letter/number/special-character checks. The server remains
 authoritative, and release tests cover each create/change flow so later UI drift cannot
 weaken or misrepresent the policy.
 

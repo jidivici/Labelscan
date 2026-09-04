@@ -8,7 +8,7 @@ async function login(page: Page, role: TestRole): Promise<MockBackend> {
   const backend = await installMockBackend(page, { role });
   await page.goto(loginPath);
   await page.getByLabel('Identifiant').fill(`${role}@labelscan.test`);
-  await page.getByLabel('Mot de passe').fill('mot-de-passe-e2e-solide');
+  await page.getByLabel('Mot de passe', { exact: true }).fill('mot-de-passe-e2e-solide');
   await page.getByRole('button', { name: 'Se connecter' }).click();
   await expect(page).toHaveURL(role === 'manager'
     ? /\/portails\/poissonnerie\/arrivages/

@@ -133,8 +133,10 @@ single source for priority, release-blocker status, impact, and required remedia
 - A local Android release can keep cleartext enabled unless the approved preview/production
   profile is selected. Inspect the generated native artifact; the static configuration
   check is not sufficient proof.
-- Back-office forms mirror the server's 12-character password policy, including Unicode
-  letter/number handling. The API remains authoritative and release tests cover each role.
+- Back-office forms mirror the role-specific password policy: managers have no displayed
+  minimum or complexity rule, while privileged accounts require at least 12 characters
+  with Unicode-safe letter/number handling. The API remains authoritative and release
+  tests cover each role.
 
 ## Production approval
 

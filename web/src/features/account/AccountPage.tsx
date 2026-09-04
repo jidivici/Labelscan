@@ -42,28 +42,36 @@ export function AccountPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const privileged = session?.user.role === 'admin' || session?.user.role === 'super_admin';
-  const validPassword = privileged ? hasPrivilegedPasswordPolicy(newPassword) : newPassword.length >= 12;
+  const validPassword = privileged ? hasPrivilegedPasswordPolicy(newPassword) : newPassword.length > 0;
   const valid = currentPassword.length > 0
     && validPassword
     && newPassword === confirmation;
   const passwordRequirements: Requirement[] = [
     { label: '12 caractères minimum', met: newPassword.length >= 12, touched: newPassword.length > 0 },
-    ...(privileged ? [
-      { label: 'Une lettre majuscule', met: /[A-Z]/.test(newPassword), touched: newPassword.length > 0 },
-      { label: 'Une lettre minuscule', met: /[a-z]/.test(newPassword), touched: newPassword.length > 0 },
-      { label: 'Un chiffre', met: /\d/.test(newPassword), touched: newPassword.length > 0 },
-      { label: 'Un caractère spécial', met: /[^\p{Alphabetic}\p{Number}]/u.test(newPassword), touched: newPassword.length > 0 },
-    ] : []),
+    { label: 'Une lettre majuscule', met: /[A-Z]/.test(newPassword), touched: newPassword.length > 0 },
+    { label: 'Une lettre minuscule', met: /[a-z]/.test(newPassword), touched: newPassword.length > 0 },
+    { label: 'Un chiffre', met: /\d/.test(newPassword), touched: newPassword.length > 0 },
+    { label: 'Un caractère spécial', met: /[^\p{Alphabetic}\p{Number}]/u.test(newPassword), touched: newPassword.length > 0 },
     { label: 'Les deux nouveaux mots de passe correspondent', met: confirmation.length > 0 && newPassword === confirmation, touched: confirmation.length > 0 },
   ];
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session || !valid) return;
+    const values = new FormData(event.currentTarget);
+    const submittedCurrentPassword = String(values.get('currentPassword') ?? '');
+    const submittedNewPassword = String(values.get('newPassword') ?? '');
+    const submittedConfirmation = String(values.get('newPasswordConfirmation') ?? '');
+    const submittedPasswordIsValid = privileged
+      ? hasPrivilegedPasswordPolicy(submittedNewPassword)
+      : submittedNewPassword.length > 0;
+    if (!session
+      || !submittedCurrentPassword
+      || !submittedPasswordIsValid
+      || submittedNewPassword !== submittedConfirmation) return;
     setSaving(true);
     setError('');
     try {
-      await changeMyPassword(session, currentPassword, newPassword);
+      await changeMyPassword(session, submittedCurrentPassword, submittedNewPassword);
       await logout();
     } catch (cause) {
       setError(errorMessage(cause));
@@ -77,26 +85,25 @@ export function AccountPage() {
     </header>
     <ErrorNotice message={error} />
     <IdentityPanel title="Changer mon mot de passe" description="Votre mot de passe actuel est obligatoire. Vous devrez ensuite vous reconnecter.">
-      <div className="account-security-summary">
-        <span className="account-security-mark" aria-hidden="true">✓</span>
-        <span><strong>Sécurité du compte</strong><small>Choisissez un mot de passe unique que vous n’utilisez sur aucun autre service.</small></span>
-      </div>
-      <form className="account-password-form" onSubmit={(event) => void submit(event)}>
-        <label className="sr-only" htmlFor="account-username">Identifiant</label>
-        <input id="account-username" className="sr-only" name="username" type="text" autoComplete="username" value={session?.user.username ?? ''} readOnly tabIndex={-1} />
-        <PasswordField name="currentPassword" label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" preserveAutofill />
+      <form id="account-password-change-form" className="account-password-form" method="post" action="/v1/me/password" onSubmit={(event) => void submit(event)}>
+        <input id="account-username-autofill" className="sr-only" name="username" type="text" autoComplete="username" value={session?.user.username ?? ''} readOnly tabIndex={-1} aria-hidden="true" />
+        <PasswordField id="account-current-password" name="currentPassword" label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" preserveAutofill />
         <PasswordField
+          id="account-new-password"
           name="newPassword"
           label="Nouveau mot de passe"
           value={newPassword}
           onChange={setNewPassword}
-          minLength={12}
-          passwordRules={privileged ? 'minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: [-];' : 'minlength: 12; maxlength: 128;'}
-          hint={privileged ? '12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.' : '12 caractères minimum.'}
+          minLength={privileged ? 12 : undefined}
+          autoComplete="new-password"
+          passwordRules={privileged
+            ? 'minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: special;'
+            : undefined}
+          hint={privileged ? '12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial.' : undefined}
           preserveAutofill
         />
-        <PasswordRequirements requirements={passwordRequirements} />
-        <PasswordField name="newPasswordConfirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={12} preserveAutofill />
+        {privileged ? <PasswordRequirements requirements={passwordRequirements} /> : null}
+        <PasswordField id="account-new-password-confirmation" name="newPasswordConfirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={privileged ? 12 : undefined} autoComplete="new-password" preserveAutofill />
         <button className={`button account-password-submit ${valid ? 'is-valid' : 'is-incomplete'}`} disabled={saving || !valid}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
       </form>
     </IdentityPanel>

@@ -118,11 +118,11 @@ or a complete regulatory checklist.
 | `GET` | `/v1/stores/{store_id}/portals` | Any authenticated user, filtered by persisted visibility |
 | `PUT` | `/v1/stores/{store_id}/portals` | `identity:portals:manage`; idempotent soft activation |
 
-New accounts require a direct password of 12–128 characters and start active. Manager
-passwords have the length requirement only. Administrator and super-administrator
-passwords must also include an uppercase letter, a lowercase letter, a digit, and a
-non-alphanumeric character; the server remains authoritative while OR-14 tracks the
-current form-validation mismatch.
+New accounts require a direct password and start active. Manager passwords may contain
+any non-empty value up to the 128-character technical cap. Administrator and
+super-administrator passwords require 12–128 characters, including an uppercase letter,
+a lowercase letter, a digit, and a non-alphanumeric character; the server remains
+authoritative.
 Creating a store creates all three canonical portal rows and activates only the
 requested professions. Runtime account and portal deletion is a soft state
 change; historical identities and business records remain addressable.

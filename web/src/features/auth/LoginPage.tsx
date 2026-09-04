@@ -22,6 +22,7 @@ export function LoginPage() {
   const [, navigate] = useLocation();
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -48,9 +49,30 @@ export function LoginPage() {
       <form className="login-form" onSubmit={submit}>
         <div className="login-brand"><BrandMark /><div><strong>LabelScan</strong><span>Portail professionnel</span></div></div>
         <header><h1>Connexion</h1><p>Accédez à votre espace de traçabilité.</p></header>
-        {error && <div className="notice error" role="alert">{error}</div>}
         <label className="field">Identifiant<input name="username" autoComplete="username" required /></label>
-        <label className="field">Mot de passe<input name="password" type="password" autoComplete="current-password" maxLength={128} required /></label>
+        <div className="field">
+          <label htmlFor="login-password">Mot de passe</label>
+          <span className="password-input">
+            <input
+              id="login-password"
+              name="password"
+              type={passwordVisible ? 'text' : 'password'}
+              autoComplete="current-password"
+              maxLength={128}
+              required
+            />
+            <button
+              type="button"
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => setPasswordVisible((visible) => !visible)}
+              aria-label={passwordVisible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
+              aria-pressed={passwordVisible}
+            >
+              {passwordVisible ? 'Masquer' : 'Afficher'}
+            </button>
+          </span>
+        </div>
+        {error && <div className="notice error login-error" role="alert">{error}</div>}
         <button className="button primary wide" disabled={busy}>{busy ? 'Connexion…' : 'Se connecter'}</button>
       </form>
     </section>

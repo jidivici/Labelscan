@@ -380,11 +380,6 @@ tbody tr:hover { background: #fafcfb; }
 .manager-portal-option[aria-selected="true"] { background: #ddf4ef; color: #07554e; }
 .manager-portal-option.placeholder { color: #73817e; font-weight: 550; }
 .manager-portal-check { flex: 0 0 auto; color: var(--primary); font-weight: 800; }
-.account-security-summary { max-width: 620px; display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding: 13px 14px; border: 1px solid #cfe3de; border-radius: 12px; background: #f3faf8; }
-.account-security-summary > span:last-child { display: grid; gap: 3px; }
-.account-security-summary strong { color: var(--primary-dark); font-size: 12px; }
-.account-security-summary small { color: var(--muted); font-size: 10px; line-height: 1.45; }
-.account-security-mark { width: 32px; height: 32px; flex: 0 0 auto; display: grid; place-items: center; border-radius: 9px; background: var(--primary); color: #fff; font-size: 14px; font-weight: 850; }
 .account-password-form { display: grid; max-width: 620px; gap: 16px; }
 .password-requirements { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: #fafcfb; }
 .password-requirements-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
@@ -415,8 +410,14 @@ tbody tr:hover { background: #fafcfb; }
 
 /* Detail drawer and dialogs */
 .drawer-backdrop, .modal-backdrop { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgb(12 23 21 / 48%); backdrop-filter: blur(2px); }
-.detail-drawer { width: min(100%, 680px); height: min(100%, 900px); max-height: calc(100vh - 48px); overflow-y: auto; padding: 23px; border: 1px solid rgb(221 231 227 / 80%); border-radius: 18px; background: #f8faf9; box-shadow: 0 24px 70px rgb(8 28 25 / 24%); }
+.detail-drawer { width: min(100%, 680px); height: min(100%, 900px); max-height: calc(100vh - 48px); display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; padding: 23px 10px 23px 23px; border: 1px solid rgb(221 231 227 / 80%); border-radius: 18px; background: #f8faf9; box-shadow: 0 24px 70px rgb(8 28 25 / 24%); }
 .drawer-header, .modal-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.detail-drawer > .drawer-header { margin-right: 13px; }
+.detail-drawer-scroll { min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding-right: 13px; scrollbar-color: #7d8d89 transparent; scrollbar-gutter: stable; scrollbar-width: thin; }
+.detail-drawer-scroll::-webkit-scrollbar { width: 10px; }
+.detail-drawer-scroll::-webkit-scrollbar-track { background: transparent; }
+.detail-drawer-scroll::-webkit-scrollbar-thumb { border: 3px solid transparent; border-radius: 999px; background: #7d8d89; background-clip: padding-box; }
+.detail-drawer-scroll::-webkit-scrollbar-thumb:hover { background-color: #5f716c; }
 .drawer-header h2, .modal-card h2 { margin: 0; font-size: 21px; letter-spacing: -.03em; }
 .icon-button { width: 36px; height: 36px; flex: 0 0 auto; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--muted); font-size: 21px; }
 .detail-drawer > .arrival-image, .detail-drawer > .image-placeholder { width: 100%; height: 265px; border-radius: 9px; }
@@ -496,7 +497,9 @@ tbody tr:hover { background: #fafcfb; }
   .manager-form .choice-fieldset { grid-column: auto; }
   .topbar-context { max-width: 52%; }
   .topbar-context span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .detail-drawer { padding: 17px; }
+  .detail-drawer { padding: 17px 8px 17px 17px; }
+  .detail-drawer > .drawer-header { margin-right: 9px; }
+  .detail-drawer-scroll { padding-right: 9px; }
   .detail-drawer > .arrival-image, .detail-drawer > .image-placeholder { height: 215px; }
   .detail-section dl > div { grid-template-columns: 1fr; gap: 3px; }
   .form-actions { flex-direction: column-reverse; }

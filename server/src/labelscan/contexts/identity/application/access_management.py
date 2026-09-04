@@ -154,7 +154,7 @@ def _password(value: str, *, role: str) -> str:
             raise ValueError("password must contain a special character")
         return hash_password(value, min_length=12)
     if role == MANAGER_ROLE:
-        return hash_password(value, min_length=12)
+        return hash_password(value, min_length=1)
     raise ValueError("unknown password policy")
 
 

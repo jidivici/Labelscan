@@ -257,7 +257,7 @@ def test_deleted_manager_is_hidden_but_keeps_identity_and_username_is_reusable(
     assert recreated.json()["id"] != deleted_id
 
 
-def test_manager_password_requires_at_least_twelve_characters(iam_v2):
+def test_manager_password_accepts_a_single_character(iam_v2):
     client, ids, organization_id, prefix = iam_v2
     response = client.post(
         "/v1/managers",
@@ -271,8 +271,7 @@ def test_manager_password_requires_at_least_twelve_characters(iam_v2):
             "business_portal_ids": [ids["portal"]],
         },
     )
-    assert response.status_code == 400
-    assert response.json()["error_code"] == "VALIDATION_ERROR"
+    assert response.status_code == 201
 
 
 def test_old_activation_routes_are_absent(iam_v2):
@@ -312,7 +311,7 @@ def test_admin_and_manager_change_own_password_with_current_password(iam_v2):
         headers=manager_headers,
         json={
             "current_password": "manager-password-123",
-            "new_password": "manager2-secure",
+            "new_password": "x",
         },
     )
     assert manager_changed.status_code == 200
@@ -321,7 +320,7 @@ def test_admin_and_manager_change_own_password_with_current_password(iam_v2):
             "/v1/mobile/auth/login",
             json={
                 "username": manager["username"],
-                "password": "manager2-secure",
+                "password": "x",
             },
         ).status_code
         == 200
@@ -353,6 +352,33 @@ def test_super_admin_has_full_admin_and_manager_management(iam_v2):
 
     manager = _create_manager(client, ids, organization_id, prefix, [ids["portal"]])
     assert manager["role"] == "manager"
+
+
+@pytest.mark.parametrize(
+    "password",
+    [
+        "Short1!",
+        "lowercase-password-123!",
+        "UPPERCASE-PASSWORD-123!",
+        "Password-without-digit!",
+        "PasswordWithoutSpecial123",
+    ],
+)
+def test_super_admin_cannot_create_admin_with_weak_password(iam_v2, password):
+    client, ids, organization_id, prefix = iam_v2
+    response = client.post(
+        "/v1/admins",
+        headers=_headers(
+            "identity:admins:manage", "super_admin", ids["super"], organization_id
+        ),
+        json={
+            "username": f"{prefix}-weak-admin",
+            "display_name": "Weak Admin",
+            "password": password,
+        },
+    )
+    assert response.status_code == 400
+    assert response.json()["error_code"] == "VALIDATION_ERROR"
 
 
 def test_portal_deactivation_blocks_manager_login_and_refresh(iam_v2):

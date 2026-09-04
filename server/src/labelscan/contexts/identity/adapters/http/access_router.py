@@ -171,6 +171,7 @@ class CreateIdentityRequest(_StrictRequest):
 
 
 class CreateManagerRequest(CreateIdentityRequest):
+    password: str = Field(min_length=1, max_length=128)
     business_portal_ids: list[CanonicalUUID] = Field(min_length=1, max_length=1)
 
 
@@ -184,7 +185,7 @@ class ActiveRequest(_StrictRequest):
 
 class ChangePasswordRequest(_StrictRequest):
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class SetPortalActiveRequest(_StrictRequest):

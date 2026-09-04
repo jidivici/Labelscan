@@ -63,13 +63,19 @@ export function SuperAdminPage() {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session) return;
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const submittedUsername = String(values.get('username') ?? '');
+    const submittedPassword = String(values.get('password') ?? '');
+    if (!submittedUsername || !hasPrivilegedPasswordPolicy(submittedPassword)) return;
     setSaving(true);
     setSuccess('');
     try {
       await createAdmin(session, {
-        username,
-        password,
+        username: submittedUsername,
+        password: submittedPassword,
       });
+      form.reset();
       setUsername('');
       setPassword('');
       setSuccess('Le compte administrateur est créé et peut se connecter immédiatement.');
@@ -104,9 +110,18 @@ export function SuperAdminPage() {
     <SuccessNotice message={success} />
 
     <IdentityPanel title="Nouvel administrateur" description="Le compte sera actif dès sa création.">
-      <form className="identity-form" onSubmit={(event) => void submit(event)}>
-        <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-        <PasswordField value={password} onChange={setPassword} minLength={12} hint="12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial." />
+      <form id="create-admin-form" className="identity-form" method="post" action="/v1/admins" onSubmit={(event) => void submit(event)}>
+        <label className="field" htmlFor="new-admin-username"><span>Identifiant</span><input id="new-admin-username" name="username" autoComplete="off" required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
+        <PasswordField
+          id="new-admin-password"
+          name="password"
+          value={password}
+          onChange={setPassword}
+          minLength={12}
+          passwordRules="minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: special;"
+          hint="12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial."
+          preserveAutofill
+        />
         <button className="button primary" disabled={saving || !hasPrivilegedPasswordPolicy(password)}>{saving ? 'Création…' : 'Créer le compte'}</button>
       </form>
     </IdentityPanel>

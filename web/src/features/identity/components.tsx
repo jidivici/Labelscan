@@ -62,17 +62,19 @@ export function ActiveBadge({ active }: { active: boolean }) {
 }
 
 export function PasswordField({
+  id,
   value,
   onChange,
   name,
   label = 'Mot de passe',
   autoFocus = false,
-  minLength = 1,
+  minLength,
   hint,
-  autoComplete = 'new-password',
+  autoComplete = 'off',
   passwordRules,
   preserveAutofill = false,
 }: {
+  id?: string;
   value: string;
   onChange: (value: string) => void;
   name?: string;
@@ -80,13 +82,34 @@ export function PasswordField({
   autoFocus?: boolean;
   minLength?: number;
   hint?: string;
-  autoComplete?: 'current-password' | 'new-password';
+  autoComplete?: 'off' | 'current-password' | 'new-password';
   passwordRules?: string;
   preserveAutofill?: boolean;
 }) {
   const [visible, setVisible] = useState(false);
-  const inputId = useId();
+  const generatedInputId = useId();
+  const inputId = id ?? generatedInputId;
+  const syncTimerRef = useRef<number | undefined>(undefined);
   const valueProps = preserveAutofill ? { defaultValue: value } : { value };
+
+  useEffect(() => () => {
+    if (syncTimerRef.current !== undefined) window.clearTimeout(syncTimerRef.current);
+  }, []);
+
+  function deferChange(nextValue: string) {
+    if (syncTimerRef.current !== undefined) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = window.setTimeout(() => {
+      syncTimerRef.current = undefined;
+      onChange(nextValue);
+    }, 0);
+  }
+
+  function commitChange(nextValue: string) {
+    if (syncTimerRef.current !== undefined) window.clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = undefined;
+    onChange(nextValue);
+  }
+
   return <div className="field password-field">
     <label htmlFor={inputId}>{label}</label>
     <span className="password-input">
@@ -95,8 +118,9 @@ export function PasswordField({
         name={name}
         type={visible ? 'text' : 'password'}
         {...valueProps}
-        onInput={(event) => onChange(event.currentTarget.value)}
-        minLength={minLength}
+        onInput={(event) => deferChange(event.currentTarget.value)}
+        onBlur={(event) => commitChange(event.currentTarget.value)}
+        {...(minLength === undefined ? {} : { minLength })}
         maxLength={128}
         autoComplete={autoComplete}
         autoFocus={autoFocus}

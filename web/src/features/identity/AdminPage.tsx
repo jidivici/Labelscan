@@ -174,14 +174,20 @@ export function AdminPage() {
   async function submitManager(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session || !selectedPortalId) return;
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const submittedUsername = String(values.get('username') ?? '');
+    const submittedPassword = String(values.get('password') ?? '');
+    if (!submittedUsername || !submittedPassword) return;
     setSaving(true);
     setSuccess('');
     try {
       await createManager(session, {
-        username,
-        password,
+        username: submittedUsername,
+        password: submittedPassword,
         business_portal_ids: [selectedPortalId],
       });
+      form.reset();
       setUsername('');
       setPassword('');
       setSelectedPortalId('');
@@ -303,11 +309,11 @@ export function AdminPage() {
       <IdentityPanel title="Nouveau manager" description="Le compte sera actif dès sa création.">
         {scopedPortals.length === 0
           ? <IdentityEmpty title={scopeActive ? 'Aucun portail dans ce périmètre' : 'Créez d’abord un magasin'} description={scopeActive ? 'Modifiez le magasin ou le métier sélectionné pour créer un manager.' : 'Ajoutez un magasin et activez au moins un métier avant de créer votre premier manager.'} />
-          : <form className="identity-form manager-form" onSubmit={(event) => void submitManager(event)}>
-          <label className="field"><span>Identifiant</span><input required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-          <PasswordField value={password} onChange={setPassword} minLength={12} hint="12 caractères minimum." />
+          : <form id="create-manager-form" className="identity-form manager-form" method="post" action="/v1/managers" onSubmit={(event) => void submitManager(event)}>
+          <label className="field" htmlFor="new-manager-username"><span>Identifiant</span><input id="new-manager-username" name="username" autoComplete="off" required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
+          <PasswordField id="new-manager-password" name="password" value={password} onChange={setPassword} preserveAutofill />
           <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={scopedPortals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
-          <button className="button primary" disabled={saving || !selectedPortalId || password.length < 12}>{saving ? 'Création…' : 'Créer le compte'}</button>
+          <button className="button primary" disabled={saving || !selectedPortalId || !password}>{saving ? 'Création…' : 'Créer le compte'}</button>
         </form>}
       </IdentityPanel>
     }

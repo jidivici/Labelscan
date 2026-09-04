@@ -1,14 +1,15 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { AuthProvider } from '../auth/AuthContext';
 import { adminFixtureSession, managerFixtureSession, superAdminFixtureSession } from '../fixtures/portalFixtures';
+import type { Session } from '../types';
 import { ApplicationRoutes } from './AppRouter';
 
-function renderAt(path: string, session = managerFixtureSession) {
+function renderAt(path: string, session: Session | null = managerFixtureSession) {
   const { hook } = memoryLocation({ path });
   return render(<Router hook={hook}><AuthProvider initialSession={session}><ApplicationRoutes /></AuthProvider></Router>);
 }
@@ -117,12 +118,85 @@ describe('capability based routing', () => {
     renderAt('/o/labelscan/compte', superAdminFixtureSession);
     await screen.findByRole('heading', { name: 'Mon compte' });
 
-    expect(screen.getByLabelText('Identifiant')).toHaveAttribute('autocomplete', 'username');
+    expect(screen.queryByText('Sécurité du compte')).not.toBeInTheDocument();
+    expect(screen.queryByText('Choisissez un mot de passe unique que vous n’utilisez sur aucun autre service.')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Identifiant')).not.toBeInTheDocument();
+    expect(document.querySelector('input[name="username"]')).toHaveAttribute('autocomplete', 'username');
+    expect(document.querySelector('input[name="username"]')).toHaveAttribute('aria-hidden', 'true');
+    expect(document.querySelector('input[name="username"]')).toHaveAttribute('id', 'account-username-autofill');
     expect(screen.getByLabelText('Mot de passe actuel')).toHaveAttribute('autocomplete', 'current-password');
+    expect(screen.getByLabelText('Mot de passe actuel')).toHaveAttribute('id', 'account-current-password');
     expect(screen.getByLabelText('Nouveau mot de passe')).toHaveAttribute('autocomplete', 'new-password');
-    expect(screen.getByLabelText('Nouveau mot de passe')).toHaveAttribute('passwordrules');
+    expect(screen.getByLabelText('Nouveau mot de passe')).toHaveAttribute('id', 'account-new-password');
+    expect(screen.getByLabelText('Nouveau mot de passe')).toHaveAttribute(
+      'passwordrules',
+      'minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: special;',
+    );
     expect(screen.getByLabelText('Confirmer le nouveau mot de passe')).toHaveAttribute('autocomplete', 'new-password');
+    expect(screen.getByLabelText('Confirmer le nouveau mot de passe')).toHaveAttribute('id', 'account-new-password-confirmation');
     expect(screen.getByLabelText('Confirmer le nouveau mot de passe')).not.toHaveAttribute('passwordrules');
+  });
+
+  it('treats login as an existing password and preserves it when revealed', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/connexion', null);
+
+    const password = await screen.findByLabelText('Mot de passe');
+    expect(password).toHaveAttribute('type', 'password');
+    expect(password).toHaveAttribute('autocomplete', 'current-password');
+    expect(password).not.toHaveAttribute('passwordrules');
+
+    await user.type(password, 'Existing-Password-42!');
+    await user.click(screen.getByRole('button', { name: 'Afficher le mot de passe' }));
+
+    expect(password).toHaveAttribute('type', 'text');
+    expect(password).toHaveValue('Existing-Password-42!');
+    expect(screen.getByRole('button', { name: 'Masquer le mot de passe' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('places a login error between the password field and the submit button', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      detail: 'Identifiants invalides',
+      error_code: 'INVALID_CREDENTIALS',
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+    renderAt('/o/labelscan/connexion', null);
+
+    await user.type(screen.getByLabelText('Identifiant'), 'inconnu');
+    await user.type(screen.getByLabelText('Mot de passe'), 'incorrect');
+    await user.click(screen.getByRole('button', { name: 'Se connecter' }));
+
+    const form = screen.getByRole('button', { name: 'Se connecter' }).closest('form')!;
+    const children = Array.from(form.children);
+    const passwordField = screen.getByLabelText('Mot de passe').closest('.field')!;
+    const alert = await screen.findByRole('alert');
+    const submit = screen.getByRole('button', { name: 'Se connecter' });
+    expect(children.indexOf(alert)).toBeGreaterThan(children.indexOf(passwordField));
+    expect(children.indexOf(alert)).toBeLessThan(children.indexOf(submit));
+    fetchSpy.mockRestore();
+  });
+
+  it('does not expose Safari password rules for a manager password change', async () => {
+    renderAt('/o/labelscan/compte', managerFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+
+    expect(screen.getByLabelText('Nouveau mot de passe')).not.toHaveAttribute('passwordrules');
+    expect(screen.getByLabelText('Nouveau mot de passe')).not.toHaveAttribute('minlength');
+    expect(screen.getByLabelText('Confirmer le nouveau mot de passe')).not.toHaveAttribute('passwordrules');
+    expect(screen.getByLabelText('Confirmer le nouveau mot de passe')).not.toHaveAttribute('minlength');
+    expect(screen.queryByRole('region', { name: 'Critères du nouveau mot de passe' })).not.toBeInTheDocument();
+  });
+
+  it('accepts a one-character manager password when both entries match', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/compte', managerFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+
+    await user.type(screen.getByLabelText('Mot de passe actuel'), 'a');
+    await user.type(screen.getByLabelText('Nouveau mot de passe'), 'x');
+    await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), 'x');
+
+    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
   });
 
   it('keeps a Safari-generated password when revealing it and reacts to native input events', async () => {
@@ -138,7 +212,7 @@ describe('capability based routing', () => {
     fireEvent.input(password, { target: { value: generatedPassword } });
     fireEvent.input(confirmation, { target: { value: generatedPassword } });
 
-    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled());
     await user.click(screen.getAllByRole('button', { name: 'Afficher le mot de passe' })[1]);
     expect(password).toHaveAttribute('type', 'text');
     expect(password).toHaveValue(generatedPassword);

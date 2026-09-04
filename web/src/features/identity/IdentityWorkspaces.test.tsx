@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Router } from 'wouter';
@@ -214,7 +214,20 @@ describe('IAM credentials', () => {
   ])('creates %s accounts with a direct password', async (_role, currentSession, path, heading) => {
     renderAt(path, currentSession);
     await screen.findByRole('heading', { name: heading });
-    expect(screen.getByLabelText('Mot de passe')).toBeInTheDocument();
+    const password = screen.getByLabelText('Mot de passe');
+    expect(password).toHaveAttribute('autocomplete', 'off');
+    if (_role === 'admin') {
+      expect(password).not.toHaveAttribute('passwordrules');
+      expect(password).not.toHaveAttribute('minlength');
+    } else {
+      expect(password).toHaveAttribute(
+        'passwordrules',
+        'minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: special;',
+      );
+    }
+    expect(password).toHaveAttribute('name', 'password');
+    expect(password).toHaveAttribute('id', _role === 'admin' ? 'new-manager-password' : 'new-admin-password');
+    expect(screen.getByLabelText('Identifiant')).toHaveAttribute('name', 'username');
   });
 
   it.each([
@@ -238,6 +251,23 @@ describe('IAM credentials', () => {
     await user.type(screen.getByLabelText('Mot de passe'), 'Abcdefghi1é!');
 
     expect(screen.getByRole('button', { name: 'Créer le compte' })).toBeEnabled();
+  });
+
+  it('submits the password present in the DOM before the deferred AutoFill synchronization', async () => {
+    renderAt('/o/labelscan/super-administration', superAdminSession);
+    await screen.findByRole('heading', { name: 'Administrateurs' });
+    const username = screen.getByLabelText('Identifiant');
+    const password = screen.getByLabelText('Mot de passe');
+    const form = password.closest('form')!;
+
+    fireEvent.change(username, { target: { value: 'admin.autofill' } });
+    fireEvent.input(password, { target: { value: 'Strong-Safari-42!' } });
+    fireEvent.submit(form);
+
+    await waitFor(() => expect(createAdmin).toHaveBeenCalledWith(superAdminSession, {
+      username: 'admin.autofill',
+      password: 'Strong-Safari-42!',
+    }));
   });
 
 });

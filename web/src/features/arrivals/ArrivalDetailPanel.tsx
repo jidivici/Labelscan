@@ -137,33 +137,35 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
   return <div className="drawer-backdrop" onMouseDown={() => navigate(closePath)}>
     <aside ref={drawerRef} className="detail-drawer" role="dialog" aria-modal="true" aria-label="Détail de l’arrivage" onMouseDown={(event) => event.stopPropagation()}>
       <header className="drawer-header"><div><span className="eyebrow">{detailPortal?.shortLabel ?? 'Traçabilité'}</span><h2>Détail produit</h2></div><button ref={closeButtonRef} type="button" className="icon-button" onClick={() => navigate(closePath)} aria-label="Fermer">×</button></header>
-      {error && <div className="notice error" role="alert">{error}</div>}
-      {!detail && !error && <div className="drawer-loading"><div className="loader" /><p>Chargement de la fiche…</p></div>}
-      {detail && <>
-        <section className="detail-hero">
-          <div className="detail-visual">
-            <ArrivalImage batchId={detail.batch_id} available={detail.photo_available} alt="Étiquette du produit" rotationDegrees={detail.photo_rotation_degrees} baseRotationDegrees={detail.photo_base_rotation_degrees} onOpen={setPhotoViewerUrl} />
-          </div>
-          <div className="detail-identity">
-            <span className="detail-identity-eyebrow">{detailPortal?.shortLabel ?? display(detail.profession_code) ?? 'Produit'} · produit enregistré</span>
-            <h3>{productName}</h3>
-            {description && <p className="detail-description">{description}</p>}
-            {productionMethod && <span className="detail-summary-chip">{productionMethod}</span>}
-            {summaryFacts.length > 0 && <dl className={`detail-facts detail-facts-${Math.min(summaryFacts.length, 4)}`}>{summaryFacts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>}
-            <p className="detail-record-meta">
-              <span aria-hidden="true" />
-              {[display(store?.name ?? detail.store_code), formatDateTime(detail.recorded_at) ? `Enregistré le ${formatDateTime(detail.recorded_at)}` : null, display(detail.captured_by_user_name)].filter(Boolean).join(' · ')}
-            </p>
-          </div>
-        </section>
+      <div className="detail-drawer-scroll">
+        {error && <div className="notice error" role="alert">{error}</div>}
+        {!detail && !error && <div className="drawer-loading"><div className="loader" /><p>Chargement de la fiche…</p></div>}
+        {detail && <>
+          <section className="detail-hero">
+            <div className="detail-visual">
+              <ArrivalImage batchId={detail.batch_id} available={detail.photo_available} alt="Étiquette du produit" rotationDegrees={detail.photo_rotation_degrees} baseRotationDegrees={detail.photo_base_rotation_degrees} onOpen={setPhotoViewerUrl} />
+            </div>
+            <div className="detail-identity">
+              <span className="detail-identity-eyebrow">{detailPortal?.shortLabel ?? display(detail.profession_code) ?? 'Produit'} · produit enregistré</span>
+              <h3>{productName}</h3>
+              {description && <p className="detail-description">{description}</p>}
+              {productionMethod && <span className="detail-summary-chip">{productionMethod}</span>}
+              {summaryFacts.length > 0 && <dl className={`detail-facts detail-facts-${Math.min(summaryFacts.length, 4)}`}>{summaryFacts.map((fact) => <div key={fact.label}><dt>{fact.label}</dt><dd>{fact.value}</dd></div>)}</dl>}
+              <p className="detail-record-meta">
+                <span aria-hidden="true" />
+                {[display(store?.name ?? detail.store_code), formatDateTime(detail.recorded_at) ? `Enregistré le ${formatDateTime(detail.recorded_at)}` : null, display(detail.captured_by_user_name)].filter(Boolean).join(' · ')}
+              </p>
+            </div>
+          </section>
 
-        <header className="detail-record-heading">
-          <div><span className="eyebrow">Fiche du lot</span><h3>Informations produit</h3></div>
-          <span>{fieldCount} information{fieldCount > 1 ? 's' : ''}</span>
-        </header>
+          <header className="detail-record-heading">
+            <div><span className="eyebrow">Fiche du lot</span><h3>Informations produit</h3></div>
+            <span>{fieldCount} information{fieldCount > 1 ? 's' : ''}</span>
+          </header>
 
-        <DetailSections sections={detailSections} fields={detail.fields} />
-      </>}
+          <DetailSections sections={detailSections} fields={detail.fields} />
+        </>}
+      </div>
     </aside>
     {photoViewerUrl && <ProductPhotoViewer url={photoViewerUrl} rotationDegrees={detail?.photo_rotation_degrees} baseRotationDegrees={detail?.photo_base_rotation_degrees} onClose={() => setPhotoViewerUrl(undefined)} />}
   </div>;
