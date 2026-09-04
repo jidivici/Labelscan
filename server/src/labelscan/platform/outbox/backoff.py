@@ -1,8 +1,8 @@
 """Pure retry-scheduling math for the outbox relay — exponential backoff + jitter.
 
 Dependency-free on purpose: this module imports ONLY the standard library (no
-sqlalchemy / alembic / framework code), so it obeys the domain-purity rule from
-CLAUDE.md and can be reasoned about and unit-tested in isolation. The worker
+sqlalchemy / alembic / framework code), so it obeys the architecture's domain-purity
+rule and can be reasoned about and unit-tested in isolation. The worker
 (platform, an adapter) is the only caller; it feeds the result straight into the
 `next_retry_at` column.
 

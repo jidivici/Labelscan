@@ -2,6 +2,8 @@
 node_modules/
 
 # Local agent and developer state
+AGENTS.md
+CLAUDE.md
 .agents/
 .claude/
 .codex*/
@@ -9,6 +11,7 @@ node_modules/
 .vscode/
 .tmp/
 .local-archive/
+docs/archive/
 
 # Expo and generated native projects
 .expo/

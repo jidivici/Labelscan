@@ -5,6 +5,8 @@
 node_modules/
 
 # Local agent and developer state
+AGENTS.md
+CLAUDE.md
 .git/
 .github/
 .agents/
@@ -82,7 +84,6 @@ __pycache__/
 # The remote mobile build does not need backend, web portal, operations or docs.
 deploy/
 docs/
-postman/
 security/
 server/
 web/

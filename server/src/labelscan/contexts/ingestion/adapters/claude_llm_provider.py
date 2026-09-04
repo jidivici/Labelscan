@@ -99,10 +99,9 @@ def _env_bool(name: str, default: bool) -> bool:
 # Work Item A (two-tier escalation), OFF by default — no behaviour change until an
 # operator flips the flag. The escalation tier is a SECOND ClaudeLlmExtractor bound
 # to a stronger model behind the SAME LlmExtractorPort (no interface change). The
-# default is Opus 4.8 per SYNTHESIS C12 ("claude-haiku-4-5 is the current default
-# adapter; claude-opus-4-8 remains the escalation tier") — this supersedes the stale
-# claude-sonnet-4-6 default in the older CLAUDE.md prompt text. Wired exactly like
-# LABELSCAN_LLM_MODEL: read once here (the only place model ids are named in code),
+# default is Opus 4.8; Haiku 4.5 remains the primary adapter and Opus the escalation
+# tier. It is wired exactly like LABELSCAN_LLM_MODEL: read once here (the only place
+# model ids are named in code),
 # consumed by the composition root (extraction_wiring) to build the second instance.
 _DEFAULT_ESCALATION_MODEL = "claude-opus-4-8"
 ESCALATION_MODEL = os.environ.get(

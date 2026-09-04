@@ -57,15 +57,11 @@ source when precision is important.
 | [Secret rotation](security/SECRET-ROTATION.md) | You need to replace credentials without losing control of the rollout |
 | [SRE and reliability](operations/SRE-RELIABILITY.md) | You are monitoring, backing up, restoring, troubleshooting, or responding to an incident |
 
-## Living documentation and archive
+## Living documentation
 
 Current guides stay in the active documentation tree. Superseded audits, completed plans,
-old design snapshots, and replaced technical references live in the
-[documentation archive](archive/README.md), where every item is labelled with its
-historical role and current replacement.
-
-Archive material is context, not instruction. Never use it as the source for a new setup,
-schema change, security decision, or release.
+old design snapshots, and replaced technical references are removed; Git history remains
+the source for retired material.
 
 When two current sources disagree, use this order while fixing the documentation gap:
 
@@ -84,4 +80,4 @@ Keep the library pleasant and dependable:
 - update the relevant guide in the same change as the behavior;
 - link to one maintained source instead of copying the same contract across files;
 - keep credentials, personal data, and unverified production values out of examples;
-- archive replaced material only after its useful conclusions exist in a living guide.
+- remove replaced material after its useful conclusions exist in a living guide.

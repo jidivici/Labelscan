@@ -207,3 +207,7 @@ volume and backup procedure. Compliance rules are still provisional and require 
 approval before regulated production use. Review the
 [confirmed open-risk register](docs/security/THREAT-MODEL.md#confirmed-open-risk-register)
 before approving any release.
+
+## License
+
+LabelScan is licensed under the [MIT License](LICENSE). Copyright © 2026 Brice Fontaine.

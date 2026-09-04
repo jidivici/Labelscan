@@ -1,6 +1,6 @@
 /**
  * scanStepFromStatus — pure mapping from a PendingScan's workflow status to the
- * home screen's 3-step counter (workflow v1, CLAUDE.md directive §2):
+ * home screen's 3-step counter (workflow v1):
  *   1. Photo envoyée   2. Extraction   3. À valider
  * A terminal unusable extraction is a separate, tappable recapture decision: it
  * never masquerades as step 3 and never exposes a confirmation action.

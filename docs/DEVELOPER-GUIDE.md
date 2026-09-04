@@ -262,8 +262,8 @@ release workflow supplies its reviewed revision, runner, secrets, and environmen
   temporary phase labels.
 - Link to one authoritative explanation rather than duplicating a long procedure in
   several files.
-- Move a completed plan, dated audit, or replaced design note to `docs/archive` only when
-  it still explains useful history. Add an archive notice and link its current replacement.
+- Remove completed plans, dated audits, and replaced design notes after carrying any useful
+  conclusions into a living guide. Git history preserves retired text.
 - Do not commit generated validation renders. Keep release evidence in the release record,
   and rely on Git history for retired text with no continuing value.
 - Never include real credentials, private infrastructure values, personal data, or a
@@ -279,4 +279,4 @@ release workflow supplies its reviewed revision, runner, secrets, and environmen
   test count.
 - Manual checks that cannot be automated are listed honestly for the next reviewer.
 
-For deeper context, use the [documentation home](README.md) rather than an archived plan.
+For deeper context, use the [documentation home](README.md).

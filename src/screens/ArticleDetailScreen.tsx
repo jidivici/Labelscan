@@ -9,7 +9,7 @@
  * backend (source='human', force_gs1 tagged automatically for barcode-derived fields),
  * then refreshes the shared catalogue.
  *
- * Clean UI (CLAUDE.md): no "Édité"/"Modifié" tag, no confidence score, no red. Who/when an
+ * Clean UI: no "Édité"/"Modifié" tag, no confidence score, no red. Who/when an
  * edit happened lives only in the header meta, not as per-field badges.
  */
 
