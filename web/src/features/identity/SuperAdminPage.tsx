@@ -1,6 +1,16 @@
 import { type FormEvent, useCallback, useEffect, useState } from 'react';
 
 import { useAuth } from '../../auth/AuthContext';
+import {
+  clearFieldError,
+  FieldError,
+  type FieldErrors,
+  focusFirstInvalidField,
+  hasPrivilegedPasswordPolicy,
+  PRIVILEGED_PASSWORD_ERROR,
+  PRIVILEGED_PASSWORD_HINT,
+  PRIVILEGED_PASSWORD_RULES,
+} from '../../components/FormValidation';
 import { createAdmin, deactivateAdmin, listAdmins } from './client';
 import {
   ActiveBadge,
@@ -19,14 +29,6 @@ function message(cause: unknown): string {
   return cause instanceof Error ? cause.message : 'L’opération a échoué.';
 }
 
-function hasPrivilegedPasswordPolicy(value: string): boolean {
-  return value.length >= 12
-    && /[A-Z]/.test(value)
-    && /[a-z]/.test(value)
-    && /\d/.test(value)
-    && /[^\p{Alphabetic}\p{Number}]/u.test(value);
-}
-
 export function SuperAdminPage() {
   const { session } = useAuth();
   const [admins, setAdmins] = useState<IamUser[]>([]);
@@ -37,6 +39,7 @@ export function SuperAdminPage() {
   const [adminPage, setAdminPage] = useState(1);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -62,13 +65,25 @@ export function SuperAdminPage() {
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session) return;
+    if (!session || saving) return;
     const form = event.currentTarget;
     const values = new FormData(form);
-    const submittedUsername = String(values.get('username') ?? '');
+    const submittedUsername = String(values.get('username') ?? '').trim();
     const submittedPassword = String(values.get('password') ?? '');
-    if (!submittedUsername || !hasPrivilegedPasswordPolicy(submittedPassword)) return;
+    const nextErrors: FieldErrors = {};
+    if (!submittedUsername) nextErrors.username = 'Renseignez un identifiant.';
+    else if (submittedUsername.length > 254) nextErrors.username = 'L’identifiant ne peut pas dépasser 254 caractères.';
+    if (!submittedPassword) nextErrors.password = 'Renseignez un mot de passe.';
+    else if (!hasPrivilegedPasswordPolicy(submittedPassword)) nextErrors.password = PRIVILEGED_PASSWORD_ERROR;
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      setError('');
+      setSuccess('');
+      focusFirstInvalidField(form, Object.keys(nextErrors));
+      return;
+    }
     setSaving(true);
+    setFieldErrors({});
     setSuccess('');
     try {
       await createAdmin(session, {
@@ -110,19 +125,21 @@ export function SuperAdminPage() {
     <SuccessNotice message={success} />
 
     <IdentityPanel title="Nouvel administrateur" description="Le compte sera actif dès sa création.">
-      <form id="create-admin-form" className="identity-form" method="post" action="/v1/admins" onSubmit={(event) => void submit(event)}>
-        <label className="field" htmlFor="new-admin-username"><span>Identifiant</span><input id="new-admin-username" name="username" autoComplete="off" required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
+      <form id="create-admin-form" className="identity-form" method="post" action="/v1/admins" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
+        <div className="field"><label htmlFor="new-admin-username">Identifiant</label><input id="new-admin-username" name="username" autoComplete="off" required maxLength={254} value={username} aria-invalid={Boolean(fieldErrors.username)} aria-describedby={fieldErrors.username ? 'new-admin-username-error' : undefined} onChange={(event) => { setUsername(event.target.value); clearFieldError(setFieldErrors, 'username'); setError(''); }} /><FieldError id="new-admin-username-error" message={fieldErrors.username} /></div>
         <PasswordField
           id="new-admin-password"
           name="password"
           value={password}
           onChange={setPassword}
           minLength={12}
-          passwordRules="minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: special;"
-          hint="12 caractères minimum, avec majuscule, minuscule, chiffre et caractère spécial."
+          passwordRules={PRIVILEGED_PASSWORD_RULES}
+          hint={PRIVILEGED_PASSWORD_HINT}
           preserveAutofill
+          error={fieldErrors.password}
+          onClearError={() => { clearFieldError(setFieldErrors, 'password'); setError(''); }}
         />
-        <button className="button primary" disabled={saving || !hasPrivilegedPasswordPolicy(password)}>{saving ? 'Création…' : 'Créer le compte'}</button>
+        <button className="button primary" type="submit" disabled={saving}>{saving ? 'Création…' : 'Créer le compte'}</button>
       </form>
     </IdentityPanel>
 

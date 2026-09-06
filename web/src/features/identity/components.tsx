@@ -73,6 +73,8 @@ export function PasswordField({
   autoComplete = 'off',
   passwordRules,
   preserveAutofill = false,
+  error,
+  onClearError,
 }: {
   id?: string;
   value: string;
@@ -85,10 +87,15 @@ export function PasswordField({
   autoComplete?: 'off' | 'current-password' | 'new-password';
   passwordRules?: string;
   preserveAutofill?: boolean;
+  error?: string;
+  onClearError?: () => void;
 }) {
   const [visible, setVisible] = useState(false);
   const generatedInputId = useId();
   const inputId = id ?? generatedInputId;
+  const hintId = hint ? `${inputId}-hint` : undefined;
+  const errorId = error ? `${inputId}-error` : undefined;
+  const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined;
   const syncTimerRef = useRef<number | undefined>(undefined);
   const valueProps = preserveAutofill ? { defaultValue: value } : { value };
 
@@ -97,6 +104,7 @@ export function PasswordField({
   }, []);
 
   function deferChange(nextValue: string) {
+    onClearError?.();
     if (syncTimerRef.current !== undefined) window.clearTimeout(syncTimerRef.current);
     syncTimerRef.current = window.setTimeout(() => {
       syncTimerRef.current = undefined;
@@ -105,6 +113,7 @@ export function PasswordField({
   }
 
   function commitChange(nextValue: string) {
+    onClearError?.();
     if (syncTimerRef.current !== undefined) window.clearTimeout(syncTimerRef.current);
     syncTimerRef.current = undefined;
     onChange(nextValue);
@@ -124,6 +133,8 @@ export function PasswordField({
         maxLength={128}
         autoComplete={autoComplete}
         autoFocus={autoFocus}
+        aria-invalid={Boolean(error)}
+        aria-describedby={describedBy}
         {...(passwordRules ? { passwordrules: passwordRules } : {})}
         required
       />
@@ -137,7 +148,8 @@ export function PasswordField({
         {visible ? 'Masquer' : 'Afficher'}
       </button>
     </span>
-    {hint ? <small>{hint}</small> : null}
+    {hint ? <small id={hintId}>{hint}</small> : null}
+    {error ? <span id={errorId} className="field-error" aria-live="polite">{error}</span> : null}
   </div>;
 }
 

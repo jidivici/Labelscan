@@ -2,6 +2,12 @@ import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react
 
 import { useAuth } from '../../auth/AuthContext';
 import { hasCapability } from '../../auth/capabilities';
+import {
+  clearFieldError,
+  FieldError,
+  type FieldErrors,
+  focusFirstInvalidField,
+} from '../../components/FormValidation';
 import { PORTALS } from '../../portals/registry';
 import { useScope } from '../../scope/ScopeContext';
 import { CAPABILITIES, type ProfessionCode } from '../../types';
@@ -89,6 +95,8 @@ export function AdminPage() {
   const [storePage, setStorePage] = useState(1);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [managerFieldErrors, setManagerFieldErrors] = useState<FieldErrors>({});
+  const [storeFieldErrors, setStoreFieldErrors] = useState<FieldErrors>({});
   const [pendingDeletion, setPendingDeletion] = useState<{ kind: 'manager'; item: IamUser } | { kind: 'store'; item: StoreItem } | null>(null);
   const [deletionError, setDeletionError] = useState('');
 
@@ -130,8 +138,8 @@ export function AdminPage() {
       setOverview(access);
       setManagers(users);
       setError('');
-    } catch {
-      setDeletionError('Ce manager ne peut pas être supprimé pour le moment. Vérifiez ses accès, puis réessayez.');
+    } catch (cause) {
+      setError(message(cause));
     } finally {
       setLoading(false);
     }
@@ -162,30 +170,50 @@ export function AdminPage() {
   }, [scopedPortalIds, selectedPortalId]);
 
   useEffect(() => {
-    if (!session || !selectedStoreId || !canManagePortals) return;
+    if (!session || !selectedStoreId || !canManagePortals) {
+      setStorePortals([]);
+      return;
+    }
+    let active = true;
     listStorePortals(session, selectedStoreId)
       .then((items) => {
+        if (!active) return;
         setStorePortals(items);
         setError('');
       })
-      .catch((cause) => setError(message(cause)));
+      .catch((cause) => { if (active) setError(message(cause)); });
+    return () => { active = false; };
   }, [canManagePortals, selectedStoreId, session]);
 
   async function submitManager(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session || !selectedPortalId) return;
+    if (!session || saving) return;
     const form = event.currentTarget;
     const values = new FormData(form);
-    const submittedUsername = String(values.get('username') ?? '');
+    const submittedUsername = String(values.get('username') ?? '').trim();
     const submittedPassword = String(values.get('password') ?? '');
-    if (!submittedUsername || !submittedPassword) return;
+    const submittedPortalId = String(values.get('new-manager-portal') ?? '');
+    const nextErrors: FieldErrors = {};
+    if (!submittedUsername) nextErrors.username = 'Renseignez un identifiant.';
+    else if (submittedUsername.length > 254) nextErrors.username = 'L’identifiant ne peut pas dépasser 254 caractères.';
+    if (!submittedPassword) nextErrors.password = 'Renseignez un mot de passe.';
+    else if (submittedPassword.length > 128) nextErrors.password = 'Le mot de passe ne peut pas dépasser 128 caractères.';
+    if (!scopedPortals.some((portal) => portal.active && portal.id === submittedPortalId)) nextErrors.portal = 'Choisissez un magasin et un métier actifs.';
+    if (Object.keys(nextErrors).length > 0) {
+      setManagerFieldErrors(nextErrors);
+      setError('');
+      setSuccess('');
+      focusFirstInvalidField(form, Object.keys(nextErrors).map((name) => name === 'portal' ? 'new-manager-portal' : name));
+      return;
+    }
     setSaving(true);
+    setManagerFieldErrors({});
     setSuccess('');
     try {
       await createManager(session, {
         username: submittedUsername,
         password: submittedPassword,
-        business_portal_ids: [selectedPortalId],
+        business_portal_ids: [submittedPortalId],
       });
       form.reset();
       setUsername('');
@@ -256,13 +284,31 @@ export function AdminPage() {
 
   async function submitStore(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!session || storeProfessions.length === 0) return;
+    if (!session || saving) return;
+    const form = event.currentTarget;
+    const values = new FormData(form);
+    const submittedStoreName = String(values.get('storeName') ?? '').trim();
+    const submittedProfessions = values.getAll('professionCodes')
+      .map(String)
+      .filter((code): code is ProfessionCode => Object.hasOwn(PORTALS, code));
+    const nextErrors: FieldErrors = {};
+    if (!submittedStoreName) nextErrors.storeName = 'Renseignez le nom du magasin.';
+    else if (submittedStoreName.length > 120) nextErrors.storeName = 'Le nom du magasin ne peut pas dépasser 120 caractères.';
+    if (submittedProfessions.length === 0) nextErrors.professionCodes = 'Choisissez au moins un métier.';
+    if (Object.keys(nextErrors).length > 0) {
+      setStoreFieldErrors(nextErrors);
+      setError('');
+      setSuccess('');
+      focusFirstInvalidField(form, Object.keys(nextErrors));
+      return;
+    }
     setSaving(true);
+    setStoreFieldErrors({});
     setSuccess('');
     try {
       const created = await createStore(session, {
-        name: storeName.trim(),
-        profession_codes: storeProfessions,
+        name: submittedStoreName,
+        profession_codes: [...new Set(submittedProfessions)],
       });
       setStoreName('');
       setStoreProfessions([]);
@@ -309,25 +355,25 @@ export function AdminPage() {
       <IdentityPanel title="Nouveau manager" description="Le compte sera actif dès sa création.">
         {scopedPortals.length === 0
           ? <IdentityEmpty title={scopeActive ? 'Aucun portail dans ce périmètre' : 'Créez d’abord un magasin'} description={scopeActive ? 'Modifiez le magasin ou le métier sélectionné pour créer un manager.' : 'Ajoutez un magasin et activez au moins un métier avant de créer votre premier manager.'} />
-          : <form id="create-manager-form" className="identity-form manager-form" method="post" action="/v1/managers" onSubmit={(event) => void submitManager(event)}>
-          <label className="field" htmlFor="new-manager-username"><span>Identifiant</span><input id="new-manager-username" name="username" autoComplete="off" required maxLength={254} value={username} onChange={(event) => setUsername(event.target.value)} /></label>
-          <PasswordField id="new-manager-password" name="password" value={password} onChange={setPassword} preserveAutofill />
-          <label className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={scopedPortals} selected={selectedPortalId} onChange={setSelectedPortalId} name="new-manager-portal" ariaLabel="Magasin et métier attribués" /></label>
-          <button className="button primary" disabled={saving || !selectedPortalId || !password}>{saving ? 'Création…' : 'Créer le compte'}</button>
+          : <form id="create-manager-form" className="identity-form manager-form" method="post" action="/v1/managers" noValidate aria-busy={saving} onSubmit={(event) => void submitManager(event)}>
+          <div className="field"><label htmlFor="new-manager-username">Identifiant</label><input id="new-manager-username" name="username" autoComplete="off" required maxLength={254} value={username} aria-invalid={Boolean(managerFieldErrors.username)} aria-describedby={managerFieldErrors.username ? 'new-manager-username-error' : undefined} onChange={(event) => { setUsername(event.target.value); clearFieldError(setManagerFieldErrors, 'username'); setError(''); }} /><FieldError id="new-manager-username-error" message={managerFieldErrors.username} /></div>
+          <PasswordField id="new-manager-password" name="password" value={password} onChange={setPassword} preserveAutofill error={managerFieldErrors.password} onClearError={() => { clearFieldError(setManagerFieldErrors, 'password'); setError(''); }} />
+          <div className="field"><span>Magasin et métier attribués</span><ManagerPortalSelect portals={scopedPortals} selected={selectedPortalId} onChange={(portalId) => { setSelectedPortalId(portalId); clearFieldError(setManagerFieldErrors, 'portal'); setError(''); }} name="new-manager-portal" ariaLabel="Magasin et métier attribués" invalid={Boolean(managerFieldErrors.portal)} describedBy={managerFieldErrors.portal ? 'new-manager-portal-error' : undefined} /><FieldError id="new-manager-portal-error" message={managerFieldErrors.portal} /></div>
+          <button className="button primary" type="submit" disabled={saving}>{saving ? 'Création…' : 'Créer le compte'}</button>
         </form>}
       </IdentityPanel>
     }
 
     {canManagePortals && <IdentityPanel title="Nouveau magasin" description="Ajoutez un magasin et choisissez les métiers réellement utilisés.">
-      <form className="identity-form manager-form" onSubmit={(event) => void submitStore(event)}>
-        <label className="field"><span>Nom du magasin</span><input required maxLength={120} value={storeName} onChange={(event) => setStoreName(event.target.value)} /></label>
-        <fieldset className="choice-fieldset"><legend>Métiers</legend><div className="portal-choices">
+      <form className="identity-form manager-form" noValidate aria-busy={saving} onSubmit={(event) => void submitStore(event)}>
+        <div className="field"><label htmlFor="new-store-name">Nom du magasin</label><input id="new-store-name" name="storeName" required maxLength={120} value={storeName} aria-invalid={Boolean(storeFieldErrors.storeName)} aria-describedby={storeFieldErrors.storeName ? 'new-store-name-error' : undefined} onChange={(event) => { setStoreName(event.target.value); clearFieldError(setStoreFieldErrors, 'storeName'); setError(''); }} /><FieldError id="new-store-name-error" message={storeFieldErrors.storeName} /></div>
+        <fieldset className="choice-fieldset" aria-invalid={Boolean(storeFieldErrors.professionCodes)} aria-describedby={storeFieldErrors.professionCodes ? 'new-store-professions-error' : undefined}><legend>Métiers</legend><div className="portal-choices">
           {(Object.keys(PORTALS) as ProfessionCode[]).map((code) => <label key={code} className="portal-choice">
-            <input type="checkbox" checked={storeProfessions.includes(code)} onChange={(event) => setStoreProfessions(event.target.checked ? [...storeProfessions, code] : storeProfessions.filter((item) => item !== code))} />
+            <input type="checkbox" name="professionCodes" value={code} data-validation-for="professionCodes" checked={storeProfessions.includes(code)} onChange={(event) => { setStoreProfessions(event.target.checked ? [...storeProfessions, code] : storeProfessions.filter((item) => item !== code)); clearFieldError(setStoreFieldErrors, 'professionCodes'); setError(''); }} />
             <span>{PORTALS[code].label}</span>
           </label>)}
-        </div></fieldset>
-        <button className="button primary" disabled={saving || !storeName.trim() || storeProfessions.length === 0}>{saving ? 'Ajout…' : 'Ajouter le magasin'}</button>
+        </div><FieldError id="new-store-professions-error" message={storeFieldErrors.professionCodes} /></fieldset>
+        <button className="button primary" type="submit" disabled={saving}>{saving ? 'Ajout…' : 'Ajouter le magasin'}</button>
       </form>
     </IdentityPanel>}
 

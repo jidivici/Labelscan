@@ -24,6 +24,8 @@ export function ManagerPortalSelect({
   ariaLabel,
   inTable = false,
   disabled = false,
+  invalid = false,
+  describedBy,
 }: {
   portals: IamPortal[];
   selected: string;
@@ -32,6 +34,8 @@ export function ManagerPortalSelect({
   ariaLabel: string;
   inTable?: boolean;
   disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
 }) {
   const options: SelectOption[] = [
     { value: '', label: PLACEHOLDER },
@@ -47,6 +51,8 @@ export function ManagerPortalSelect({
     ariaLabel={ariaLabel}
     inTable={inTable}
     disabled={disabled}
+    invalid={invalid}
+    describedBy={describedBy}
   />;
 }
 
@@ -55,11 +61,15 @@ export function StoreSelect({
   selected,
   onChange,
   disabled = false,
+  invalid = false,
+  describedBy,
 }: {
   stores: Array<{ id: string; name: string }>;
   selected: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
 }) {
   return <MenuSelect
     options={stores.map((store) => ({ value: store.id, label: store.name }))}
@@ -68,6 +78,8 @@ export function StoreSelect({
     name="store-profession-scope"
     ariaLabel="Magasin"
     disabled={disabled}
+    invalid={invalid}
+    describedBy={describedBy}
   />;
 }
 
@@ -79,6 +91,8 @@ function MenuSelect({
   ariaLabel,
   inTable = false,
   disabled = false,
+  invalid = false,
+  describedBy,
 }: {
   options: SelectOption[];
   selected: string;
@@ -87,6 +101,8 @@ function MenuSelect({
   ariaLabel: string;
   inTable?: boolean;
   disabled?: boolean;
+  invalid?: boolean;
+  describedBy?: string;
 }) {
   const selectedIndex = Math.max(0, options.findIndex((option) => option.value === selected));
   const [open, setOpen] = useState(false);
@@ -234,6 +250,9 @@ function MenuSelect({
       aria-controls={open ? listboxId : undefined}
       aria-haspopup="listbox"
       aria-expanded={open}
+      aria-invalid={invalid}
+      aria-describedby={describedBy}
+      data-validation-for={name}
       disabled={disabled}
       onClick={() => {
         if (open) setOpen(false);

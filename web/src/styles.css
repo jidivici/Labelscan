@@ -107,6 +107,8 @@ select {
 }
 .field input:hover, .field select:hover { border-color: #93a39f; }
 .field input:focus, .field select:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(8 127 114 / 10%); }
+.field input[aria-invalid="true"], .field select[aria-invalid="true"] { border-color: #d98b95; background: #fffafb; }
+.field input[aria-invalid="true"]:focus, .field select[aria-invalid="true"]:focus { border-color: var(--danger); box-shadow: 0 0 0 3px rgb(201 39 57 / 10%); }
 .field small { color: var(--muted); font-size: 10px; font-weight: 500; }
 .compact-field { width: min(100%, 420px); }
 .table-field select { min-height: 36px; padding-block: 6px; font-size: 11px; }
@@ -323,6 +325,7 @@ tbody tr:hover { background: #fafcfb; }
 .password-input button:hover, .password-input button[aria-pressed="true"] { background: var(--primary-soft); color: var(--primary-dark); }
 .choice-fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .choice-fieldset legend { margin-bottom: 8px; color: #465450; font-size: 12px; font-weight: 700; }
+.choice-fieldset[aria-invalid="true"] .portal-choices { padding: 8px; border: 1px solid #efcbd0; border-radius: 9px; background: #fffafb; }
 .portal-choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .portal-choice { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; color: #45534f; font-size: 10px; font-weight: 600; }
 .portal-choice:has(input:checked) { border-color: #93bbb5; background: var(--primary-soft); color: var(--primary-dark); }
@@ -356,6 +359,8 @@ tbody tr:hover { background: #fafcfb; }
 }
 .manager-portal-trigger:hover { border-color: #93a39f; background: #fbfcfc; }
 .manager-portal-trigger:disabled { opacity: .56; cursor: wait; }
+.manager-portal-trigger[aria-invalid="true"] { border-color: #d98b95; background: #fffafb; }
+.manager-portal-trigger[aria-invalid="true"]:focus-visible { outline: 0; border-color: var(--danger); box-shadow: 0 0 0 3px rgb(201 39 57 / 10%); }
 .manager-portal-select.open .manager-portal-trigger { border-color: var(--primary); box-shadow: 0 0 0 3px rgb(8 127 114 / 10%); }
 .manager-portal-trigger > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .manager-portal-trigger .placeholder { color: #7a8985; font-weight: 550; }
@@ -393,10 +398,7 @@ tbody tr:hover { background: #fafcfb; }
 .password-requirements li.unmet { color: var(--danger); }
 .password-requirements li.unmet > span { background: #fde8e8; color: var(--danger); }
 .account-password-form > .button { width: 100%; min-height: 50px; margin-top: 3px; font-size: 14px; transition: background .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease, transform .15s ease; }
-.account-password-submit.is-incomplete { border-color: #d6dfdc; background: #e9eeec; color: #788681; opacity: 1; box-shadow: none; }
-.account-password-submit.is-valid { border-color: var(--primary); background: var(--primary); color: #fff; box-shadow: 0 9px 22px rgb(8 127 114 / 24%); }
-.account-password-submit.is-valid:hover { background: var(--primary-dark); transform: translateY(-1px); }
-.field-error { color: var(--danger); }
+.field-error { display: block; color: var(--danger); font-size: 10px; font-weight: 650; line-height: 1.4; }
 .account-link { display: block; padding: 8px 10px; border-radius: 6px; color: var(--primary); font-size: 10px; font-weight: 750; text-decoration: none; }
 .account-link:hover { background: var(--primary-soft); }
 .paged-content { animation: paged-content-in .18s ease-out; }

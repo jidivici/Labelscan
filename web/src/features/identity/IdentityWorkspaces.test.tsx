@@ -10,6 +10,7 @@ import { CAPABILITIES, type Capability, type Role, type Session } from '../../ty
 import {
   createAdmin,
   createManager,
+  createStore,
   deactivateAdmin,
   deleteManager,
   getIamOverview,
@@ -24,6 +25,7 @@ import type { IamOverview, IamPortal, IamUser } from './types';
 vi.mock('./client', () => ({
   createAdmin: vi.fn(),
   createManager: vi.fn(),
+  createStore: vi.fn(),
   deactivateAdmin: vi.fn(),
   deleteManager: vi.fn(),
   getIamOverview: vi.fn(),
@@ -172,6 +174,7 @@ function renderAt(path: string, currentSession: Session) {
 }
 
 beforeEach(() => {
+  vi.clearAllMocks();
   vi.mocked(getIamOverview).mockResolvedValue(overview);
   vi.mocked(listManagers).mockResolvedValue([manager]);
   vi.mocked(listAdmins).mockResolvedValue([admin]);
@@ -185,6 +188,7 @@ beforeEach(() => {
   vi.mocked(deactivateAdmin).mockResolvedValue(undefined);
   vi.mocked(createManager).mockResolvedValue(manager);
   vi.mocked(createAdmin).mockResolvedValue(admin);
+  vi.mocked(createStore).mockResolvedValue(overview.stores[0]);
 });
 
 describe('IAM workspace capability visibility', () => {
@@ -233,14 +237,19 @@ describe('IAM credentials', () => {
   it.each([
     ['une lettre accentuée', 'Abcdefghij1é'],
     ['un chiffre Unicode', 'Abcdefghij1٢'],
-  ])('does not treat %s as the required special character', async (_case, password) => {
+  ])('explains that %s is not the required special character', async (_case, password) => {
     const user = userEvent.setup();
     renderAt('/o/labelscan/super-administration', superAdminSession);
     await screen.findByRole('heading', { name: 'Administrateurs' });
 
     await user.type(screen.getByLabelText('Mot de passe'), password);
 
-    expect(screen.getByRole('button', { name: 'Créer le compte' })).toBeDisabled();
+    const submit = screen.getByRole('button', { name: 'Créer le compte' });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(screen.getByLabelText('Identifiant')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Mot de passe')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText(/Utilisez 12 à 128 caractères/)).toBeInTheDocument();
   });
 
   it('accepts punctuation as the required special character', async () => {
@@ -268,6 +277,57 @@ describe('IAM credentials', () => {
       username: 'admin.autofill',
       password: 'Strong-Safari-42!',
     }));
+  });
+
+  it('shows complete inline guidance instead of native manager-form bubbles', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/administration', adminSession);
+    await screen.findByRole('heading', { name: 'Équipe et magasins' });
+    const form = document.querySelector<HTMLFormElement>('#create-manager-form')!;
+
+    expect(form).toHaveAttribute('novalidate');
+    await user.click(within(form).getByRole('button', { name: 'Créer le compte' }));
+
+    expect(within(form).getByText('Renseignez un identifiant.')).toBeInTheDocument();
+    expect(within(form).getByText('Renseignez un mot de passe.')).toBeInTheDocument();
+    expect(within(form).getByText('Choisissez un magasin et un métier actifs.')).toBeInTheDocument();
+    expect(within(form).getByLabelText('Identifiant')).toHaveFocus();
+    expect(createManager).not.toHaveBeenCalled();
+  });
+
+  it('submits manager credentials read directly from Safari AutoFill', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/administration', adminSession);
+    await screen.findByRole('heading', { name: 'Équipe et magasins' });
+    const form = document.querySelector<HTMLFormElement>('#create-manager-form')!;
+    await user.click(within(form).getByRole('button', { name: 'Magasin et métier attribués' }));
+    await user.click(screen.getByRole('option', { name: 'Paris Centre · Poissonnerie' }));
+    const username = within(form).getByLabelText('Identifiant') as HTMLInputElement;
+    const password = within(form).getByLabelText('Mot de passe') as HTMLInputElement;
+
+    username.value = 'manager.safari';
+    password.value = 'safari-secret';
+    await user.click(within(form).getByRole('button', { name: 'Créer le compte' }));
+
+    await waitFor(() => expect(createManager).toHaveBeenCalledWith(adminSession, {
+      username: 'manager.safari',
+      password: 'safari-secret',
+      business_portal_ids: ['portal-fish-paris'],
+    }));
+  });
+
+  it('shows both missing fields for the new-store form', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/administration', adminSession);
+    const panel = (await screen.findByRole('heading', { name: 'Nouveau magasin' })).closest('section')!;
+    const form = panel.querySelector('form')!;
+
+    await user.click(within(form).getByRole('button', { name: 'Ajouter le magasin' }));
+
+    expect(within(form).getByText('Renseignez le nom du magasin.')).toBeInTheDocument();
+    expect(within(form).getByText('Choisissez au moins un métier.')).toBeInTheDocument();
+    expect(within(form).getByLabelText('Nom du magasin')).toHaveFocus();
+    expect(createStore).not.toHaveBeenCalled();
   });
 
 });

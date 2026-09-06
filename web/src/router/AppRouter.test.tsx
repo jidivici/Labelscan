@@ -71,7 +71,7 @@ describe('capability based routing', () => {
   it.each([
     ['une lettre accentuée', 'Abcdefghij1é'],
     ['un chiffre Unicode', 'Abcdefghij1٢'],
-  ])('does not treat %s as a special character on the account page', async (_case, password) => {
+  ])('explains that %s is not a special character on the account page', async (_case, password) => {
     const user = userEvent.setup();
     renderAt('/o/labelscan/compte', superAdminFixtureSession);
     await screen.findByRole('heading', { name: 'Mon compte' });
@@ -80,7 +80,11 @@ describe('capability based routing', () => {
     await user.type(screen.getByLabelText('Nouveau mot de passe'), password);
     await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), password);
 
-    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeDisabled();
+    const submit = screen.getByRole('button', { name: 'Modifier le mot de passe' });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(screen.getByLabelText('Nouveau mot de passe')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByText('Respectez tous les critères de sécurité indiqués.')).toBeInTheDocument();
   });
 
   it('accepts punctuation as a special character on the account page', async () => {
@@ -94,7 +98,7 @@ describe('capability based routing', () => {
     await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), password);
 
     expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toHaveClass('is-valid');
+    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toHaveClass('primary');
     expect(screen.getByText('Tous les critères sont respectés')).toBeInTheDocument();
   });
 
@@ -111,7 +115,12 @@ describe('capability based routing', () => {
     expect(within(requirements).getByText('Une lettre majuscule').closest('li')).toHaveClass('unmet');
     expect(within(requirements).getByText('Un chiffre').closest('li')).toHaveClass('unmet');
     expect(within(requirements).getByText('Les deux nouveaux mots de passe correspondent').closest('li')).toHaveClass('unmet');
-    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toHaveClass('is-incomplete');
+    const submit = screen.getByRole('button', { name: 'Modifier le mot de passe' });
+    expect(submit).toBeEnabled();
+    await user.click(submit);
+    expect(screen.getByText('Renseignez votre mot de passe actuel.')).toBeInTheDocument();
+    expect(screen.getByText('Respectez tous les critères de sécurité indiqués.')).toBeInTheDocument();
+    expect(screen.getByText('Les deux nouveaux mots de passe ne correspondent pas.')).toBeInTheDocument();
   });
 
   it('exposes password-change semantics to Safari AutoFill', async () => {
@@ -152,6 +161,45 @@ describe('capability based routing', () => {
     expect(password).toHaveAttribute('type', 'text');
     expect(password).toHaveValue('Existing-Password-42!');
     expect(screen.getByRole('button', { name: 'Masquer le mot de passe' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('replaces native login validation with accessible inline guidance', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch');
+    renderAt('/o/labelscan/connexion', null);
+
+    const submit = await screen.findByRole('button', { name: 'Se connecter' });
+    expect(submit.closest('form')).toHaveAttribute('novalidate');
+    await user.click(submit);
+
+    expect(screen.getByText('Renseignez votre identifiant.')).toBeInTheDocument();
+    expect(screen.getByText('Renseignez votre mot de passe.')).toBeInTheDocument();
+    expect(screen.getByLabelText('Identifiant')).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByLabelText('Identifiant')).toHaveFocus();
+    expect(fetchSpy).not.toHaveBeenCalled();
+    fetchSpy.mockRestore();
+  });
+
+  it('submits Safari-autofilled login values even without input events', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({
+      detail: 'Identifiants invalides',
+      error_code: 'INVALID_CREDENTIALS',
+    }), { status: 401, headers: { 'Content-Type': 'application/json' } }));
+    renderAt('/o/labelscan/connexion', null);
+    const username = await screen.findByLabelText('Identifiant') as HTMLInputElement;
+    const password = screen.getByLabelText('Mot de passe') as HTMLInputElement;
+
+    username.value = 'safari.autofill';
+    password.value = 'Safari-password-42!';
+    await user.click(screen.getByRole('button', { name: 'Se connecter' }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+      username: 'safari.autofill',
+      password: 'Safari-password-42!',
+    });
+    fetchSpy.mockRestore();
   });
 
   it('places a login error between the password field and the submit button', async () => {
@@ -217,5 +265,29 @@ describe('capability based routing', () => {
     expect(password).toHaveAttribute('type', 'text');
     expect(password).toHaveValue(generatedPassword);
     expect(screen.getByRole('button', { name: 'Masquer le mot de passe' })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('submits Safari-autofilled account passwords even without input events', async () => {
+    const user = userEvent.setup();
+    const fetchSpy = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    renderAt('/o/labelscan/compte', superAdminFixtureSession);
+    await screen.findByRole('heading', { name: 'Mon compte' });
+    const current = screen.getByLabelText('Mot de passe actuel') as HTMLInputElement;
+    const password = screen.getByLabelText('Nouveau mot de passe') as HTMLInputElement;
+    const confirmation = screen.getByLabelText('Confirmer le nouveau mot de passe') as HTMLInputElement;
+
+    current.value = 'CurrentPassword1!';
+    password.value = 'Strong-Safari-Password-42!';
+    confirmation.value = 'Strong-Safari-Password-42!';
+    await user.click(screen.getByRole('button', { name: 'Modifier le mot de passe' }));
+
+    await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/v1/me/password', expect.objectContaining({ method: 'POST' })));
+    expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
+      current_password: 'CurrentPassword1!',
+      new_password: 'Strong-Safari-Password-42!',
+    });
+    fetchSpy.mockRestore();
   });
 });
