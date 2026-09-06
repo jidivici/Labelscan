@@ -97,6 +97,7 @@ export function PasswordField({
   const errorId = error ? `${inputId}-error` : undefined;
   const describedBy = [hintId, errorId].filter(Boolean).join(' ') || undefined;
   const syncTimerRef = useRef<number | undefined>(undefined);
+  const inputRef = useRef<HTMLInputElement>(null);
   const valueProps = preserveAutofill ? { defaultValue: value } : { value };
 
   useEffect(() => () => {
@@ -119,10 +120,19 @@ export function PasswordField({
     onChange(nextValue);
   }
 
+  function toggleVisibility() {
+    // Safari may fill the input without emitting an input event. Read the DOM
+    // value before switching its type so the AutoFill value is retained and can
+    // be rendered as plain text immediately.
+    commitChange(inputRef.current?.value ?? value);
+    setVisible((current) => !current);
+  }
+
   return <div className="field password-field">
     <label htmlFor={inputId}>{label}</label>
     <span className="password-input">
       <input
+        ref={inputRef}
         id={inputId}
         name={name}
         type={visible ? 'text' : 'password'}
@@ -140,8 +150,7 @@ export function PasswordField({
       />
       <button
         type="button"
-        onPointerDown={(event) => event.preventDefault()}
-        onClick={() => setVisible((current) => !current)}
+        onClick={toggleVisibility}
         aria-label={visible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
         aria-pressed={visible}
       >

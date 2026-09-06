@@ -281,6 +281,21 @@ describe('IAM credentials', () => {
     }));
   });
 
+  it('reveals a password filled by Safari', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/administration', adminSession);
+    await screen.findByRole('heading', { name: 'Équipe et magasins' });
+    const password = screen.getByLabelText('Mot de passe') as HTMLInputElement;
+
+    // Safari can populate the DOM value without firing an input event.
+    password.value = 'Safari-AutoFill-42!';
+    await user.click(screen.getByRole('button', { name: 'Afficher le mot de passe' }));
+
+    expect(password).toHaveAttribute('type', 'text');
+    expect(password).toHaveValue('Safari-AutoFill-42!');
+    expect(screen.getByRole('button', { name: 'Masquer le mot de passe' })).toBeInTheDocument();
+  });
+
   it('shows complete inline guidance instead of native manager-form bubbles', async () => {
     const user = userEvent.setup();
     renderAt('/o/labelscan/administration', adminSession);
