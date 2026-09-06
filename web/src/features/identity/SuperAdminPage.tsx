@@ -10,6 +10,7 @@ import {
   PRIVILEGED_PASSWORD_ERROR,
   PRIVILEGED_PASSWORD_HINT,
   PRIVILEGED_PASSWORD_RULES,
+  useFormCompleteness,
 } from '../../components/FormValidation';
 import { createAdmin, deactivateAdmin, listAdmins } from './client';
 import {
@@ -32,7 +33,6 @@ function message(cause: unknown): string {
 export function SuperAdminPage() {
   const { session } = useAuth();
   const [admins, setAdmins] = useState<IamUser[]>([]);
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -40,6 +40,13 @@ export function SuperAdminPage() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const { formRef, formIsComplete } = useFormCompleteness((form) => {
+    const values = new FormData(form);
+    const submittedUsername = String(values.get('username') ?? '').trim();
+    const submittedPassword = String(values.get('password') ?? '');
+    return submittedUsername.length > 0 && submittedUsername.length <= 254
+      && hasPrivilegedPasswordPolicy(submittedPassword);
+  });
 
   const load = useCallback(async () => {
     if (!session) return;
@@ -91,7 +98,6 @@ export function SuperAdminPage() {
         password: submittedPassword,
       });
       form.reset();
-      setUsername('');
       setPassword('');
       setSuccess('Le compte administrateur est créé et peut se connecter immédiatement.');
       setError('');
@@ -125,8 +131,8 @@ export function SuperAdminPage() {
     <SuccessNotice message={success} />
 
     <IdentityPanel title="Nouvel administrateur" description="Le compte sera actif dès sa création.">
-      <form id="create-admin-form" className="identity-form" method="post" action="/v1/admins" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
-        <div className="field"><label htmlFor="new-admin-username">Identifiant</label><input id="new-admin-username" name="username" autoComplete="off" required maxLength={254} value={username} aria-invalid={Boolean(fieldErrors.username)} aria-describedby={fieldErrors.username ? 'new-admin-username-error' : undefined} onChange={(event) => { setUsername(event.target.value); clearFieldError(setFieldErrors, 'username'); setError(''); }} /><FieldError id="new-admin-username-error" message={fieldErrors.username} /></div>
+      <form ref={formRef} id="create-admin-form" className="identity-form" method="post" action="/v1/admins" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
+        <div className="field"><label htmlFor="new-admin-username">Identifiant</label><input id="new-admin-username" name="username" autoComplete="off" required maxLength={254} aria-invalid={Boolean(fieldErrors.username)} aria-describedby={fieldErrors.username ? 'new-admin-username-error' : undefined} onInput={() => { clearFieldError(setFieldErrors, 'username'); setError(''); }} /><FieldError id="new-admin-username-error" message={fieldErrors.username} /></div>
         <PasswordField
           id="new-admin-password"
           name="password"
@@ -139,7 +145,7 @@ export function SuperAdminPage() {
           error={fieldErrors.password}
           onClearError={() => { clearFieldError(setFieldErrors, 'password'); setError(''); }}
         />
-        <button className="button primary" type="submit" disabled={saving}>{saving ? 'Création…' : 'Créer le compte'}</button>
+        <button className={`button primary ${formIsComplete ? 'is-complete' : 'is-incomplete'}`} type="submit" disabled={saving}>{saving ? 'Création…' : 'Créer le compte'}</button>
       </form>
     </IdentityPanel>
 

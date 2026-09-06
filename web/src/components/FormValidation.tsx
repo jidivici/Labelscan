@@ -1,3 +1,5 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+
 export type FieldErrors = Record<string, string>;
 
 export const PRIVILEGED_PASSWORD_RULES = 'minlength: 12; maxlength: 128; required: upper; required: lower; required: digit; required: special;';
@@ -11,6 +13,43 @@ export function hasPrivilegedPasswordPolicy(value: string): boolean {
     && /[a-z]/.test(value)
     && /\d/.test(value)
     && /[^\p{Alphabetic}\p{Number}]/u.test(value);
+}
+
+export function useFormCompleteness(check: (form: HTMLFormElement) => boolean) {
+  const checkRef = useRef(check);
+  const [form, setForm] = useState<HTMLFormElement | null>(null);
+  const [formIsComplete, setFormIsComplete] = useState(false);
+  checkRef.current = check;
+  const formRef = useCallback((element: HTMLFormElement | null) => setForm(element), []);
+
+  const refreshFormCompleteness = useCallback(() => {
+    setFormIsComplete(Boolean(form && checkRef.current(form)));
+  }, [form]);
+
+  useEffect(() => {
+    if (!form) return;
+    const refresh = () => refreshFormCompleteness();
+    const frame = window.requestAnimationFrame(refresh);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refresh();
+    }, 500);
+    form.addEventListener('input', refresh);
+    form.addEventListener('change', refresh);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('pageshow', refresh);
+    document.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(interval);
+      form.removeEventListener('input', refresh);
+      form.removeEventListener('change', refresh);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('pageshow', refresh);
+      document.removeEventListener('visibilitychange', refresh);
+    };
+  }, [refreshFormCompleteness]);
+
+  return { formRef, formIsComplete, refreshFormCompleteness };
 }
 
 export function FieldError({ id, message }: { id: string; message?: string }) {

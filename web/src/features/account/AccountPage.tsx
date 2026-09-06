@@ -8,6 +8,7 @@ import {
   hasPrivilegedPasswordPolicy,
   PRIVILEGED_PASSWORD_HINT,
   PRIVILEGED_PASSWORD_RULES,
+  useFormCompleteness,
 } from '../../components/FormValidation';
 import { changeMyPassword } from '../identity/client';
 import { ErrorNotice, IdentityPanel, PasswordField } from '../identity/components';
@@ -43,6 +44,18 @@ export function AccountPage() {
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const privileged = session?.user.role === 'admin' || session?.user.role === 'super_admin';
+  const { formRef, formIsComplete } = useFormCompleteness((form) => {
+    const values = new FormData(form);
+    const current = String(values.get('currentPassword') ?? '');
+    const next = String(values.get('newPassword') ?? '');
+    const confirmed = String(values.get('newPasswordConfirmation') ?? '');
+    const nextIsValid = privileged
+      ? hasPrivilegedPasswordPolicy(next)
+      : next.length > 0 && next.length <= 128;
+    return current.length > 0 && current.length <= 128
+      && nextIsValid
+      && confirmed === next;
+  });
   const passwordRequirements: Requirement[] = [
     { label: '12 caractères minimum', met: newPassword.length >= 12, touched: newPassword.length > 0 },
     { label: 'Une lettre majuscule', met: /[A-Z]/.test(newPassword), touched: newPassword.length > 0 },
@@ -102,7 +115,7 @@ export function AccountPage() {
     </header>
     <ErrorNotice message={error} />
     <IdentityPanel title="Changer mon mot de passe" description="Votre mot de passe actuel est obligatoire. Vous devrez ensuite vous reconnecter.">
-      <form id="account-password-change-form" className="account-password-form" method="post" action="/v1/me/password" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
+      <form ref={formRef} id="account-password-change-form" className="account-password-form" method="post" action="/v1/me/password" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
         <input id="account-username-autofill" className="sr-only" name="username" type="text" autoComplete="username" value={session?.user.username ?? ''} readOnly tabIndex={-1} aria-hidden="true" />
         <PasswordField id="account-current-password" name="currentPassword" label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" preserveAutofill error={fieldErrors.currentPassword} onClearError={() => { clearFieldError(setFieldErrors, 'currentPassword'); setError(''); }} />
         <PasswordField
@@ -121,7 +134,7 @@ export function AccountPage() {
         />
         {privileged ? <PasswordRequirements requirements={passwordRequirements} /> : null}
         <PasswordField id="account-new-password-confirmation" name="newPasswordConfirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} minLength={privileged ? 12 : undefined} autoComplete="new-password" preserveAutofill error={fieldErrors.newPasswordConfirmation} onClearError={() => { clearFieldError(setFieldErrors, 'newPasswordConfirmation'); setError(''); }} />
-        <button className="button primary account-password-submit" type="submit" disabled={saving}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
+        <button className={`button primary account-password-submit ${formIsComplete ? 'is-complete' : 'is-incomplete'}`} type="submit" disabled={saving}>{saving ? 'Modification…' : 'Modifier le mot de passe'}</button>
       </form>
     </IdentityPanel>
   </section>;

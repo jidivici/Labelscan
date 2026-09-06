@@ -246,6 +246,7 @@ describe('IAM credentials', () => {
 
     const submit = screen.getByRole('button', { name: 'Créer le compte' });
     expect(submit).toBeEnabled();
+    expect(submit).toHaveClass('is-incomplete');
     await user.click(submit);
     expect(screen.getByLabelText('Identifiant')).toHaveAttribute('aria-invalid', 'true');
     expect(screen.getByLabelText('Mot de passe')).toHaveAttribute('aria-invalid', 'true');
@@ -260,6 +261,7 @@ describe('IAM credentials', () => {
     await user.type(screen.getByLabelText('Mot de passe'), 'Abcdefghi1é!');
 
     expect(screen.getByRole('button', { name: 'Créer le compte' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Créer le compte' })).toHaveClass('is-incomplete');
   });
 
   it('submits the password present in the DOM before the deferred AutoFill synchronization', async () => {
@@ -286,7 +288,9 @@ describe('IAM credentials', () => {
     const form = document.querySelector<HTMLFormElement>('#create-manager-form')!;
 
     expect(form).toHaveAttribute('novalidate');
-    await user.click(within(form).getByRole('button', { name: 'Créer le compte' }));
+    const submit = within(form).getByRole('button', { name: 'Créer le compte' });
+    expect(submit).toHaveClass('is-incomplete');
+    await user.click(submit);
 
     expect(within(form).getByText('Renseignez un identifiant.')).toBeInTheDocument();
     expect(within(form).getByText('Renseignez un mot de passe.')).toBeInTheDocument();
@@ -307,7 +311,9 @@ describe('IAM credentials', () => {
 
     username.value = 'manager.safari';
     password.value = 'safari-secret';
-    await user.click(within(form).getByRole('button', { name: 'Créer le compte' }));
+    const submit = within(form).getByRole('button', { name: 'Créer le compte' });
+    await waitFor(() => expect(submit).toHaveClass('is-complete'));
+    await user.click(submit);
 
     await waitFor(() => expect(createManager).toHaveBeenCalledWith(adminSession, {
       username: 'manager.safari',
@@ -322,7 +328,9 @@ describe('IAM credentials', () => {
     const panel = (await screen.findByRole('heading', { name: 'Nouveau magasin' })).closest('section')!;
     const form = panel.querySelector('form')!;
 
-    await user.click(within(form).getByRole('button', { name: 'Ajouter le magasin' }));
+    const submit = within(form).getByRole('button', { name: 'Ajouter le magasin' });
+    expect(submit).toHaveClass('is-incomplete');
+    await user.click(submit);
 
     expect(within(form).getByText('Renseignez le nom du magasin.')).toBeInTheDocument();
     expect(within(form).getByText('Choisissez au moins un métier.')).toBeInTheDocument();

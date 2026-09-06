@@ -81,6 +81,8 @@ select {
 
 .button.primary { background: var(--primary); color: #fff; }
 .button.primary:hover { background: var(--primary-dark); }
+.button.primary.is-incomplete { border-color: #d6dfdc; background: #e9eeec; color: #788681; opacity: 1; box-shadow: none; }
+.button.primary.is-incomplete:hover { border-color: #cbd6d2; background: #e1e8e5; color: #64736e; }
 .button.secondary { border-color: var(--line-strong); background: #fff; color: var(--ink); }
 .button.secondary:hover, .button.secondary.active { border-color: #93b7b1; background: var(--primary-soft); color: var(--primary-dark); }
 .button.text { border: 0; background: transparent; color: var(--primary); }

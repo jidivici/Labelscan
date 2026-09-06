@@ -98,7 +98,7 @@ describe('capability based routing', () => {
     await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), password);
 
     expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toHaveClass('primary');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Modifier le mot de passe' })).toHaveClass('is-complete'));
     expect(screen.getByText('Tous les critères sont respectés')).toBeInTheDocument();
   });
 
@@ -117,6 +117,7 @@ describe('capability based routing', () => {
     expect(within(requirements).getByText('Les deux nouveaux mots de passe correspondent').closest('li')).toHaveClass('unmet');
     const submit = screen.getByRole('button', { name: 'Modifier le mot de passe' });
     expect(submit).toBeEnabled();
+    expect(submit).toHaveClass('is-incomplete');
     await user.click(submit);
     expect(screen.getByText('Renseignez votre mot de passe actuel.')).toBeInTheDocument();
     expect(screen.getByText('Respectez tous les critères de sécurité indiqués.')).toBeInTheDocument();
@@ -170,6 +171,7 @@ describe('capability based routing', () => {
 
     const submit = await screen.findByRole('button', { name: 'Se connecter' });
     expect(submit.closest('form')).toHaveAttribute('novalidate');
+    expect(submit).toHaveClass('is-incomplete');
     await user.click(submit);
 
     expect(screen.getByText('Renseignez votre identifiant.')).toBeInTheDocument();
@@ -192,7 +194,9 @@ describe('capability based routing', () => {
 
     username.value = 'safari.autofill';
     password.value = 'Safari-password-42!';
-    await user.click(screen.getByRole('button', { name: 'Se connecter' }));
+    const submit = screen.getByRole('button', { name: 'Se connecter' });
+    await waitFor(() => expect(submit).toHaveClass('is-complete'));
+    await user.click(submit);
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalled());
     expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({
@@ -281,7 +285,9 @@ describe('capability based routing', () => {
     current.value = 'CurrentPassword1!';
     password.value = 'Strong-Safari-Password-42!';
     confirmation.value = 'Strong-Safari-Password-42!';
-    await user.click(screen.getByRole('button', { name: 'Modifier le mot de passe' }));
+    const submit = screen.getByRole('button', { name: 'Modifier le mot de passe' });
+    await waitFor(() => expect(submit).toHaveClass('is-complete'));
+    await user.click(submit);
 
     await waitFor(() => expect(fetchSpy).toHaveBeenCalledWith('/v1/me/password', expect.objectContaining({ method: 'POST' })));
     expect(JSON.parse(String(fetchSpy.mock.calls[0][1]?.body))).toEqual({

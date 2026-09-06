@@ -10,6 +10,7 @@ import {
   FieldError,
   type FieldErrors,
   focusFirstInvalidField,
+  useFormCompleteness,
 } from '../../components/FormValidation';
 import { CAPABILITIES, type Session } from '../../types';
 
@@ -30,6 +31,13 @@ export function LoginPage() {
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [busy, setBusy] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const { formRef, formIsComplete } = useFormCompleteness((form) => {
+    const values = new FormData(form);
+    const username = String(values.get('username') ?? '').trim();
+    const password = String(values.get('password') ?? '');
+    return username.length > 0 && username.length <= 254
+      && password.length > 0 && password.length <= 128;
+  });
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -69,7 +77,7 @@ export function LoginPage() {
 
   return <main className="login-page">
     <section className="login-panel">
-      <form className="login-form" noValidate aria-busy={busy} onSubmit={submit}>
+      <form ref={formRef} className="login-form" noValidate aria-busy={busy} onSubmit={submit}>
         <div className="login-brand"><BrandMark /><div><strong>LabelScan</strong><span>Portail professionnel</span></div></div>
         <header><h1>Connexion</h1><p>Accédez à votre espace de traçabilité.</p></header>
         <div className="field">
@@ -113,7 +121,7 @@ export function LoginPage() {
           <FieldError id="login-password-error" message={fieldErrors.password} />
         </div>
         {error && <div className="notice error login-error" role="alert">{error}</div>}
-        <button className="button primary wide" type="submit" disabled={busy}>{busy ? 'Connexion…' : 'Se connecter'}</button>
+        <button className={`button primary wide ${formIsComplete ? 'is-complete' : 'is-incomplete'}`} type="submit" disabled={busy}>{busy ? 'Connexion…' : 'Se connecter'}</button>
       </form>
     </section>
   </main>;
