@@ -330,8 +330,10 @@ tbody tr:hover { background: #fafcfb; }
 .choice-fieldset[aria-invalid="true"] .portal-choices { padding: 8px; border: 1px solid #efcbd0; border-radius: 9px; background: #fffafb; }
 .portal-choices { display: flex; flex-wrap: wrap; gap: 8px; }
 .portal-choice { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 7px; color: #45534f; font-size: 10px; font-weight: 600; }
+.choice-fieldset[aria-invalid="true"] .portal-choice { border-color: #ef7079; background: #fffafb; }
 .portal-choice:has(input:checked) { border-color: #93bbb5; background: var(--primary-soft); color: var(--primary-dark); }
 .portal-choice input { accent-color: var(--primary); }
+.choice-fieldset[aria-invalid="true"] .portal-choice input { accent-color: var(--danger); outline: 1px solid #ef7079; outline-offset: 1px; border-radius: 2px; }
 .panel-control { margin-bottom: 18px; }
 .table-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
 .identity-admin-table th:nth-last-child(2), .identity-admin-table td:nth-last-child(2) { width: 112px; }

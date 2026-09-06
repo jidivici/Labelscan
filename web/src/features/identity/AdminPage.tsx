@@ -204,6 +204,9 @@ export function AdminPage() {
   async function submitManager(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session || saving) return;
+    // A new validation attempt belongs to this form: do not leave stale errors
+    // visible in the store form above/below it.
+    setStoreFieldErrors({});
     const form = event.currentTarget;
     const values = new FormData(form);
     const submittedUsername = String(values.get('username') ?? '').trim();
@@ -300,6 +303,9 @@ export function AdminPage() {
   async function submitStore(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!session || saving) return;
+    // A new validation attempt belongs to this form: do not leave stale errors
+    // visible in the manager form above it.
+    setManagerFieldErrors({});
     const form = event.currentTarget;
     const values = new FormData(form);
     const submittedStoreName = String(values.get('storeName') ?? '').trim();

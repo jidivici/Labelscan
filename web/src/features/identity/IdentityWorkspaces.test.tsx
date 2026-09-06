@@ -338,6 +338,22 @@ describe('IAM credentials', () => {
     expect(createStore).not.toHaveBeenCalled();
   });
 
+  it('clears validation errors from the other creation form', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/administration', adminSession);
+    const storePanel = (await screen.findByRole('heading', { name: 'Nouveau magasin' })).closest('section')!;
+    const managerForm = document.querySelector<HTMLFormElement>('#create-manager-form')!;
+
+    await user.click(within(storePanel).getByRole('button', { name: 'Ajouter le magasin' }));
+    expect(within(storePanel).getByText('Choisissez au moins un métier.')).toBeInTheDocument();
+
+    await user.click(within(managerForm).getByRole('button', { name: 'Créer le compte' }));
+
+    expect(within(storePanel).queryByText('Renseignez le nom du magasin.')).not.toBeInTheDocument();
+    expect(within(storePanel).queryByText('Choisissez au moins un métier.')).not.toBeInTheDocument();
+    expect(within(managerForm).getByText('Renseignez un identifiant.')).toBeInTheDocument();
+  });
+
 });
 
 describe('IAM bounded actions', () => {
