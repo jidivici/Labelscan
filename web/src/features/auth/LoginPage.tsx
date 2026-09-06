@@ -110,7 +110,6 @@ export function LoginPage() {
             />
             <button
               type="button"
-              onPointerDown={(event) => event.preventDefault()}
               onClick={() => setPasswordVisible((visible) => !visible)}
               aria-label={passwordVisible ? 'Masquer le mot de passe' : 'Afficher le mot de passe'}
               aria-pressed={passwordVisible}
@@ -120,7 +119,9 @@ export function LoginPage() {
           </span>
           <FieldError id="login-password-error" message={fieldErrors.password} />
         </div>
-        {error && <div className="notice error login-error" role="alert">{error}</div>}
+        <div className="login-feedback">
+          {error && <div className="notice error login-error" role="alert">{error}</div>}
+        </div>
         <button className={`button primary wide ${formIsComplete ? 'is-complete' : 'is-incomplete'}`} type="submit" disabled={busy}>{busy ? 'Connexion…' : 'Se connecter'}</button>
       </form>
     </section>

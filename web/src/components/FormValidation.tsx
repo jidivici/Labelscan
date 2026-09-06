@@ -53,8 +53,7 @@ export function useFormCompleteness(check: (form: HTMLFormElement) => boolean) {
 }
 
 export function FieldError({ id, message }: { id: string; message?: string }) {
-  if (!message) return null;
-  return <span id={id} className="field-error" aria-live="polite">{message}</span>;
+  return <span id={id} className="field-error" aria-live="polite">{message ?? ''}</span>;
 }
 
 export function clearFieldError(

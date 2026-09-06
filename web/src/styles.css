@@ -20,9 +20,10 @@
 
 * { box-sizing: border-box; }
 html, body, #root { min-width: 320px; min-height: 100%; margin: 0; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 html, body { overflow-x: hidden; }
 body { min-height: 100vh; background: #f4f7f5; }
-button, input, select { font: inherit; }
+button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 button { cursor: pointer; }
 a { color: inherit; text-decoration: none; }
@@ -403,6 +404,8 @@ tbody tr:hover { background: #fafcfb; }
 .password-requirements li.unmet > span { background: #fde8e8; color: var(--danger); }
 .account-password-form > .button { width: 100%; min-height: 50px; margin-top: 3px; font-size: 14px; transition: background .2s ease, border-color .2s ease, color .2s ease, box-shadow .2s ease, transform .15s ease; }
 .field-error { display: block; color: var(--danger); font-size: 10px; font-weight: 650; line-height: 1.4; }
+.field-error:empty { display: none; }
+.login-feedback:empty { display: none; }
 .account-link { display: block; padding: 8px 10px; border-radius: 6px; color: var(--primary); font-size: 10px; font-weight: 750; text-decoration: none; }
 .account-link:hover { background: var(--primary-soft); }
 .paged-content { animation: paged-content-in .18s ease-out; }
@@ -490,7 +493,12 @@ tbody tr:hover { background: #fafcfb; }
   }
   .login-panel { min-height: 100%; align-items: safe center; }
   .login-form { padding: 26px 22px; }
-  .login-form .field input { font-size: 16px; }
+  input, select, textarea, .manager-portal-trigger { font-size: 16px; }
+  button, a, input, select, textarea { touch-action: manipulation; }
+  .field-error { min-height: 28px; }
+  .field-error:empty { display: block; }
+  .login-feedback { min-height: 54px; }
+  .login-feedback:empty { display: block; }
   .page-header { align-items: flex-start; }
   .heading-stat { min-width: auto; }
   .heading-stat strong { font-size: 24px; }

@@ -158,7 +158,7 @@ export function PasswordField({
       </button>
     </span>
     {hint ? <small id={hintId}>{hint}</small> : null}
-    {error ? <span id={errorId} className="field-error" aria-live="polite">{error}</span> : null}
+    <span id={errorId} className="field-error" aria-live="polite">{error ?? ''}</span>
   </div>;
 }
 

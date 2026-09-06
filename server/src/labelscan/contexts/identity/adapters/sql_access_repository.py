@@ -16,9 +16,12 @@ from labelscan.contexts.identity.application.access_management import (
     AllowedStore,
     IdentityAlreadyExists,
     IdentityAudit,
+    IdentityCredentialPairAlreadyExists,
     IdentityNotFound,
+    IdentityPasswordAlreadyExists,
     InvalidCurrentPassword,
 )
+from labelscan.contexts.identity.domain.password import verify_password
 from labelscan.contexts.identity.domain.user import (
     ADMIN_ROLE,
     MANAGER_ROLE,
@@ -446,6 +449,7 @@ class SqlAccessRepository(AccessRepository):
         display_name: str,
         role: str,
         portal_ids: tuple[str, ...],
+        password: str,
         password_hash: str,
     ) -> ManagedUser:
         with self._engine.begin() as conn:
@@ -475,6 +479,73 @@ class SqlAccessRepository(AccessRepository):
             scoped_role = role == MANAGER_ROLE
             store_id = portals[0]["store_id"] if scoped_role else None
             store_code = portals[0]["store_code"] if scoped_role else None
+            if scoped_role:
+                # Serialize both the identifier and store checks so concurrent
+                # creations cannot bypass either credential rule.
+                conn.execute(
+                    text(
+                        "SELECT pg_advisory_xact_lock("
+                        "hashtextextended(:credential_scope, 1))"
+                    ),
+                    {
+                        "credential_scope": (
+                            f"{audit.organization_id}:{username.casefold()}"
+                        )
+                    },
+                )
+                conn.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:store_id, 0))"),
+                    {"store_id": store_id},
+                )
+                username_in_use = conn.execute(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM identity.app_user "
+                        "WHERE organization_id = :organization_id "
+                        "AND store_id = :store_id AND role = 'manager' "
+                        "AND lower(username) = lower(:username) "
+                        "AND deleted_at IS NULL)"
+                    ),
+                    {
+                        "organization_id": audit.organization_id,
+                        "store_id": store_id,
+                        "username": username,
+                    },
+                ).scalar_one()
+                if username_in_use:
+                    raise IdentityAlreadyExists("store")
+                existing_hashes = conn.execute(
+                    text(
+                        "SELECT password_hash FROM identity.app_user "
+                        "WHERE organization_id = :organization_id "
+                        "AND store_id = :store_id AND role = 'manager' "
+                        "AND deleted_at IS NULL"
+                    ),
+                    {
+                        "organization_id": audit.organization_id,
+                        "store_id": store_id,
+                    },
+                ).scalars()
+                if any(verify_password(password, value) for value in existing_hashes):
+                    raise IdentityPasswordAlreadyExists()
+                same_identifier_elsewhere = conn.execute(
+                    text(
+                        "SELECT password_hash FROM identity.app_user "
+                        "WHERE organization_id = :organization_id "
+                        "AND store_id <> :store_id AND role = 'manager' "
+                        "AND lower(username) = lower(:username) "
+                        "AND deleted_at IS NULL"
+                    ),
+                    {
+                        "organization_id": audit.organization_id,
+                        "store_id": store_id,
+                        "username": username,
+                    },
+                ).scalars()
+                if any(
+                    verify_password(password, value)
+                    for value in same_identifier_elsewhere
+                ):
+                    raise IdentityCredentialPairAlreadyExists()
             set_audit_context(
                 conn,
                 actor_id=audit.actor_id,
@@ -507,7 +578,9 @@ class SqlAccessRepository(AccessRepository):
                 )
             except IntegrityError as exc:
                 if getattr(exc.orig, "sqlstate", None) == "23505":
-                    raise IdentityAlreadyExists() from exc
+                    raise IdentityAlreadyExists(
+                        "store" if role == MANAGER_ROLE else "organization"
+                    ) from exc
                 raise
             for portal_id in portal_ids:
                 conn.execute(
@@ -586,19 +659,24 @@ class SqlAccessRepository(AccessRepository):
                         "created_by": audit.actor_id,
                     },
                 )
-            conn.execute(
-                text(
-                    "UPDATE identity.app_user SET store_id = :store_id, "
-                    "store_code = :store_code, updated_at = clock_timestamp() "
-                    "WHERE organization_id = :organization_id AND id = :user_id"
-                ),
-                {
-                    "organization_id": audit.organization_id,
-                    "user_id": target_user_id,
-                    "store_id": portals[0]["store_id"],
-                    "store_code": portals[0]["store_code"],
-                },
-            )
+            try:
+                conn.execute(
+                    text(
+                        "UPDATE identity.app_user SET store_id = :store_id, "
+                        "store_code = :store_code, updated_at = clock_timestamp() "
+                        "WHERE organization_id = :organization_id AND id = :user_id"
+                    ),
+                    {
+                        "organization_id": audit.organization_id,
+                        "user_id": target_user_id,
+                        "store_id": portals[0]["store_id"],
+                        "store_code": portals[0]["store_code"],
+                    },
+                )
+            except IntegrityError as exc:
+                if getattr(exc.orig, "sqlstate", None) == "23505":
+                    raise IdentityAlreadyExists("store") from exc
+                raise
             _revoke_sessions(conn, audit.organization_id, target_user_id)
             return _managed(conn, audit.organization_id, target_user_id)
 
@@ -717,6 +795,45 @@ class SqlAccessRepository(AccessRepository):
             if row is None:
                 raise AccessDenied()
             return str(row.role), str(row.password_hash)
+
+    def manager_password_in_use(
+        self, audit: IdentityAudit, password: str
+    ) -> bool:
+        with self._engine.begin() as conn:
+            set_tenant_context(conn, audit.organization_id)
+            if _actor_role(conn, audit) != MANAGER_ROLE:
+                return False
+            row = conn.execute(
+                text(
+                    "SELECT store_id::text FROM identity.app_user "
+                    "WHERE organization_id = :organization_id AND id = :user_id "
+                    "AND role = 'manager' AND active = true AND deleted_at IS NULL"
+                ),
+                {
+                    "organization_id": audit.organization_id,
+                    "user_id": audit.actor_id,
+                },
+            ).scalar_one_or_none()
+            if row is None:
+                raise AccessDenied()
+            conn.execute(
+                text("SELECT pg_advisory_xact_lock(hashtextextended(:store_id, 0))"),
+                {"store_id": row},
+            )
+            hashes = conn.execute(
+                text(
+                    "SELECT password_hash FROM identity.app_user "
+                    "WHERE organization_id = :organization_id "
+                    "AND store_id = CAST(:store_id AS uuid) AND role = 'manager' "
+                    "AND id <> CAST(:user_id AS uuid) AND deleted_at IS NULL"
+                ),
+                {
+                    "organization_id": audit.organization_id,
+                    "store_id": row,
+                    "user_id": audit.actor_id,
+                },
+            ).scalars()
+            return any(verify_password(password, value) for value in hashes)
 
     def change_own_password(
         self,

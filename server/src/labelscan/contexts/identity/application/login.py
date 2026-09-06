@@ -31,7 +31,10 @@ class Login:
         self._users = users
 
     def __call__(
-        self, username: str, password: str, organization_slug: str = "labelscan"
+        self,
+        username: str,
+        password: str,
+        organization_slug: str = "labelscan",
     ) -> AuthenticatedUser:
         try:
             username = normalize_identity_text(
@@ -41,15 +44,34 @@ class Login:
             # Keep malformed and unknown usernames on the same password-cost path.
             verify_password(password, _DUMMY_HASH)
             raise InvalidCredentials() from None
-        try:
-            user = self._users.find_active_by_username(username, organization_slug)
-        except TypeError:
-            # Additive rollout compatibility for an in-process legacy adapter.
-            user = self._users.find_active_by_username(username)  # type: ignore[call-arg]
-        stored_hash = user.password_hash if user else _DUMMY_HASH
-        password_ok = verify_password(password, stored_hash)
-        if not user or not password_ok:
+        candidate_lookup = getattr(
+            self._users, "find_active_candidates_by_username", None
+        )
+        if callable(candidate_lookup):
+            candidates = candidate_lookup(username, organization_slug)
+        else:
+            try:
+                candidate = self._users.find_active_by_username(
+                    username, organization_slug
+                )
+            except TypeError:
+                candidate = self._users.find_active_by_username(username)  # type: ignore[call-arg]
+            candidates = (candidate,) if candidate else ()
+
+        # The username/password pair resolves the store invisibly. Shared
+        # usernames are safe when their passwords differ. If an exact pair was
+        # duplicated across stores, fail closed because no store can be chosen
+        # reliably without changing the login form.
+        matches = tuple(
+            candidate
+            for candidate in candidates
+            if verify_password(password, candidate.password_hash)
+        )
+        if not candidates:
+            verify_password(password, _DUMMY_HASH)
+        if len(matches) != 1:
             raise InvalidCredentials()
+        user = matches[0]
         return AuthenticatedUser(
             actor_id=user.id,
             username=user.username,

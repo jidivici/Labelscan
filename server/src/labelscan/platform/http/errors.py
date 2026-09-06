@@ -25,6 +25,12 @@ ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
     "FORBIDDEN": (403, "Insufficient scope for this operation", False),
     "NOT_FOUND": (404, "Resource not found", False),
     "USER_ALREADY_EXISTS": (409, "Username is already in use", False),
+    "PASSWORD_ALREADY_EXISTS": (409, "Password is already in use", False),
+    "CREDENTIAL_PAIR_ALREADY_EXISTS": (
+        409,
+        "Credential pair is already in use",
+        False,
+    ),
     "STORE_ALREADY_EXISTS": (409, "Store code is already in use", False),
     "STORE_IN_USE": (409, "Store still has active users", False),
     "STORE_NOT_FOUND": (400, "Store code does not exist", False),

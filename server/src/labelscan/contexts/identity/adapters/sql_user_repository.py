@@ -87,8 +87,20 @@ class SqlUserRepository(UserRepository):
         self._engine = engine
 
     def find_active_by_username(
-        self, username: str, organization_slug: str = "labelscan"
+        self,
+        username: str,
+        organization_slug: str = "labelscan",
     ) -> StoredUser | None:
+        candidates = self.find_active_candidates_by_username(
+            username, organization_slug
+        )
+        return candidates[0] if len(candidates) == 1 else None
+
+    def find_active_candidates_by_username(
+        self,
+        username: str,
+        organization_slug: str = "labelscan",
+    ) -> tuple[StoredUser, ...]:
         with self._engine.begin() as conn:
             organization = (
                 conn.execute(
@@ -102,47 +114,51 @@ class SqlUserRepository(UserRepository):
                 .first()
             )
             if organization is None:
-                return None
+                return ()
             set_tenant_context(conn, organization["id"])
-            row = (
+            rows = (
                 conn.execute(
                     text(
-                        "SELECT id::text AS id, username, display_name, "
-                        "password_hash, role, active, store_code, "
-                        "organization_id::text AS organization_id, "
-                        "store_id::text AS store_id "
-                        "FROM identity.app_user "
-                        "WHERE organization_id = :organization_id "
-                        "AND username = :u AND active = true AND deleted_at IS NULL"
+                        "SELECT account.id::text AS id, account.username, "
+                        "account.display_name, account.password_hash, account.role, "
+                        "account.active, account.store_code, "
+                        "account.organization_id::text AS organization_id, "
+                        "account.store_id::text AS store_id "
+                        "FROM identity.app_user AS account "
+                        "WHERE account.organization_id = :organization_id "
+                        "AND lower(account.username) = lower(:u) "
+                        "AND account.active = true AND account.deleted_at IS NULL "
+                        "ORDER BY account.created_at, account.id"
                     ),
-                    {"organization_id": organization["id"], "u": username},
+                    {
+                        "organization_id": organization["id"],
+                        "u": username,
+                    },
                 )
                 .mappings()
-                .first()
+                .all()
             )
-            portal_ids: tuple[str, ...] = ()
-            primary_portal_id = None
-            trade_code = None
-            store_ids: tuple[str, ...] = ()
-            if row is not None:
+            users: list[StoredUser] = []
+            for row in rows:
                 portal_ids, primary_portal_id, trade_code, store_ids = (
                     _identity_context(conn, organization["id"], row["id"], row["role"])
                 )
-        if row is None:
-            return None
-        return StoredUser(
-            id=row["id"],
-            username=row["username"],
-            display_name=row["display_name"],
-            password_hash=row["password_hash"],
-            role=row["role"],
-            active=row["active"],
-            store_code=row["store_code"],
-            organization_id=row["organization_id"],
-            organization_slug=organization["slug"],
-            store_id=row["store_id"],
-            business_portal_ids=portal_ids,
-            business_portal_id=primary_portal_id,
-            trade_code=trade_code,
-            store_ids=store_ids,
-        )
+                users.append(
+                    StoredUser(
+                        id=row["id"],
+                        username=row["username"],
+                        display_name=row["display_name"],
+                        password_hash=row["password_hash"],
+                        role=row["role"],
+                        active=row["active"],
+                        store_code=row["store_code"],
+                        organization_id=row["organization_id"],
+                        organization_slug=organization["slug"],
+                        store_id=row["store_id"],
+                        business_portal_ids=portal_ids,
+                        business_portal_id=primary_portal_id,
+                        trade_code=trade_code,
+                        store_ids=store_ids,
+                    )
+                )
+        return tuple(users)

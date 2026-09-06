@@ -293,16 +293,18 @@ def test_store_with_active_manager_portal_assignment_cannot_be_disabled(client, 
         conn.execute(
             text(
                 "INSERT INTO identity.app_user "
-                "(id, organization_id, username, display_name, password_hash, "
-                "role, active, created_by) "
-                "VALUES (:id, :organization_id, :username, 'Manager affecté', "
-                ":password_hash, 'manager', true, :admin_id)"
+                "(id, organization_id, organization_code, username, display_name, "
+                "password_hash, role, active, store_id, store_code, created_by) "
+                "VALUES (:id, :organization_id, 'labelscan', :username, "
+                "'Manager affecté', :password_hash, 'manager', true, :store_id, "
+                "'MANAGER-SCOPE-01', :admin_id)"
             ),
             {
                 "id": manager_id,
                 "organization_id": created.json()["organization_id"],
                 "username": f"{PREFIX}manager-store",
                 "password_hash": hash_password("manager-password-123"),
+                "store_id": created.json()["id"],
                 "admin_id": ADMIN_ID,
             },
         )

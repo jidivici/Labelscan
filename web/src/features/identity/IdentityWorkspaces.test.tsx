@@ -5,6 +5,7 @@ import { Router } from 'wouter';
 import { memoryLocation } from 'wouter/memory-location';
 
 import { AuthProvider } from '../../auth/AuthContext';
+import { ApiProblem } from '../../api';
 import { ApplicationRoutes } from '../../router/AppRouter';
 import { CAPABILITIES, type Capability, type Role, type Session } from '../../types';
 import {
@@ -367,6 +368,66 @@ describe('IAM credentials', () => {
     expect(within(storePanel).queryByText('Renseignez le nom du magasin.')).not.toBeInTheDocument();
     expect(within(storePanel).queryByText('Choisissez au moins un métier.')).not.toBeInTheDocument();
     expect(within(managerForm).getByText('Renseignez un identifiant.')).toBeInTheDocument();
+  });
+
+  it('shows a same-store identifier conflict on the username field', async () => {
+    const user = userEvent.setup();
+    vi.mocked(createManager).mockRejectedValueOnce(
+      new ApiProblem('USER_ALREADY_EXISTS', 'cet identifiant est déjà utilisé dans ce magasin'),
+    );
+    renderAt('/o/labelscan/administration', adminSession);
+    await screen.findByRole('heading', { name: 'Équipe et magasins' });
+    const form = document.querySelector<HTMLFormElement>('#create-manager-form')!;
+
+    await user.type(within(form).getByLabelText('Identifiant'), 'manager.existant');
+    await user.type(within(form).getByLabelText('Mot de passe'), 'mot-de-passe');
+    await user.click(within(form).getByRole('button', { name: 'Magasin et métier attribués' }));
+    await user.click(screen.getByRole('option', { name: 'Paris Centre · Poissonnerie' }));
+    await user.click(within(form).getByRole('button', { name: 'Créer le compte' }));
+
+    expect(await within(form).findByText('Cet identifiant est déjà utilisé dans ce magasin.')).toBeInTheDocument();
+    expect(within(form).getByLabelText('Identifiant')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('shows a same-store password conflict on the password field', async () => {
+    const user = userEvent.setup();
+    vi.mocked(createManager).mockRejectedValueOnce(
+      new ApiProblem('PASSWORD_ALREADY_EXISTS', 'ce mot de passe est déjà utilisé dans ce magasin'),
+    );
+    renderAt('/o/labelscan/administration', adminSession);
+    await screen.findByRole('heading', { name: 'Équipe et magasins' });
+    const form = document.querySelector<HTMLFormElement>('#create-manager-form')!;
+
+    await user.type(within(form).getByLabelText('Identifiant'), 'manager.nouveau');
+    await user.type(within(form).getByLabelText('Mot de passe'), 'mot-de-passe-partage');
+    await user.click(within(form).getByRole('button', { name: 'Magasin et métier attribués' }));
+    await user.click(screen.getByRole('option', { name: 'Paris Centre · Poissonnerie' }));
+    await user.click(within(form).getByRole('button', { name: 'Créer le compte' }));
+
+    expect(await within(form).findByText('Ce mot de passe est déjà utilisé dans ce magasin.')).toBeInTheDocument();
+    expect(within(form).getByLabelText('Mot de passe')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('marks both fields when the complete credential pair exists elsewhere', async () => {
+    const user = userEvent.setup();
+    vi.mocked(createManager).mockRejectedValueOnce(
+      new ApiProblem(
+        'CREDENTIAL_PAIR_ALREADY_EXISTS',
+        'ce couple identifiant et mot de passe est déjà utilisé dans un autre magasin',
+      ),
+    );
+    renderAt('/o/labelscan/administration', adminSession);
+    await screen.findByRole('heading', { name: 'Équipe et magasins' });
+    const form = document.querySelector<HTMLFormElement>('#create-manager-form')!;
+
+    await user.type(within(form).getByLabelText('Identifiant'), 'manager.partage');
+    await user.type(within(form).getByLabelText('Mot de passe'), 'mot-de-passe-partage');
+    await user.click(within(form).getByRole('button', { name: 'Magasin et métier attribués' }));
+    await user.click(screen.getByRole('option', { name: 'Paris Centre · Poissonnerie' }));
+    await user.click(within(form).getByRole('button', { name: 'Créer le compte' }));
+
+    expect(within(form).getByLabelText('Identifiant')).toHaveAttribute('aria-invalid', 'true');
+    expect(within(form).getByLabelText('Mot de passe')).toHaveAttribute('aria-invalid', 'true');
   });
 
 });

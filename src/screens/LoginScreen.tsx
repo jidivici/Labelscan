@@ -211,7 +211,7 @@ export function LoginScreen() {
               />
               <TextInput
                 value={username}
-                onChangeText={setUsername}
+                onChangeText={(value) => { setUsername(value); setError(null); }}
                 onFocus={() => setFocusedField('username')}
                 onBlur={() => setFocusedField(null)}
                 style={styles.input}
@@ -227,7 +227,7 @@ export function LoginScreen() {
             </View>
           </View>
 
-          <View style={[styles.fieldGroup, error && styles.fieldGroupWithError]}>
+          <View style={styles.fieldGroup}>
             <Text style={[typography.labelMedium, styles.fieldLabel]}>Mot de passe</Text>
             <View
               style={[
@@ -242,7 +242,7 @@ export function LoginScreen() {
               />
               <TextInput
                 value={password}
-                onChangeText={setPassword}
+                onChangeText={(value) => { setPassword(value); setError(null); }}
                 onFocus={() => setFocusedField('password')}
                 onBlur={() => setFocusedField(null)}
                 style={styles.input}
@@ -272,17 +272,19 @@ export function LoginScreen() {
             </View>
           </View>
 
-          {error ? (
-            <View style={styles.errorRow} accessibilityLiveRegion="polite">
-              <MaterialCommunityIcons
-                name="alert-circle-outline"
-                size={20}
-                color={colors.error}
-                style={styles.errorIcon}
-              />
-              <Text style={[typography.bodySmall, styles.errorText]}>{error}</Text>
-            </View>
-          ) : null}
+          <View style={styles.errorSlot}>
+            {error ? (
+              <View style={styles.errorRow} accessibilityLiveRegion="polite">
+                <MaterialCommunityIcons
+                  name="alert-circle-outline"
+                  size={20}
+                  color={colors.error}
+                  style={styles.errorIcon}
+                />
+                <Text style={[typography.bodySmall, styles.errorText]}>{error}</Text>
+              </View>
+            ) : null}
+          </View>
 
           <Pressable
             onPress={handleSubmit}
@@ -394,9 +396,6 @@ const styles = StyleSheet.create({
   fieldGroup: {
     marginBottom: spacing.md,
   },
-  fieldGroupWithError: {
-    marginBottom: spacing.xs,
-  },
   fieldLabel: {
     color: colors.onSurfaceVariant,
     marginBottom: spacing.xs,
@@ -429,7 +428,9 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
     paddingHorizontal: spacing.md,
     marginTop: spacing.sm,
-    marginBottom: spacing.md,
+  },
+  errorSlot: {
+    minHeight: 44,
   },
   errorText: {
     color: colors.error,

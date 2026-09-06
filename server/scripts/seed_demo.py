@@ -321,19 +321,47 @@ def upsert_user(
     store_code: str | None = None,
 ) -> str:
     user_id = stable_id(f"user:{username}")
+    if role == "manager":
+        statement = text("""
+            INSERT INTO identity.app_user
+                (id, organization_id, organization_code, username, display_name,
+                 password_hash, role, active, store_id, store_code, created_by)
+            VALUES (:id, :org, 'labelscan', :username, :username, :password_hash,
+                    :role, true, :store_id, :store_code, :created_by)
+            ON CONFLICT (organization_id, store_id, lower(username))
+                WHERE deleted_at IS NULL AND role = 'manager'
+            DO UPDATE SET
+                display_name=excluded.display_name,
+                password_hash=excluded.password_hash,
+                role=excluded.role,
+                active=true,
+                store_id=excluded.store_id,
+                store_code=excluded.store_code,
+                updated_at=clock_timestamp()
+            RETURNING id::text
+        """)
+    else:
+        statement = text("""
+            INSERT INTO identity.app_user
+                (id, organization_id, organization_code, username, display_name,
+                 password_hash, role, active, store_id, store_code, created_by)
+            VALUES (:id, :org, 'labelscan', :username, :username, :password_hash,
+                    :role, true, :store_id, :store_code, :created_by)
+            ON CONFLICT (organization_id, lower(username))
+                WHERE deleted_at IS NULL AND role IN ('super_admin', 'admin')
+            DO UPDATE SET
+                display_name=excluded.display_name,
+                password_hash=excluded.password_hash,
+                role=excluded.role,
+                active=true,
+                store_id=excluded.store_id,
+                store_code=excluded.store_code,
+                updated_at=clock_timestamp()
+            RETURNING id::text
+        """)
     audit(conn, created_by, "identity.demo_user_seeded")
-    conn.execute(
-        text("""
-        INSERT INTO identity.app_user
-            (id, organization_id, organization_code, username, display_name,
-             password_hash, role, active, store_id, store_code, created_by)
-        VALUES (:id, :org, 'labelscan', :username, :username, :password_hash,
-                :role, true, :store_id, :store_code, :created_by)
-        ON CONFLICT (organization_id, username) WHERE deleted_at IS NULL DO UPDATE SET
-            display_name=excluded.display_name, password_hash=excluded.password_hash,
-            role=excluded.role, active=true, store_id=excluded.store_id,
-            store_code=excluded.store_code, updated_at=clock_timestamp()
-    """),
+    seeded_user_id = conn.execute(
+        statement,
         {
             "id": user_id,
             "org": organization_id,
@@ -344,15 +372,8 @@ def upsert_user(
             "store_code": store_code,
             "created_by": created_by,
         },
-    )
-    return str(
-        conn.execute(
-            text(
-                "SELECT id FROM identity.app_user WHERE organization_id=:org AND username=:username AND deleted_at IS NULL"
-            ),
-            {"org": organization_id, "username": username},
-        ).scalar_one()
-    )
+    ).scalar_one()
+    return str(seeded_user_id)
 
 
 def seed() -> None:

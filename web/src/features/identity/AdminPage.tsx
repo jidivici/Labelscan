@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 
 import { useAuth } from '../../auth/AuthContext';
+import { ApiProblem } from '../../api';
 import { hasCapability } from '../../auth/capabilities';
 import {
   clearFieldError,
@@ -241,7 +242,22 @@ export function AdminPage() {
       setError('');
       await load();
     } catch (cause) {
-      setError(message(cause));
+      if (cause instanceof ApiProblem && cause.code === 'USER_ALREADY_EXISTS') {
+        setManagerFieldErrors({ username: 'Cet identifiant est déjà utilisé dans ce magasin.' });
+        focusFirstInvalidField(form, ['username']);
+        setError('');
+      } else if (cause instanceof ApiProblem && cause.code === 'PASSWORD_ALREADY_EXISTS') {
+        setManagerFieldErrors({ password: 'Ce mot de passe est déjà utilisé dans ce magasin.' });
+        focusFirstInvalidField(form, ['password']);
+        setError('');
+      } else if (cause instanceof ApiProblem && cause.code === 'CREDENTIAL_PAIR_ALREADY_EXISTS') {
+        const duplicateMessage = 'Ce couple identifiant et mot de passe existe déjà dans un autre magasin.';
+        setManagerFieldErrors({ username: duplicateMessage, password: duplicateMessage });
+        focusFirstInvalidField(form, ['username']);
+        setError('');
+      } else {
+        setError(message(cause));
+      }
     } finally {
       setSaving(false);
     }

@@ -187,6 +187,18 @@ class _FakeRepo:
         return None
 
 
+class _CandidateRepo:
+    def __init__(self, users: tuple[StoredUser, ...]) -> None:
+        self._users = users
+
+    def find_active_candidates_by_username(
+        self, username: str, organization_slug: str = "labelscan"
+    ) -> tuple[StoredUser, ...]:
+        return tuple(
+            user for user in self._users if user.username.casefold() == username.casefold()
+        )
+
+
 def _admin(password: str) -> StoredUser:
     return StoredUser(
         id=ADMIN_ID,
@@ -196,6 +208,19 @@ def _admin(password: str) -> StoredUser:
         role="admin",
         active=True,
         store_code=None,
+    )
+
+
+def _manager(user_id: str, store_code: str, password: str) -> StoredUser:
+    return StoredUser(
+        id=user_id,
+        username="manager",
+        display_name="Manager",
+        password_hash=hash_password(password),
+        role="manager",
+        active=True,
+        store_code=store_code,
+        store_id=user_id,
     )
 
 
@@ -211,6 +236,26 @@ def test_login_success_maps_admin_scopes():
 def test_login_wrong_password_rejected():
     with pytest.raises(InvalidCredentials):
         Login(_FakeRepo(_admin("valid passphrase")))("admin", "nope")
+
+
+def test_login_resolves_a_shared_manager_identifier_by_password():
+    paris = _manager("paris", "PARIS-01", "paris-password")
+    lyon = _manager("lyon", "LYON-02", "lyon-password")
+
+    authenticated = Login(_CandidateRepo((paris, lyon)))(
+        "MANAGER", "lyon-password"
+    )
+
+    assert authenticated.actor_id == "lyon"
+    assert authenticated.store_code == "LYON-02"
+
+
+def test_login_rejects_an_exact_credential_pair_shared_by_two_stores():
+    paris = _manager("paris", "PARIS-01", "same-password")
+    lyon = _manager("lyon", "LYON-02", "same-password")
+
+    with pytest.raises(InvalidCredentials):
+        Login(_CandidateRepo((paris, lyon)))("manager", "same-password")
 
 
 def test_login_unknown_user_rejected():

@@ -132,6 +132,21 @@ def iam_v2(engine):
             {"prefix": f"{prefix}%"},
         )
         conn.execute(
+            text(
+                "DELETE FROM identity.business_portal WHERE store_id IN ("
+                "SELECT id FROM identity.store WHERE organization_id = :org "
+                "AND code LIKE :store_prefix)"
+            ),
+            {"org": organization_id, "store_prefix": f"{prefix.upper()}%"},
+        )
+        conn.execute(
+            text(
+                "DELETE FROM identity.store WHERE organization_id = :org "
+                "AND code LIKE :store_prefix"
+            ),
+            {"org": organization_id, "store_prefix": f"{prefix.upper()}%"},
+        )
+        conn.execute(
             text("DELETE FROM identity.business_portal WHERE id IN (:portal, :other)"),
             ids,
         )
@@ -198,6 +213,141 @@ def test_admin_creates_active_manager_but_cannot_create_admin(iam_v2):
     manager = _create_manager(client, ids, organization_id, prefix, [ids["portal"]])
     assert manager["active"] is True
     assert manager["business_portal_ids"] == [ids["portal"]]
+
+
+def test_manager_identifier_is_unique_per_store_and_reusable_elsewhere(
+    iam_v2,
+    engine,
+):
+    client, ids, organization_id, prefix = iam_v2
+    headers = _headers(
+        "identity:managers:manage", "admin", ids["admin"], organization_id
+    )
+    username = f"{prefix}-shared-manager"
+    password = "shared-store-password"
+    first = client.post(
+        "/v1/managers",
+        headers=headers,
+        json={
+            "username": username,
+            "password": password,
+            "business_portal_ids": [ids["portal"]],
+        },
+    )
+    assert first.status_code == 201
+
+    same_store = client.post(
+        "/v1/managers",
+        headers=headers,
+        json={
+            "username": username.upper(),
+            "password": "another-password",
+            "business_portal_ids": [ids["other"]],
+        },
+    )
+    assert same_store.status_code == 409
+    assert same_store.json()["error_code"] == "USER_ALREADY_EXISTS"
+    assert "dans ce magasin" in same_store.json()["detail"]
+
+    same_store_password = client.post(
+        "/v1/managers",
+        headers=headers,
+        json={
+            "username": f"{prefix}-different-manager",
+            "password": password,
+            "business_portal_ids": [ids["other"]],
+        },
+    )
+    assert same_store_password.status_code == 409
+    assert same_store_password.json()["error_code"] == "PASSWORD_ALREADY_EXISTS"
+    assert "dans ce magasin" in same_store_password.json()["detail"]
+
+    second_store_id = str(uuid.uuid4())
+    second_portal_id = str(uuid.uuid4())
+    second_store_code = f"{prefix}-SECOND".upper()
+    with engine.begin() as conn:
+        set_audit_context(
+            conn,
+            actor_id=ids["admin"],
+            action="identity.test_store_created",
+            correlation_id=prefix,
+            trace_id=prefix,
+        )
+        conn.execute(
+            text(
+                "INSERT INTO identity.store "
+                "(id, organization_id, organization_code, code, name, created_by) "
+                "VALUES (:id, :org, 'labelscan', :code, :name, :creator)"
+            ),
+            {
+                "id": second_store_id,
+                "org": organization_id,
+                "code": second_store_code,
+                "name": f"{prefix} Second",
+                "creator": ids["admin"],
+            },
+        )
+        conn.execute(
+            text(
+                "INSERT INTO identity.business_portal "
+                "(id, organization_id, store_id, profession_code, name, created_by) "
+                "VALUES (:id, :org, :store_id, 'poissonnerie', 'Poissonnerie', :creator)"
+            ),
+            {
+                "id": second_portal_id,
+                "org": organization_id,
+                "store_id": second_store_id,
+                "creator": ids["admin"],
+            },
+        )
+
+    exact_pair = client.post(
+        "/v1/managers",
+        headers=headers,
+        json={
+            "username": username,
+            "password": password,
+            "business_portal_ids": [second_portal_id],
+        },
+    )
+    assert exact_pair.status_code == 409
+    assert exact_pair.json()["error_code"] == "CREDENTIAL_PAIR_ALREADY_EXISTS"
+
+    second = client.post(
+        "/v1/managers",
+        headers=headers,
+        json={
+            "username": username,
+            "password": "second-store-password",
+            "business_portal_ids": [second_portal_id],
+        },
+    )
+    assert second.status_code == 201
+    assert second.json()["id"] != first.json()["id"]
+
+    password_reused = client.post(
+        "/v1/managers",
+        headers=headers,
+        json={
+            "username": f"{prefix}-other-manager",
+            "password": password,
+            "business_portal_ids": [second_portal_id],
+        },
+    )
+    assert password_reused.status_code == 201
+
+    first_login = client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": password},
+    )
+    second_login = client.post(
+        "/v1/auth/login",
+        json={"username": username, "password": "second-store-password"},
+    )
+    assert first_login.status_code == 200
+    assert first_login.json()["user"]["id"] == first.json()["id"]
+    assert second_login.status_code == 200
+    assert second_login.json()["user"]["id"] == second.json()["id"]
 
 
 def test_deleted_manager_is_hidden_but_keeps_identity_and_username_is_reusable(
@@ -386,7 +536,10 @@ def test_portal_deactivation_blocks_manager_login_and_refresh(iam_v2):
     manager = _create_manager(client, ids, organization_id, prefix, [ids["portal"]])
     logged_in = client.post(
         "/v1/mobile/auth/login",
-        json={"username": manager["username"], "password": "manager-password-123"},
+        json={
+            "username": manager["username"],
+            "password": "manager-password-123",
+        },
     )
     assert logged_in.status_code == 200
     disabled = client.put(
@@ -400,7 +553,10 @@ def test_portal_deactivation_blocks_manager_login_and_refresh(iam_v2):
     assert (
         client.post(
             "/v1/mobile/auth/login",
-            json={"username": manager["username"], "password": "manager-password-123"},
+            json={
+                "username": manager["username"],
+                "password": "manager-password-123",
+            },
         ).status_code
         == 403
     )

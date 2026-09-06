@@ -17,7 +17,9 @@ from labelscan.contexts.identity.application.access_management import (
     AllowedStore,
     IdentityAlreadyExists,
     IdentityAudit,
+    IdentityCredentialPairAlreadyExists,
     IdentityNotFound,
+    IdentityPasswordAlreadyExists,
     InvalidCurrentPassword,
 )
 from labelscan.contexts.identity.domain.user import (
@@ -216,7 +218,22 @@ def _map_error(exc: Exception) -> None:
     if isinstance(exc, IdentityNotFound):
         raise ApiError("NOT_FOUND", "compte ou portail introuvable")
     if isinstance(exc, IdentityAlreadyExists):
-        raise ApiError("USER_ALREADY_EXISTS", "cet identifiant est déjà utilisé")
+        detail = (
+            "cet identifiant est déjà utilisé dans ce magasin"
+            if exc.scope == "store"
+            else "cet identifiant est déjà utilisé dans cette organisation"
+        )
+        raise ApiError("USER_ALREADY_EXISTS", detail)
+    if isinstance(exc, IdentityPasswordAlreadyExists):
+        raise ApiError(
+            "PASSWORD_ALREADY_EXISTS",
+            "ce mot de passe est déjà utilisé dans ce magasin",
+        )
+    if isinstance(exc, IdentityCredentialPairAlreadyExists):
+        raise ApiError(
+            "CREDENTIAL_PAIR_ALREADY_EXISTS",
+            "ce couple identifiant et mot de passe est déjà utilisé dans un autre magasin",
+        )
     if isinstance(exc, InvalidCurrentPassword):
         raise ApiError(
             "INVALID_CURRENT_PASSWORD", "le mot de passe actuel est incorrect"

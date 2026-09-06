@@ -231,9 +231,10 @@ describe('capability based routing', () => {
     const children = Array.from(form.children);
     const passwordField = screen.getByLabelText('Mot de passe').closest('.field')!;
     const alert = await screen.findByRole('alert');
+    const feedback = alert.closest('.login-feedback')!;
     const submit = screen.getByRole('button', { name: 'Se connecter' });
-    expect(children.indexOf(alert)).toBeGreaterThan(children.indexOf(passwordField));
-    expect(children.indexOf(alert)).toBeLessThan(children.indexOf(submit));
+    expect(children.indexOf(feedback)).toBeGreaterThan(children.indexOf(passwordField));
+    expect(children.indexOf(feedback)).toBeLessThan(children.indexOf(submit));
     fetchSpy.mockRestore();
   });
 

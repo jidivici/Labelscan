@@ -11,5 +11,11 @@ class UserRepository(Protocol):
     def find_active_by_username(
         self, username: str, organization_slug: str = "labelscan"
     ) -> StoredUser | None:
-        """Return the active credential record for ``username``, or None."""
+        """Return one unambiguous active credential, or None."""
+        ...
+
+    def find_active_candidates_by_username(
+        self, username: str, organization_slug: str = "labelscan"
+    ) -> tuple[StoredUser, ...]:
+        """Return active credentials sharing a store-scoped identifier."""
         ...

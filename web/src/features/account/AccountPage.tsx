@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from 'react';
 
 import { useAuth } from '../../auth/AuthContext';
+import { ApiProblem } from '../../api';
 import {
   clearFieldError,
   type FieldErrors,
@@ -104,7 +105,13 @@ export function AccountPage() {
       await changeMyPassword(session, submittedCurrentPassword, submittedNewPassword);
       await logout();
     } catch (cause) {
-      setError(errorMessage(cause));
+      if (cause instanceof ApiProblem && cause.code === 'PASSWORD_ALREADY_EXISTS') {
+        setFieldErrors({ newPassword: 'Ce mot de passe est déjà utilisé dans ce magasin.' });
+        focusFirstInvalidField(form, ['newPassword']);
+        setError('');
+      } else {
+        setError(errorMessage(cause));
+      }
       setSaving(false);
     }
   }

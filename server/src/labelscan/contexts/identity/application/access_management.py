@@ -24,6 +24,16 @@ class IdentityNotFound(Exception):
 
 
 class IdentityAlreadyExists(Exception):
+    def __init__(self, scope: str = "organization") -> None:
+        self.scope = scope
+        super().__init__(scope)
+
+
+class IdentityPasswordAlreadyExists(Exception):
+    pass
+
+
+class IdentityCredentialPairAlreadyExists(Exception):
     pass
 
 
@@ -94,6 +104,7 @@ class AccessRepository(Protocol):
         display_name: str,
         role: str,
         portal_ids: tuple[str, ...],
+        password: str,
         password_hash: str,
     ) -> ManagedUser: ...
 
@@ -126,6 +137,10 @@ class AccessRepository(Protocol):
     ) -> None: ...
 
     def own_credentials(self, audit: IdentityAudit) -> tuple[str, str]: ...
+
+    def manager_password_in_use(
+        self, audit: IdentityAudit, password: str
+    ) -> bool: ...
 
     def change_own_password(
         self, audit: IdentityAudit, expected_password_hash: str, password_hash: str
@@ -199,6 +214,7 @@ class AccessManagementService:
         role: str,
         portal_ids: tuple[str, ...] = (),
     ) -> ManagedUser:
+        password_hash = _password(password, role=role)
         return self._repository.create_active(
             audit,
             actor_roles=actor_roles,
@@ -210,7 +226,8 @@ class AccessManagementService:
             ),
             role=role,
             portal_ids=tuple(dict.fromkeys(portal_ids)),
-            password_hash=_password(password, role=role),
+            password=password,
+            password_hash=password_hash,
         )
 
     def replace_assignments(
@@ -266,6 +283,10 @@ class AccessManagementService:
         role, current_hash = self._repository.own_credentials(audit)
         if not verify_password(current_password, current_hash):
             raise InvalidCurrentPassword()
+        if role == MANAGER_ROLE and self._repository.manager_password_in_use(
+            audit, new_password
+        ):
+            raise IdentityPasswordAlreadyExists()
         return self._repository.change_own_password(
             audit,
             current_hash,
