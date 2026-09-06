@@ -391,6 +391,19 @@ tbody tr:hover { background: #fafcfb; }
 .manager-portal-option.placeholder { color: #73817e; font-weight: 550; }
 .manager-portal-check { flex: 0 0 auto; color: var(--primary); font-weight: 800; }
 .account-password-form { display: grid; max-width: 620px; gap: 16px; }
+.account-menu { margin-top: 10px; border-top: 1px solid rgba(255, 255, 255, .12); }
+.account-menu summary { display: flex; align-items: center; min-height: 38px; cursor: pointer; color: #fff; font-size: 12px; font-weight: 750; list-style: none; }
+.account-menu summary::-webkit-details-marker { display: none; }
+.account-menu summary::after { content: '⌄'; margin-left: auto; color: rgba(255, 255, 255, .7); transition: transform .16s ease; }
+.account-menu[open] summary::after { transform: rotate(180deg); }
+.account-menu-content { display: grid; gap: 3px; margin-bottom: 9px; padding: 10px; border-radius: 9px; background: rgba(255, 255, 255, .08); }
+.account-menu-content strong { color: #fff; font-size: 12px; }
+.account-menu-content small { color: rgba(255, 255, 255, .65); font-size: 10px; }
+.account-menu-content a { margin-top: 5px; color: #fff; font-size: 11px; font-weight: 750; }
+.store-arrivals-link { display: grid; gap: 3px; color: inherit; text-decoration: none; }
+.store-arrivals-link strong { color: var(--primary); }
+.store-arrivals-link small { color: var(--muted); font-size: 10px; font-weight: 650; }
+.store-arrivals-link:hover strong, .store-arrivals-link:focus-visible strong { text-decoration: underline; }
 .password-requirements { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: #fafcfb; }
 .password-requirements-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .password-requirements-heading strong { font-size: 11px; }

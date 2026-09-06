@@ -45,6 +45,7 @@ export function AccountPage() {
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const privileged = session?.user.role === 'admin' || session?.user.role === 'super_admin';
+  const requiresCurrentPassword = privileged;
   const { formRef, formIsComplete } = useFormCompleteness((form) => {
     const values = new FormData(form);
     const current = String(values.get('currentPassword') ?? '');
@@ -53,7 +54,7 @@ export function AccountPage() {
     const nextIsValid = privileged
       ? hasPrivilegedPasswordPolicy(next)
       : next.length > 0 && next.length <= 128;
-    return current.length > 0 && current.length <= 128
+    return (!requiresCurrentPassword || (current.length > 0 && current.length <= 128))
       && nextIsValid
       && confirmed === next;
   });
@@ -78,8 +79,8 @@ export function AccountPage() {
       ? hasPrivilegedPasswordPolicy(submittedNewPassword)
       : submittedNewPassword.length > 0 && submittedNewPassword.length <= 128;
     const nextErrors: FieldErrors = {};
-    if (!submittedCurrentPassword) nextErrors.currentPassword = 'Renseignez votre mot de passe actuel.';
-    else if (submittedCurrentPassword.length > 128) nextErrors.currentPassword = 'Le mot de passe ne peut pas dépasser 128 caractères.';
+    if (requiresCurrentPassword && !submittedCurrentPassword) nextErrors.currentPassword = 'Renseignez votre mot de passe actuel.';
+    else if (requiresCurrentPassword && submittedCurrentPassword.length > 128) nextErrors.currentPassword = 'Le mot de passe ne peut pas dépasser 128 caractères.';
     if (!submittedNewPassword) {
       nextErrors.newPassword = 'Renseignez un nouveau mot de passe.';
     } else if (!submittedPasswordIsValid) {
@@ -102,7 +103,7 @@ export function AccountPage() {
     setFieldErrors({});
     setError('');
     try {
-      await changeMyPassword(session, submittedCurrentPassword, submittedNewPassword);
+      await changeMyPassword(session, submittedNewPassword, requiresCurrentPassword ? submittedCurrentPassword : undefined);
       await logout();
     } catch (cause) {
       if (cause instanceof ApiProblem && cause.code === 'PASSWORD_ALREADY_EXISTS') {
@@ -118,13 +119,13 @@ export function AccountPage() {
 
   return <section className="page-stack account-page">
     <header className="page-header">
-      <div><h1>Mon compte</h1><p>Modifiez votre mot de passe personnel.</p></div>
+      <div><h1>Mon compte</h1><p>{requiresCurrentPassword ? 'Modifiez votre mot de passe personnel.' : 'Modifiez votre mot de passe personnel sans saisir l’ancien.'}</p></div>
     </header>
     <ErrorNotice message={error} />
-    <IdentityPanel title="Changer mon mot de passe" description="Votre mot de passe actuel est obligatoire. Vous devrez ensuite vous reconnecter.">
+    <IdentityPanel title="Changer mon mot de passe" description={requiresCurrentPassword ? 'Votre mot de passe actuel est obligatoire. Vous devrez ensuite vous reconnecter.' : 'Choisissez un nouveau mot de passe. Vous devrez ensuite vous reconnecter.'}>
       <form ref={formRef} id="account-password-change-form" className="account-password-form" method="post" action="/v1/me/password" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
         <input id="account-username-autofill" className="sr-only" name="username" type="text" autoComplete="username" value={session?.user.username ?? ''} readOnly tabIndex={-1} aria-hidden="true" />
-        <PasswordField id="account-current-password" name="currentPassword" label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" preserveAutofill error={fieldErrors.currentPassword} onClearError={() => { clearFieldError(setFieldErrors, 'currentPassword'); setError(''); }} />
+        {requiresCurrentPassword && <PasswordField id="account-current-password" name="currentPassword" label="Mot de passe actuel" value={currentPassword} onChange={setCurrentPassword} minLength={1} autoComplete="current-password" preserveAutofill error={fieldErrors.currentPassword} onClearError={() => { clearFieldError(setFieldErrors, 'currentPassword'); setError(''); }} />}
         <PasswordField
           id="account-new-password"
           name="newPassword"

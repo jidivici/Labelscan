@@ -184,7 +184,16 @@ function ShellContent({ children }: { children: ReactNode }) {
 
       <footer className="sidebar-footer">
         <div className="user-summary"><span className="user-avatar">{session.user.username.slice(0, 2).toUpperCase()}</span><span><strong>{session.user.username}</strong><small>{ROLE_LABELS[session.user.role] ?? 'Compte professionnel'}</small></span></div>
-        <Link href={`${base}/compte`} className="account-link" onClick={closeNavigation}>Mon compte</Link>
+        {session.user.role === 'manager'
+          ? <details className="account-menu">
+              <summary>Compte</summary>
+              <div className="account-menu-content">
+                <strong>{session.user.display_name || session.user.username}</strong>
+                <small>Manager</small>
+                <Link href={`${base}/compte`} onClick={closeNavigation}>Modifier mon mot de passe</Link>
+              </div>
+            </details>
+          : <Link href={`${base}/compte`} className="account-link" onClick={closeNavigation}>Mon compte</Link>}
         <button type="button" className="logout-button" onClick={() => void logout()}>Se déconnecter</button>
       </footer>
     </aside>

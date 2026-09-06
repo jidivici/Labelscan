@@ -1,4 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { Link, useParams } from 'wouter';
 
 import { useAuth } from '../../auth/AuthContext';
 import { ApiProblem } from '../../api';
@@ -79,6 +80,7 @@ function ManagerRow({
 
 export function AdminPage() {
   const { session, refreshAccess } = useAuth();
+  const { organizationSlug = 'labelscan' } = useParams();
   const { selectedStoreCode, selectedProfessionCode } = useScope();
   const canManageManagers = hasCapability(session, CAPABILITIES.MANAGER_ASSIGNMENTS_MANAGE);
   const canManagePortals = hasCapability(session, CAPABILITIES.STORES_MANAGE);
@@ -430,7 +432,7 @@ export function AdminPage() {
         <div className="table-scroll paged-content" key={`stores-${storePage}`}><table className="identity-admin-table">
           <thead><tr><th>Magasin</th><th>Statut</th><th>Actions</th></tr></thead>
           <tbody>{visibleStores.map((store) => <tr key={store.id}>
-            <td><strong>{store.name}</strong></td>
+            <td><Link className="store-arrivals-link" href={`/o/${organizationSlug}/portails/tous/arrivages?store=${encodeURIComponent(store.code)}`}><strong>{store.name}</strong><small>Voir les arrivages</small></Link></td>
             <td><ActiveBadge active={store.active} /></td>
             <td><div className="table-actions">
               <button className={`button ${store.active ? 'text danger-text' : 'secondary'} small`} type="button" disabled={saving} onClick={() => { if (store.active) { setDeletionError(''); setPendingDeletion({ kind: 'store', item: store }); } else void toggleStore(store); }}>{store.active ? 'Supprimer' : 'Réactiver'}</button>

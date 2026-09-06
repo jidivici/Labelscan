@@ -19,12 +19,14 @@ export function getIamOverview(session: IamSession): Promise<IamOverview> {
 
 export function changeMyPassword(
   session: IamSession,
-  currentPassword: string,
   newPassword: string,
+  currentPassword?: string,
 ): Promise<void> {
+  const body: { new_password: string; current_password?: string } = { new_password: newPassword };
+  if (currentPassword) body.current_password = currentPassword;
   return request<void>('/v1/me/password', session, {
     method: 'POST',
-    ...json({ current_password: currentPassword, new_password: newPassword }),
+    ...json(body),
   });
 }
 

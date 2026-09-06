@@ -77,6 +77,16 @@ describe('capability based routing', () => {
     expect(within(sidebar).getByText('Poissonnerie')).toBeInTheDocument();
   });
 
+  it('gives a manager an account menu with their name and password action', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/portails/poissonnerie/arrivages', managerFixtureSession);
+
+    const sidebar = screen.getByRole('complementary', { name: 'Navigation du portail' });
+    await user.click(within(sidebar).getByText('Compte'));
+    expect(within(sidebar).getByText(managerFixtureSession.user.display_name)).toBeInTheDocument();
+    expect(within(sidebar).getByRole('link', { name: 'Modifier mon mot de passe' })).toHaveAttribute('href', '/o/labelscan/compte');
+  });
+
   it.each([
     ['une lettre accentuée', 'Abcdefghij1é'],
     ['un chiffre Unicode', 'Abcdefghij1٢'],
@@ -254,7 +264,7 @@ describe('capability based routing', () => {
     renderAt('/o/labelscan/compte', managerFixtureSession);
     await screen.findByRole('heading', { name: 'Mon compte' });
 
-    await user.type(screen.getByLabelText('Mot de passe actuel'), 'a');
+    expect(screen.queryByLabelText('Mot de passe actuel')).not.toBeInTheDocument();
     await user.type(screen.getByLabelText('Nouveau mot de passe'), 'x');
     await user.type(screen.getByLabelText('Confirmer le nouveau mot de passe'), 'x');
 

@@ -430,7 +430,7 @@ def test_old_activation_routes_are_absent(iam_v2):
     assert client.post("/v1/mobile/auth/activate", json={}).status_code == 404
 
 
-def test_admin_and_manager_change_own_password_with_current_password(iam_v2):
+def test_admin_requires_current_password_but_manager_can_change_from_an_authenticated_session(iam_v2):
     client, ids, organization_id, prefix = iam_v2
     admin_headers = _headers("identity:admin", "admin", ids["admin"], organization_id)
     wrong = client.post(
@@ -460,7 +460,6 @@ def test_admin_and_manager_change_own_password_with_current_password(iam_v2):
         "/v1/me/password",
         headers=manager_headers,
         json={
-            "current_password": "manager-password-123",
             "new_password": "x",
         },
     )

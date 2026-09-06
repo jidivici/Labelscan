@@ -278,10 +278,13 @@ class AccessManagementService:
         )
 
     def change_own_password(
-        self, audit: IdentityAudit, current_password: str, new_password: str
+        self, audit: IdentityAudit, current_password: str | None, new_password: str
     ) -> ManagedUser:
         role, current_hash = self._repository.own_credentials(audit)
-        if not verify_password(current_password, current_hash):
+        # Managers change their own password from the web account menu. Their
+        # authenticated session is sufficient for this low-friction flow; admin
+        # accounts still require the existing password as an extra safeguard.
+        if role != MANAGER_ROLE and (not current_password or not verify_password(current_password, current_hash)):
             raise InvalidCurrentPassword()
         if role == MANAGER_ROLE and self._repository.manager_password_in_use(
             audit, new_password
