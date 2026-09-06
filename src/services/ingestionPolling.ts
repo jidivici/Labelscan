@@ -20,7 +20,7 @@ import type { IngestionStatus, IngestionStatusResponse } from '../types/api';
 
 export type PollResult =
   | { kind: 'review_ready'; ingestion: IngestionStatusResponse }
-  | { kind: 'failed'; status: IngestionStatus }
+  | { kind: 'failed'; status: IngestionStatus; ingestion: IngestionStatusResponse }
   | { kind: 'timeout' } // bounded polling exhausted while still processing
   | { kind: 'aborted' } // cancelled (e.g. screen unmounted)
   | { kind: 'error'; code: string; message: string };
@@ -172,7 +172,7 @@ export async function pollIngestionUntilReady(
       });
       const cls = classifyIngestionStatus(ingestion.status);
       if (cls === 'review_ready') return { kind: 'review_ready', ingestion };
-      if (cls === 'failed') return { kind: 'failed', status: ingestion.status };
+      if (cls === 'failed') return { kind: 'failed', status: ingestion.status, ingestion };
       if (onInterim && ingestion.status === 'ocr_done') {
         const key = `ocr_done:${ingestion.interim_fields?.length ?? 0}`;
         if (key !== interimNotifiedKey) {

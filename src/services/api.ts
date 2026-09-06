@@ -17,6 +17,7 @@
 import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
 import { fetch as expoFetch, type FetchRequestInit } from 'expo/fetch';
 import { v4 as uuidv4 } from 'uuid';
+import { File } from 'expo-file-system';
 import * as FileSystem from 'expo-file-system/legacy';
 
 import { API_BASE_URL } from '../config';
@@ -47,10 +48,11 @@ type HttpResponse = Pick<Response, 'json' | 'ok' | 'status' | 'text'>;
  * Android JSON transport.
  *
  * The React Native legacy fetch bridge can collapse Android DNS/TLS failures into
- * an opaque `Network request failed` before the request reaches Caddy. Expo SDK 54
+ * an opaque `Network request failed` before the request reaches Caddy. Expo SDK 57
  * ships a native WinterCG fetch implementation specifically for consistent mobile
- * networking. Keep iOS on its proven transport and keep multipart uploads on the
- * legacy bridge, whose `{ uri, name, type }` file parts are React-Native-specific.
+ * networking. SDK 57 also installs this transport as the global fetch, so uploads
+ * use its native `File`/Blob representation instead of React Native's legacy
+ * `{ uri, name, type }` multipart extension.
  */
 async function fetchJson(url: string, init: RequestInit): Promise<HttpResponse> {
   if (process.env.EXPO_OS === 'android') {
@@ -450,8 +452,11 @@ export function apiUpload<T>(
         retriable: false,
       });
     }
-    // RN accepts a { uri, name, type } object as a file part; cast for the DOM typing.
-    form.append(parts.fileField ?? 'image', parts.file as unknown as Blob);
+    // Expo SDK 57's WinterCG fetch expects a Blob-compatible File. Passing the old
+    // React Native `{ uri, name, type }` object can leave multipart serialization
+    // waiting forever because the object is not a readable Blob on this transport.
+    const file = new File(parts.file.uri);
+    form.append(parts.fileField ?? 'image', file, parts.file.name);
     if (parts.fields) {
       for (const [key, value] of Object.entries(parts.fields)) form.append(key, value);
     }
@@ -459,7 +464,13 @@ export function apiUpload<T>(
       ...options,
       idempotencyKey: options.idempotencyKey ?? uuidv4(),
     };
-    return send<T>(path, { method: 'POST', body: form }, opts, {}, globalThis.fetch);
+    return send<T>(
+      path,
+      { method: 'POST', body: form },
+      opts,
+      {},
+      (url, init) => expoFetch(url, init as FetchRequestInit),
+    );
   })();
 }
 

@@ -14,6 +14,13 @@ describe('catalogue field visibility', () => {
     expect(displayFinalFieldValue('allergens', ' Nc ')).toBe('NC');
   });
 
+  it('shows allergens on one compact line and production methods in French', () => {
+    expect(displayFinalFieldValue('allergens', 'Poisson\n\n• Crustacés\r\n- Mollusques'))
+      .toBe('Poisson, Crustacés, Mollusques');
+    expect(displayFinalFieldValue('production_method', 'wild_caught')).toBe('Pêche sauvage');
+    expect(displayFinalFieldValue('production_method', 'farmed')).toBe('Élevage');
+  });
+
   it('partitions catalogue cache entries by every authenticated scope dimension', () => {
     expect(catalogQueryKey({
       organizationId: 'org-1',

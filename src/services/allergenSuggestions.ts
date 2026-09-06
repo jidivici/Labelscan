@@ -11,8 +11,8 @@
  *  - A suggestion is shown, never auto-applied. Accepting it makes it a HUMAN value
  *    (saved as an edit → `ArticleField.edited`, i.e. source='human'), never an
  *    "extracted" value. The label's own declared allergens always win when present.
- *  - When the seafood type is unclear or ambiguous (e.g. a "fruits de mer" mix), we
- *    return null — we never guess.
+ *  - A generic "fruits de mer" designation suggests both relevant families
+ *    (crustaceans + molluscs), never an arbitrarily chosen single family.
  *
  * Scope is deliberately limited to allergens. Provenance/FAO are NOT suggested:
  * port→FAO is non-deterministic and a regulated field (PROMPT-CONTRACT forbids
@@ -34,12 +34,14 @@ export const ALLERGEN_MOLLUSCS = 'Mollusques';
 // FR + EN common names + a few Latin genera. Curated, not exhaustive — it only needs
 // to recognise the family, and the human confirms.
 const CRUSTACEANS = [
+  'crustace', 'crustaces',
   'crevette', 'crevettes', 'gambas', 'langoustine', 'langoustines', 'scampi',
   'homard', 'langouste', 'crabe', 'crabes', 'tourteau', 'ecrevisse', 'etrille',
   'araignee de mer', 'shrimp', 'prawn', 'prawns', 'lobster', 'crab', 'crayfish',
   'penaeus', 'litopenaeus', 'nephrops', 'homarus', 'palinurus', 'carcinus',
 ];
 const MOLLUSCS = [
+  'mollusque', 'mollusques', 'coquillage', 'coquillages',
   'moule', 'moules', 'huitre', 'huitres', 'palourde', 'palourdes', 'coque',
   'coques', 'praire', 'saint-jacques', 'petoncle', 'calmar', 'calamar', 'calamars',
   'encornet', 'seiche', 'seiches', 'poulpe', 'pieuvre', 'bulot', 'bulots',
@@ -63,8 +65,8 @@ const FISH = [
   'xiphias',
 ];
 
-// Mixed-seafood wording: too ambiguous to attribute a single family → never guess.
-const MIXED = /(fruits de mer|melange|assortiment|seafood mix|mixed seafood|cocktail)/;
+// In ordinary French labelling, "fruits de mer" covers crustaceans and molluscs.
+const GENERIC_SEAFOOD_MIX = /(fruits? de mer|seafood mix|mixed seafood)/;
 
 function normalize(s: string): string {
   // NFD splits an accented letter into a base char + a combining diacritic; we
@@ -88,8 +90,8 @@ function matchesAny(text: string, keywords: string[]): boolean {
 /**
  * Suggest an EU allergen family from the product/species text, or null when unclear.
  * Reads scientific_name / product_name / commercial_designation only. Crustaceans and
- * molluscs are checked before fish (more specific), and a mixed-seafood product yields
- * null (no guess).
+ * Multiple detected families are all suggested; the operator still explicitly accepts
+ * the proposal before anything is saved.
  */
 export function suggestAllergen(fields: AllergenSourceField[]): string | null {
   const text = normalize(
@@ -103,9 +105,13 @@ export function suggestAllergen(fields: AllergenSourceField[]): string | null {
       .join(' '),
   );
   if (!text.trim()) return null;
-  if (MIXED.test(text)) return null;
-  if (matchesAny(text, CRUSTACEANS)) return ALLERGEN_CRUSTACEANS;
-  if (matchesAny(text, MOLLUSCS)) return ALLERGEN_MOLLUSCS;
-  if (matchesAny(text, FISH)) return ALLERGEN_FISH;
-  return null;
+  const suggestions: string[] = [];
+  if (matchesAny(text, FISH)) suggestions.push(ALLERGEN_FISH);
+  if (matchesAny(text, CRUSTACEANS) || GENERIC_SEAFOOD_MIX.test(text)) {
+    suggestions.push(ALLERGEN_CRUSTACEANS);
+  }
+  if (matchesAny(text, MOLLUSCS) || GENERIC_SEAFOOD_MIX.test(text)) {
+    suggestions.push(ALLERGEN_MOLLUSCS);
+  }
+  return suggestions.length > 0 ? suggestions.join(', ') : null;
 }

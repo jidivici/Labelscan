@@ -131,14 +131,7 @@ def validate_note(value: str | None) -> str | None:
 
 
 def _valid_gtin(value: str) -> bool:
-    if len(value) not in _GTIN_LENGTHS or not value.isascii() or not value.isdigit():
-        return False
-    payload = [int(digit) for digit in value[:-1]]
-    weighted = sum(
-        digit * (3 if index % 2 == 0 else 1)
-        for index, digit in enumerate(reversed(payload))
-    )
-    return (10 - weighted % 10) % 10 == int(value[-1])
+    return len(value) in _GTIN_LENGTHS and value.isascii() and value.isdigit()
 
 
 def _valid_iso_date(value: str) -> bool:
@@ -173,7 +166,7 @@ def validate_human_field_value(field_name: str, value: str | None) -> str | None
         )
     if spec.kind == "gtin" and not _valid_gtin(normalized):
         raise ValueError(
-            "field 'gtin' must have a valid GTIN-8/12/13/14 checksum or NC"
+            "field 'gtin' must contain 8, 12, 13, or 14 digits, or NC"
         )
     if spec.kind == "decimal_unit":
         match = _WEIGHT.fullmatch(normalized)

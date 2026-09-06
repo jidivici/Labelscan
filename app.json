@@ -3,7 +3,6 @@
     "name": "LabelScan",
     "slug": "LabelScan",
     "version": "1.0.0",
-    "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "icon": "./assets/labelscan-logo.png",
     "ios": {
@@ -45,6 +44,8 @@
         }
       ],
       "expo-secure-store",
+      "expo-font",
+      "expo-sharing",
       "expo-build-properties"
     ],
     "extra": {

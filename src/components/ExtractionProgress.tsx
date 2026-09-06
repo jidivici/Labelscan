@@ -76,11 +76,14 @@ function StepRow({ label, status }: { label: string; status: StepStatus }) {
 export function ExtractionProgress({
   startedAt,
   ready,
+  uploadDone = true,
   ocrDone = false,
   analysisLabel = 'Analyse du produit',
 }: {
   startedAt: number;
   ready: boolean;
+  /** False while the multipart photo upload is still in progress. */
+  uploadDone?: boolean;
   /** Real Tier 3 `ocr_done` transit — pins the stage to 'llm' (no more estimating). */
   ocrDone?: boolean;
   /** Trade-aware wording supplied by the review screen. */
@@ -96,12 +99,13 @@ export function ExtractionProgress({
 
   const stage = extractionStage(Date.now() - startedAt, ready, ocrDone);
   const steps: ReadonlyArray<{ key: StepKey; label: string }> = [
-    { key: 'upload', label: 'Photo envoyée' },
+    { key: 'upload', label: uploadDone ? 'Photo envoyée' : 'Envoi de la photo' },
     { key: 'ocr', label: 'Lecture du texte' },
     { key: 'llm', label: analysisLabel },
   ];
   const statusFor = (key: StepKey): StepStatus => {
-    if (key === 'upload') return 'done'; // upload finished during the background submit
+    if (key === 'upload') return uploadDone ? 'done' : 'active';
+    if (!uploadDone) return 'pending';
     if (key === 'ocr') return stage === 'ocr' ? 'active' : 'done';
     // llm
     if (stage === 'ready') return 'done';

@@ -65,6 +65,9 @@ export interface IngestionStatusResponse {
    * Present ONLY while no run exists (status ocr_done); the final run supersedes them.
    */
   interim_fields?: InterimField[] | null;
+  /** Server-authoritative image-quality decision. */
+  recapture_required?: boolean;
+  recapture_reason?: string | null;
 }
 
 /** One wave-2 preview field (server InterimFieldView). Non-authoritative. */

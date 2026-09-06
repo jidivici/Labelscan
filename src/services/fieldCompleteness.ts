@@ -14,6 +14,7 @@
  */
 
 import { fieldOrderForTrade } from './fieldOrder';
+import { allowsNotCommunicated } from './finalReviewValidation';
 import { requiresExplicitHumanConfirmation } from './reviewFieldAttention';
 import type { ExtractionField, ValidationStatus } from '../types/api';
 
@@ -57,8 +58,13 @@ export function canonicalFieldCount(tradeCode?: string | null): number {
 }
 
 /** A field value counts as "filled" when it is a non-blank string. */
-function isFilledValue(value: string | null | undefined): boolean {
+function isFilledValue(value: string | null | undefined, fieldName?: string): boolean {
   if (value == null || value.trim() === '') return false;
+  if (
+    fieldName &&
+    !allowsNotCommunicated(fieldName) &&
+    value.trim().toUpperCase() === NOT_COMMUNICATED_VALUE
+  ) return false;
   return true;
 }
 
@@ -82,13 +88,13 @@ export function filledCountFromRun(
   let count = 0;
   for (const name of fieldOrderForTrade(tradeCode)) {
     if (edits && name in edits) {
-      if (isFilledValue(edits[name])) count += 1;
+      if (isFilledValue(edits[name], name)) count += 1;
       continue;
     }
     const f = byName.get(name);
     if (!f) continue;
-    if (requiresExplicitHumanConfirmation(f.validation_status)) continue;
-    if (isFilledValue(f.value)) count += 1;
+    if (requiresExplicitHumanConfirmation(f.validation_status, f.source)) continue;
+    if (isFilledValue(f.value, name)) count += 1;
   }
   return count;
 }
@@ -121,7 +127,7 @@ export function filledCountFromValues(
   if (!values) return 0;
   let count = 0;
   for (const name of fieldOrderForTrade(tradeCode)) {
-    if (isFilledValue(values[name])) count += 1;
+    if (isFilledValue(values[name], name)) count += 1;
   }
   return count;
 }

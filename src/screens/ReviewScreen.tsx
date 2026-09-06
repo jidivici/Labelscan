@@ -36,6 +36,7 @@ import { queryClient } from '../services/queryClient';
 import { businessProfileFor } from '../services/businessProfiles';
 import { catalogQueryKey } from '../services/catalogApi';
 import { suggestAllergen } from '../services/allergenSuggestions';
+import { ProductionMethodSelector } from '../components/ProductionMethodSelector';
 import { buildFieldHistory, suggestForField, type FieldHistory } from '../services/fieldHistory';
 import {
   enqueueFinalizeReview,
@@ -79,7 +80,6 @@ import {
   notCommunicatedSuggestion,
 } from '../services/fieldCompleteness';
 import {
-  hasExploitableExtraction,
   RECAPTURE_GUIDANCE,
   RECAPTURE_MESSAGE,
   RECAPTURE_TITLE,
@@ -90,8 +90,11 @@ import { RotatedPhoto } from '../components/RotatedPhoto';
 import { ExtractionProgress } from '../components/ExtractionProgress';
 import { formatDate } from '../services/dates';
 import { logLatency } from '../services/latencyLog';
-import { validateFinalReviewValues } from '../services/finalReviewValidation';
-import { canonicalizeFinalReviewValue } from '../services/finalReviewValidation';
+import {
+  allowsNotCommunicated,
+  canonicalizeFinalReviewValue,
+  validateFinalReviewValues,
+} from '../services/finalReviewValidation';
 import {
   captureActiveSession,
   isSessionFenceCurrent,
@@ -254,18 +257,12 @@ function TempRangeInput({
       <TextInput
         value={min}
         onChangeText={(t) => {
-          if (notCommunicatedSuggestion(t)) {
-            setMin(t);
-            setMax('');
-            onChange(t);
-            return;
-          }
           setMin(t);
           onChange(formatTemp(t, max));
         }}
         onFocus={onFocus}
         onBlur={onBlur}
-        keyboardType="default"
+        keyboardType="numeric"
         placeholder="min"
         placeholderTextColor={colors.onSurfaceVariant}
         style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
@@ -275,18 +272,12 @@ function TempRangeInput({
       <TextInput
         value={max}
         onChangeText={(t) => {
-          if (notCommunicatedSuggestion(t)) {
-            setMin('');
-            setMax(t);
-            onChange(t);
-            return;
-          }
           setMax(t);
           onChange(formatTemp(min, t));
         }}
         onFocus={onFocus}
         onBlur={onBlur}
-        keyboardType="default"
+        keyboardType="numeric"
         placeholder="max"
         placeholderTextColor={colors.onSurfaceVariant}
         style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
@@ -321,9 +312,16 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // A questionable extraction is deliberately styled like an empty field: same calm
   // green cue, never an alarming error colour. We do not expose raw provider text;
   // the usual field suggestions remain the only assistance under the input.
-  const highlighted = shouldHighlightReviewField(draft, field.validation_status, edited);
+  const highlighted = shouldHighlightReviewField(
+    draft,
+    field.validation_status,
+    edited,
+    field.source,
+  );
   const needsExplicitConfirmation =
-    !empty && !edited && requiresExplicitHumanConfirmation(field.validation_status);
+    !empty &&
+    !edited &&
+    requiresExplicitHumanConfirmation(field.validation_status, field.source);
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
   const showSuggestion = !!suggestion && empty;
@@ -332,16 +330,17 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
   // formats the digits the operator reads off the label — it never computes a date.
   const isDate = isDateField(field.field_name);
+  const allowsNC = allowsNotCommunicated(field.field_name);
   const isNotCommunicated = draft.trim().toUpperCase() === NOT_COMMUNICATED_VALUE;
   // Health mark ("estampille sanitaire"): the official stamp is always uppercase, so
   // every keystroke is force-cased — never a stripped/computed character.
   const isHealthMark = isHealthMarkField(field.field_name);
   const attentionLabel =
-    !edited && requiresExplicitHumanConfirmation(field.validation_status)
+    !edited && requiresExplicitHumanConfirmation(field.validation_status, field.source)
       ? 'À vérifier'
       : 'À compléter';
   const handleChange = (text: string) => {
-    if (notCommunicatedSuggestion(text)) {
+    if (allowsNC && notCommunicatedSuggestion(text)) {
       emit(text);
       return;
     }
@@ -355,10 +354,13 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   const [focused, setFocused] = useState(false);
   const historySuggestions = useMemo(() => {
     if (!focused) return [];
-    const nc = notCommunicatedSuggestion(draft);
+    const nc = allowsNC ? notCommunicatedSuggestion(draft) : null;
     const saved = history ? suggestForField(history, field.field_name, draft) : [];
-    return [...(nc ? [nc] : []), ...saved.filter((value) => value !== nc)].slice(0, 3);
-  }, [focused, history, field.field_name, draft]);
+    return [
+      ...(nc ? [nc] : []),
+      ...saved.filter((value) => value !== nc && (allowsNC || value !== NOT_COMMUNICATED_VALUE)),
+    ].slice(0, 3);
+  }, [allowsNC, focused, history, field.field_name, draft]);
 
   // Real-time, NEUTRAL, non-blocking validity hint (Clean UI: no red, never blocks the
   // save). Computed from the live draft so it updates as the operator types; null while
@@ -378,7 +380,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           <Text style={[typography.labelSmall, styles.attentionTag]}>{attentionLabel}</Text>
         ) : null}
       </View>
-      {isNotCommunicated && ['weight', 'storage_temperature'].includes(field.field_name) ? (
+      {isNotCommunicated && allowsNC && ['weight', 'storage_temperature'].includes(field.field_name) ? (
         <TextInput
           value={draft}
           onChangeText={emit}
@@ -406,6 +408,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
         />
+      ) : field.field_name === 'production_method' ? (
+        <ProductionMethodSelector value={draft} onChange={emit} />
       ) : (
         <TextInput
           value={draft}
@@ -442,19 +446,21 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
               Confirmer cette valeur
             </Text>
           </Pressable>
-          <Pressable
-            onPress={() => emit(NOT_COMMUNICATED_VALUE)}
-            style={styles.notCommunicatedChip}
-            android_ripple={{ color: colors.primaryContainer }}
-            accessibilityRole="button"
-            accessibilityLabel={`Marquer ${fieldLabelFr(field.field_name)} non communiqué`}
-            accessibilityHint="Remplace la valeur proposée par NC"
-          >
-            <Text style={[typography.labelSmall, styles.notCommunicatedChipText]}>Marquer NC</Text>
-          </Pressable>
+          {allowsNC ? (
+            <Pressable
+              onPress={() => emit(NOT_COMMUNICATED_VALUE)}
+              style={styles.notCommunicatedChip}
+              android_ripple={{ color: colors.primaryContainer }}
+              accessibilityRole="button"
+              accessibilityLabel={`Marquer ${fieldLabelFr(field.field_name)} non communiqué`}
+              accessibilityHint="Remplace la valeur proposée par NC"
+            >
+              <Text style={[typography.labelSmall, styles.notCommunicatedChipText]}>Marquer NC</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
-      {empty ? (
+      {empty && allowsNC ? (
         <Pressable
           onPress={() => emit(NOT_COMMUNICATED_VALUE)}
           style={styles.notCommunicatedChip}
@@ -582,11 +588,9 @@ export function ReviewScreen() {
 
   const gs1 = useMemo(() => parseGs1(barcodeRaw), [barcodeRaw]);
   const fields = run?.fields ?? [];
-  // Defense in depth for a queue restored from an older app build: recompute the
-  // safety decision from the run too, so stale `ready` state still cannot confirm.
-  const requiresRecapture =
-    queueRequiresRecapture ||
-    (ready && run != null && !hasExploitableExtraction(fields, reviewProfile.code));
+  // The queue has already applied the backend's explicit image-quality verdict.
+  // Do not recompute it here: a local heuristic could wrongly reject a valid photo.
+  const requiresRecapture = queueRequiresRecapture;
   const fieldsByName = useMemo(
     () => new Map(fields.map((field) => [field.field_name, field])),
     [fields],
@@ -627,13 +631,6 @@ export function ReviewScreen() {
     logLatency('review', { wait_ms: Date.now() - Date.parse(scan.createdAt), status: 'ready' });
   }, [scan, ready]);
 
-  // Allergen decision-support (chantier B): derive ONE EU-family suggestion from the
-  // species/product fields. Pure + returns null when unsure (mixed/empty). It is shown
-  // only on the `allergens` row and only while that row is still empty; accepting it
-  // records a HUMAN edit (source='human' on save), never an extracted value — the
-  // no-fabrication gate is untouched. See services/allergenSuggestions.ts.
-  const allergenSuggestion = useMemo(() => suggestAllergen(fields), [fields]);
-
   // ONE stable callback for every editable row (audit §7.1): with React.memo a keystroke
   // re-renders only the row whose draft changed, not all 16.
   const handleFieldChange = useCallback((name: string, text: string) => {
@@ -666,13 +663,31 @@ export function ReviewScreen() {
       const initial = field
         ? initialHumanReviewValue(field.value, field.validation_status)
         : '';
+      const permittedInitial =
+        !allowsNotCommunicated(name) && initial === NOT_COMMUNICATED_VALUE ? '' : initial;
       const extracted = isDateField(name)
-        ? displayDate(initial)
-        : displayFieldValue(name, initial) ?? '';
+        ? displayDate(permittedInitial)
+        : displayFieldValue(name, permittedInitial) ?? '';
       out[name] = edits[name] ?? extracted;
     }
     return out;
   }, [fieldsByName, edits, fieldOrder]);
+  // Recompute from the live denomination/species drafts, not only the original OCR.
+  // The proposal remains explicit: it is applied only if the operator taps it.
+  const allergenSuggestion = useMemo(
+    () => suggestAllergen([
+      {
+        field_name: 'commercial_designation',
+        value: effectiveValues.commercial_designation ?? null,
+      },
+      {
+        field_name: 'scientific_name',
+        value: effectiveValues.scientific_name ?? null,
+      },
+      ...fields.filter((field) => field.field_name === 'product_name'),
+    ]),
+    [effectiveValues, fields],
+  );
   // "Enregistrer l'arrivage" unlocks only when every active profile field is non-blank.
   const filledCount = useMemo(
     () => filledCountFromRun(fields, edits, reviewProfile.code),
@@ -972,7 +987,7 @@ export function ReviewScreen() {
             <RotatedPhoto
               source={{ uri: photoUri }}
               resizeMode="cover"
-              style={StyleSheet.absoluteFillObject}
+              style={StyleSheet.absoluteFill}
               halfTurn={photoRotationDegrees === 180}
               baseRotationDegrees={scan.photoBaseRotationDegrees ?? -90}
             />
@@ -1030,18 +1045,16 @@ export function ReviewScreen() {
               </Text>
             </View>
           ) : null}
-        {scan?.status === 'submit_error' || scan?.status === 'extract_error' ? (
-            // Defensive only — a card in error state is not tappable from home, so this
-            // normally can't be reached; kept in case the scan regresses while open.
+        {!requiresRecapture && (scan?.status === 'submit_error' || scan?.status === 'extract_error') ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 {scan.status === 'submit_error'
-                  ? 'L’envoi de cette étiquette a échoué. Revenez à l’accueil pour réessayer.'
+                  ? `L’envoi de cette étiquette a échoué${scan.errorCode ? ` (${scan.errorCode})` : ''}. Revenez à l’accueil pour réessayer.`
                   : 'L’analyse de cette étiquette a échoué. Revenez à l’accueil pour réessayer.'}
               </Text>
             </View>
           ) : null}
-        {ready && run == null ? (
+        {!requiresRecapture && ready && run == null ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Impossible de charger les champs extraits. L'étiquette a été traitée sur le serveur
@@ -1049,7 +1062,7 @@ export function ReviewScreen() {
               </Text>
             </View>
           ) : null}
-        {ready && fields.length === 0 ? (
+        {!requiresRecapture && ready && fields.length === 0 ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 Aucun champ extrait.
@@ -1060,10 +1073,11 @@ export function ReviewScreen() {
         {/* Alerts never replace the contract: every profile row stays visible. A machine
             absence stays blank/à vérifier until the operator explicitly supplies a value
             or marks it NC. */}
-        {!showFinalFieldProjection ? (
+        {!requiresRecapture && !showFinalFieldProjection ? (
           <ExtractionProgress
             startedAt={mountedAt}
             ready={false}
+            uploadDone={scan?.status !== 'submitting'}
             ocrDone={ocrDone}
             analysisLabel={
               reviewProfile.code === 'poissonnerie'
@@ -1074,7 +1088,7 @@ export function ReviewScreen() {
             }
           />
         ) : null}
-        {fieldGroups.map((group) => (
+        {!requiresRecapture ? fieldGroups.map((group) => (
                 <View key={group.id} style={styles.fieldGroup}>
                   <View style={styles.fieldGroupHeader}>
                     <View style={styles.fieldGroupIcon}>
@@ -1129,7 +1143,7 @@ export function ReviewScreen() {
                     })}
                   </View>
                 </View>
-        ))}
+        )) : null}
       </ScrollView>
 
       {saveFeedback ? (
@@ -1202,7 +1216,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.onSurface,
   },
   photoCard: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     overflow: 'hidden',
   },
   photoPlaceholder: {

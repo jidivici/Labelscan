@@ -195,7 +195,8 @@ requires the exact field set for the ingestion’s snapshotted profession and
 profile version. Every value must be non-empty; `NC` is the explicit audited
 “not communicated” value. Dates must be complete `YYYY-MM-DD` values,
 `production_method` accepts `wild_caught`, `farmed`, or `NC`, and GTIN accepts
-a checksum-valid 8, 12, 13, or 14 digit value, or `NC`.
+an 8, 12, 13, or 14 digit value, or `NC`. The barcode symbology checksum protects
+scanner-originated values; supplier AI `(01)` payloads are preserved verbatim.
 
 The operation appends a fully human-sourced run, confirms the ingestion, stores
 the photo orientation, records idempotency, and emits `review.finalized` in one

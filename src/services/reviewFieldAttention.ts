@@ -10,7 +10,9 @@ const QUESTIONABLE_STATUSES = new Set<ValidationStatus>([
 /** Machine states that need an explicit human decision before final review. */
 export function requiresExplicitHumanConfirmation(
   validationStatus: ValidationStatus,
+  source?: string | null,
 ): boolean {
+  if (source === 'gs1') return false;
   return QUESTIONABLE_STATUSES.has(validationStatus);
 }
 
@@ -19,7 +21,8 @@ export function shouldHighlightReviewField(
   draft: string,
   validationStatus: ValidationStatus,
   edited: boolean,
+  source?: string | null,
 ): boolean {
   if (draft.trim() === '') return true;
-  return !edited && requiresExplicitHumanConfirmation(validationStatus);
+  return !edited && requiresExplicitHumanConfirmation(validationStatus, source);
 }

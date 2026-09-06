@@ -68,6 +68,15 @@ describe('capability based routing', () => {
     expect(screen.getByRole('button', { name: 'Métier Tous les métiers' })).toBeInTheDocument();
   });
 
+  it('keeps the assigned métier visible on a manager account page', async () => {
+    renderAt('/o/labelscan/compte', managerFixtureSession);
+
+    expect(await screen.findByRole('heading', { name: 'Mon compte' })).toBeInTheDocument();
+    const sidebar = screen.getByRole('complementary', { name: 'Navigation du portail' });
+    expect(within(sidebar).getByText('Métier')).toBeInTheDocument();
+    expect(within(sidebar).getByText('Poissonnerie')).toBeInTheDocument();
+  });
+
   it.each([
     ['une lettre accentuée', 'Abcdefghij1é'],
     ['un chiffre Unicode', 'Abcdefghij1٢'],

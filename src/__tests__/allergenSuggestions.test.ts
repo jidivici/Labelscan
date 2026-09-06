@@ -61,20 +61,25 @@ describe('suggestAllergen — EU Annex II family from species/product text', () 
     ).toBe(ALLERGEN_FISH);
   });
 
-  it('prefers the more specific family: crustacean wins over fish', () => {
-    // Mentions both a crustacean (homard) and a fish (poisson) → Crustacés.
+  it('suggests every family explicitly named by a mixed product', () => {
     expect(
       suggestAllergen(fields({ product_name: 'Bisque de homard et de poisson' })),
-    ).toBe(ALLERGEN_CRUSTACEANS);
+    ).toBe(`${ALLERGEN_FISH}, ${ALLERGEN_CRUSTACEANS}`);
   });
 
-  it('returns null for a mixed-seafood product (never guesses a single family)', () => {
+  it('maps generic fruits de mer to crustaceans and molluscs', () => {
     expect(
       suggestAllergen(fields({ product_name: 'Assortiment de fruits de mer' })),
-    ).toBeNull();
+    ).toBe(`${ALLERGEN_CRUSTACEANS}, ${ALLERGEN_MOLLUSCS}`);
     expect(
       suggestAllergen(fields({ commercial_designation: 'Cocktail de fruits de mer' })),
-    ).toBeNull();
+    ).toBe(`${ALLERGEN_CRUSTACEANS}, ${ALLERGEN_MOLLUSCS}`);
+  });
+
+  it('recognises generic family names', () => {
+    expect(suggestAllergen(fields({ product_name: 'Mollusques cuits' }))).toBe(ALLERGEN_MOLLUSCS);
+    expect(suggestAllergen(fields({ product_name: 'Crustacés décortiqués' }))).toBe(ALLERGEN_CRUSTACEANS);
+    expect(suggestAllergen(fields({ product_name: 'Poisson frais' }))).toBe(ALLERGEN_FISH);
   });
 
   it('returns null when no seafood term is present', () => {

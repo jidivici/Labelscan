@@ -22,6 +22,30 @@ import { displayDate } from './inputMasks';
 
 const FNC1 = '\x1d'; // GS / Group Separator — the GS1 variable-field terminator
 
+/**
+ * Android exposes both a presentation value and the raw barcode payload. The raw
+ * form is essential for GS1-128 because it preserves FNC1 separators between
+ * variable-length AIs; without them everything after such an AI can be swallowed.
+ */
+export function preferredBarcodePayload(result: { data: string; raw?: string }): string {
+  return result.raw && result.raw.length > 0 ? result.raw : result.data;
+}
+
+export const BARCODE_CAPTURE_FRESH_MS = 750;
+
+/** A barcode belongs to a photo only when it was still visible at shutter time. */
+export function barcodePayloadAtShutter(
+  candidate: { result: { data: string; raw?: string }; detectedAt: number } | null,
+  shutterAt: number,
+): string | undefined {
+  if (
+    !candidate ||
+    shutterAt < candidate.detectedAt ||
+    shutterAt - candidate.detectedAt > BARCODE_CAPTURE_FRESH_MS
+  ) return undefined;
+  return preferredBarcodePayload(candidate.result);
+}
+
 /** Scanner vendors may prepend an AIM symbology identifier (for example `]C1`
  * for GS1-128). It is transport metadata, not an application identifier. */
 function normalizeScan(raw: string): string {

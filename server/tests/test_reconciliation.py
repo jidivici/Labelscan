@@ -91,7 +91,7 @@ def test_weight_and_gtin_from_gs1():
     assert out["weight"].provenance == {"source": "gs1", "ai": "310x", "unit": "kg"}
 
 
-def test_gs1_gtin_with_a_check_digit_warning_remains_saveable_but_needs_review():
+def test_gs1_gtin_from_barcode_remains_saveable_without_manual_confirmation():
     out = _by_name(
         reconcile(
             (),
@@ -101,8 +101,8 @@ def test_gs1_gtin_with_a_check_digit_warning_remains_saveable_but_needs_review()
         )
     )
     assert out["gtin"].value == "93000502900206"
-    assert out["gtin"].validation_status == "invalid"
-    assert any("Clé de contrôle" in warning for warning in out["gtin"].warnings)
+    assert out["gtin"].validation_status == "present"
+    assert out["gtin"].warnings == ()
 
 
 def test_no_barcode_is_pure_passthrough():

@@ -89,6 +89,16 @@ export function productionMethodFr(value: string | null): string | null {
   return PRODUCTION_METHOD_FR[value] ?? value;
 }
 
+/** OCR often returns list items on separate lines; mobile fields stay compact. */
+export function singleLineAllergens(value: string): string {
+  return value
+    .split(/[\r\n]+/)
+    .map((part) => part.trim().replace(/^[-•]\s*/, ''))
+    .filter(Boolean)
+    .join(', ')
+    .replace(/[ \t]+/g, ' ');
+}
+
 /**
  * Field value as it should be DISPLAYED: francizes controlled vocabulary
  * (`production_method` → Élevage / Pêche sauvage), returns the value unchanged
@@ -101,6 +111,7 @@ export function productionMethodFr(value: string | null): string | null {
  */
 export function displayFieldValue(fieldName: string, value: string | null): string | null {
   if (fieldName === 'production_method') return productionMethodFr(value);
+  if (fieldName === 'allergens' && value != null) return singleLineAllergens(value);
   // Dates are stored canonical ISO (audit §7.2 step 4); render DD/MM/YYYY. displayDate
   // passes through anything not ISO, so legacy DD/MM/YYYY records still display correctly.
   if (value != null && isDateField(fieldName)) return displayDate(value);

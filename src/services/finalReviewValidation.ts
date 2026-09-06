@@ -36,6 +36,17 @@ const FIELD_SPECS: Readonly<Record<string, MobileFieldSpec>> = {
 
 const GTIN_LENGTHS = new Set([8, 12, 13, 14]);
 const PRODUCTION_METHODS = new Set(['wild_caught', 'farmed']);
+const VALUE_REQUIRED_FIELDS = new Set([
+  'commercial_designation',
+  'expiry_date',
+  'packaging_date',
+  'FAO_area',
+  'origin_country',
+  'health_mark',
+  'batch_number',
+  'production_method',
+  'storage_temperature',
+]);
 const WEIGHT = /^(\d+(?:[.,]\d{1,3})?)\s*(g|kg)$/i;
 const TEMPERATURE = /^(?:(<=|>=|≤|≥)\s*)?(-?\d+(?:[.,]\d+)?)(?:\s*(?:-|–|à)\s*(-?\d+(?:[.,]\d+)?))?\s*°?C$/i;
 const HEALTH_MARK = /^[A-Z]{2}[ A-Z0-9.\-/]{1,61}$/;
@@ -64,6 +75,11 @@ export interface FinalReviewValidationError {
   message: string;
 }
 
+/** Regulatory/traceability fields for which the mobile workflow must collect a value. */
+export function allowsNotCommunicated(fieldName: string): boolean {
+  return !VALUE_REQUIRED_FIELDS.has(fieldName);
+}
+
 function codePointLength(value: string): number {
   return Array.from(value).length;
 }
@@ -89,13 +105,10 @@ function validIsoDate(value: string): boolean {
 }
 
 export function isValidGtin(value: string): boolean {
-  if (!GTIN_LENGTHS.has(value.length) || !/^[0-9]+$/.test(value)) return false;
-  const payload = value.slice(0, -1).split('').map(Number).reverse();
-  const weighted = payload.reduce(
-    (sum, digit, index) => sum + digit * (index % 2 === 0 ? 3 : 1),
-    0,
-  );
-  return (10 - (weighted % 10)) % 10 === Number(value.at(-1));
+  // The Code 128 symbol checksum already protects the exact scanned payload. Some
+  // supplier labels carry a non-standard AI (01) check digit; keep the printed value
+  // instead of forcing the operator to "correct" trusted barcode data.
+  return GTIN_LENGTHS.has(value.length) && /^[0-9]+$/.test(value);
 }
 
 /**
@@ -112,6 +125,14 @@ export function canonicalizeFinalReviewValue(
     const localized = value.toLocaleLowerCase('fr-FR');
     if (localized === 'pêche sauvage') value = 'wild_caught';
     if (localized === 'élevage') value = 'farmed';
+  }
+  if (fieldName === 'allergens') {
+    value = value
+      .split(/[\r\n]+/)
+      .map((part) => part.trim().replace(/^[-•]\s*/, ''))
+      .filter(Boolean)
+      .join(', ')
+      .replace(/[ \t]+/g, ' ');
   }
   if (fieldName === 'weight') {
     const match = WEIGHT.exec(value);
@@ -133,7 +154,12 @@ export function validateFinalReviewValues(
     const value = canonicalizeFinalReviewValue(fieldName, rawValue);
     const spec = FIELD_SPECS[fieldName] ?? DEFAULT_SPEC;
     if (!value) {
-      errors.push({ fieldName, message: 'Ce champ doit être renseigné ou marqué NC.' });
+      errors.push({
+        fieldName,
+        message: allowsNotCommunicated(fieldName)
+          ? 'Ce champ doit être renseigné ou marqué NC.'
+          : 'Une valeur est obligatoire pour ce champ.',
+      });
       continue;
     }
     if (codePointLength(value) > spec.maxLength) {
@@ -150,16 +176,21 @@ export function validateFinalReviewValues(
       });
       continue;
     }
-    if (value === 'NC') continue;
+    if (value === 'NC') {
+      if (!allowsNotCommunicated(fieldName)) {
+        errors.push({ fieldName, message: 'La valeur NC n’est pas autorisée pour ce champ.' });
+      }
+      continue;
+    }
 
     if (spec.kind === 'date' && !validIsoDate(value)) {
       errors.push({ fieldName, message: 'Saisissez une date complète au format JJ/MM/AAAA.' });
     } else if (spec.kind === 'enum' && !PRODUCTION_METHODS.has(value)) {
-      errors.push({ fieldName, message: 'Choisissez Pêche sauvage, Élevage ou NC.' });
+      errors.push({ fieldName, message: 'Choisissez Pêche sauvage ou Élevage.' });
     } else if (spec.kind === 'gtin' && !isValidGtin(value)) {
       errors.push({
         fieldName,
-        message: 'Le GTIN doit avoir 8, 12, 13 ou 14 chiffres et une clé valide, ou être NC.',
+        message: 'Le GTIN doit contenir 8, 12, 13 ou 14 chiffres, ou être NC.',
       });
     } else if (spec.kind === 'decimal_unit') {
       const match = WEIGHT.exec(value);

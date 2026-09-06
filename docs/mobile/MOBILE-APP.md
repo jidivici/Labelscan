@@ -18,7 +18,7 @@ and caches improve the experience; they are not authorization boundaries.
 
 | Client | Primary users | Main purpose | Technology |
 | --- | --- | --- | --- |
-| Mobile app | Store managers assigned to one active business portal | Capture a label, monitor extraction, review every business field, and save the arrival | Expo SDK 54, React Native 0.81, React 19 |
+| Mobile app | Store managers assigned to one active business portal | Capture a label, monitor extraction, review every business field, and save the arrival | Expo SDK 57, React Native 0.86, React 19.2 |
 | Back office | Managers, administrators, and super administrators | Browse authorized arrivals and manage the identities allowed by the current role | React 19, Vite 7, Wouter |
 
 The normal business flow is:
@@ -78,8 +78,8 @@ not let an operator choose a tenant or profession for an upload.
 ### Platform and build contract
 
 The exact installed versions are authoritative in
-[package.json](../../package.json). The current app is pinned to Expo SDK 54 and
-uses the SDK 54-compatible React Native packages.
+[package.json](../../package.json). The current app is pinned to Expo SDK 57 and
+uses the SDK 57-compatible React Native packages.
 
 The native configuration in [app.json](../../app.json),
 [app.config.js](../../app.config.js), and [eas.json](../../eas.json) defines these

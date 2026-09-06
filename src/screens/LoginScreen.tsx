@@ -220,7 +220,6 @@ export function LoginScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoComplete="username"
-                textContentType="username"
                 returnKeyType="next"
                 editable={!submitting}
                 accessibilityLabel="Identifiant"
@@ -252,8 +251,7 @@ export function LoginScreen() {
                 secureTextEntry={!passwordVisible}
                 autoCapitalize="none"
                 autoCorrect={false}
-                autoComplete="password"
-                textContentType="password"
+                autoComplete="current-password"
                 returnKeyType="go"
                 onSubmitEditing={handleSubmit}
                 editable={!submitting}

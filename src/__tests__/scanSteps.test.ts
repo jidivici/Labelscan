@@ -1,10 +1,10 @@
 import { scanStepFromStatus } from '../services/scanSteps';
 
 describe('scanStepFromStatus', () => {
-  it('submitting: step 1 active, tap disabled', () => {
+  it('submitting: step 1 active and detail remains accessible', () => {
     const view = scanStepFromStatus('submitting', false);
     expect(view.steps).toEqual(['active', 'pending', 'pending']);
-    expect(view.openable).toBe(false);
+    expect(view.openable).toBe(true);
   });
 
   it('extracting (ocrDone=false): step 1 done, step 2 active as "Lecture du texte", openable', () => {
@@ -35,18 +35,18 @@ describe('scanStepFromStatus', () => {
     expect(view.openable).toBe(true);
   });
 
-  it('submit_error: step 1 errored, never openable', () => {
+  it('submit_error: step 1 errored and detail remains accessible', () => {
     const view = scanStepFromStatus('submit_error', false);
     expect(view.steps).toEqual(['error', 'pending', 'pending']);
     expect(view.activeLabel).toBe('Envoi impossible');
-    expect(view.openable).toBe(false);
+    expect(view.openable).toBe(true);
   });
 
-  it('extract_error: step 1 done, step 2 errored, never openable', () => {
+  it('extract_error: step 1 done, step 2 errored and detail remains accessible', () => {
     const view = scanStepFromStatus('extract_error', true);
     expect(view.steps).toEqual(['done', 'error', 'pending']);
     expect(view.activeLabel).toBe('Analyse impossible');
-    expect(view.openable).toBe(false);
+    expect(view.openable).toBe(true);
   });
 
   it('ocrDone has no effect outside the extracting status', () => {

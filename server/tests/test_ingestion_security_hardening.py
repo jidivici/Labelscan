@@ -83,6 +83,9 @@ def test_human_review_accepts_canonical_safety_values_and_nc() -> None:
     )
     assert validate_human_field_value("gtin", "4006381333931") == "4006381333931"
     assert validate_human_field_value("gtin", "93000502900204") == "93000502900204"
+    # Preserve an exact supplier barcode payload even when its AI (01) check digit
+    # does not follow the standard GTIN modulo rule.
+    assert validate_human_field_value("gtin", "93000502900206") == "93000502900206"
     assert validate_human_field_value("gtin", "nc") == "NC"
 
 

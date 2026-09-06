@@ -26,4 +26,9 @@ describe('shouldHighlightReviewField', () => {
   it('does not highlight a valid filled value', () => {
     expect(shouldHighlightReviewField('03/08/2026', 'present', false)).toBe(false);
   });
+
+  it('never asks the operator to confirm an exact GS1 scan', () => {
+    expect(requiresExplicitHumanConfirmation('invalid', 'gs1')).toBe(false);
+    expect(shouldHighlightReviewField('93000502900206', 'invalid', false, 'gs1')).toBe(false);
+  });
 });

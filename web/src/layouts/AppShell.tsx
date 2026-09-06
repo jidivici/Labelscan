@@ -113,6 +113,11 @@ function ShellContent({ children }: { children: ReactNode }) {
   const retainAdministrationScope = administrationScope.size ? `?${administrationScope.toString()}` : '';
   const defaultProfession = firstAccessibleProfession(session);
   const canSelectScope = session.user.role === 'admin' || session.user.role === 'super_admin';
+  // Manager routes such as /compte do not carry a :profession parameter. Keep the
+  // assigned métier visible in the sidebar instead of making the scope disappear.
+  const displayedPortal = currentPortal ?? (
+    !canSelectScope && defaultProfession ? portalDefinition(defaultProfession) : null
+  );
   const arrivalsPath = allProfessions
     ? `${base}/portails/tous/arrivages`
     : currentPortal
@@ -157,7 +162,7 @@ function ShellContent({ children }: { children: ReactNode }) {
               options={[{ value: 'tous', label: 'Tous les métiers' }, ...availablePortals.map((portal) => ({ value: portal.code, label: portal.shortLabel }))]}
               onChange={(next) => changeProfession(next as ProfessionCode | 'tous')}
             />
-          : currentPortal && <div className="scope-value"><span>Métier</span><strong>{currentPortal.shortLabel}</strong></div>}
+          : displayedPortal && <div className="scope-value"><span>Métier</span><strong>{displayedPortal.shortLabel}</strong></div>}
         {canSelectScope
           ? <SidebarScopeSelect
               label="Magasin"
@@ -188,7 +193,7 @@ function ShellContent({ children }: { children: ReactNode }) {
       <header className="topbar">
         <button ref={menuButtonRef} type="button" className="menu-button" onClick={() => setMobileOpen(true)} aria-label="Ouvrir le menu" aria-controls="app-sidebar" aria-expanded={mobileOpen}><span /><span /><span /></button>
         <div className="breadcrumb"><strong>{location.includes('administration') ? 'Administration' : allProfessions ? 'Tous les métiers' : currentPortal?.label ?? 'Portails'}</strong></div>
-        {(canSelectScope || assignedStore) && <div className="topbar-context"><span className="context-dot" style={{ background: currentPortal?.accent ?? (allProfessions ? '#087f72' : '#72817f') }} /><span>{canSelectScope ? (selectedStoreCode ? stores.find((store) => store.code === selectedStoreCode)?.name ?? selectedStoreCode : 'Tous les magasins') : assignedStore}</span></div>}
+        {(canSelectScope || assignedStore) && <div className="topbar-context"><span className="context-dot" style={{ background: displayedPortal?.accent ?? (allProfessions ? '#087f72' : '#72817f') }} /><span>{canSelectScope ? (selectedStoreCode ? stores.find((store) => store.code === selectedStoreCode)?.name ?? selectedStoreCode : 'Tous les magasins') : assignedStore}</span></div>}
       </header>
       <main className="main-content">{children}</main>
     </div>

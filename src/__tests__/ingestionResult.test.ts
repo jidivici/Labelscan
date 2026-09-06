@@ -123,10 +123,12 @@ describe('waitForIngestionResult', () => {
   });
 
   it('propagates failed/timeout/error/aborted kinds unchanged', async () => {
-    mockedGet.mockResolvedValueOnce(
-      statusResponse({ status: 'extraction_failed' as IngestionStatusResponse['status'] }),
-    );
+    const ingestion = statusResponse({
+      status: 'extraction_failed' as IngestionStatusResponse['status'],
+      recapture_required: false,
+    });
+    mockedGet.mockResolvedValueOnce(ingestion);
     const result = await waitForIngestionResult('ing-1');
-    expect(result).toEqual({ kind: 'failed', status: 'extraction_failed' });
+    expect(result).toEqual({ kind: 'failed', status: 'extraction_failed', ingestion });
   });
 });

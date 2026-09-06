@@ -3,8 +3,8 @@
  *
  * Fixed height (PENDING_CARD_HEIGHT) so the FlatList's getItemLayout stays exact with
  * these cards in the header. The card is tappable while EXTRACTING as well as when
- * ready → opens Review live (3-step progress box + fields filling in). An errored card
- * shows a Réessayer button instead.
+ * ready → opens Review live (3-step progress box + fields filling in). Errored cards
+ * remain openable for diagnosis and also expose a Réessayer button.
  *
  * Deletion (workflow v2.1) = LEFT SWIPE revealing a red Supprimer — the exact same
  * gesture as ArticleCard, so the whole home list shares ONE delete affordance. Works
@@ -165,7 +165,7 @@ export const PendingScanCard = React.memo(function PendingScanCard({
       : 'Touchez pour compléter'
     : extracting
       ? 'Touchez pour suivre'
-      : 'Envoi en cours';
+      : 'Touchez pour voir le détail';
 
   return (
     <View style={styles.wrapper}>

@@ -1,4 +1,5 @@
 import {
+  allowsNotCommunicated,
   canonicalizeFinalReviewValue,
   isValidGtin,
   validateFinalReviewValues,
@@ -21,14 +22,15 @@ describe('validateFinalReviewValues', () => {
     })).toEqual([]);
   });
 
-  it('requires complete real dates and a valid GTIN checksum', () => {
+  it('requires complete real dates and a structurally valid GTIN', () => {
     expect(isValidGtin('3017620422003')).toBe(true);
-    expect(isValidGtin('3017620422004')).toBe(false);
+    expect(isValidGtin('3017620422004')).toBe(true);
+    expect(isValidGtin('30176204220')).toBe(false);
     expect(validateFinalReviewValues({
       expiry_date: '31/08/2026',
       packaging_date: '2026-08',
       preparation_date: '2026-02-31',
-      gtin: '3017620422004',
+      gtin: '30176204220',
     })).toEqual(expect.arrayContaining([
       expect.objectContaining({ fieldName: 'expiry_date' }),
       expect.objectContaining({ fieldName: 'packaging_date' }),
@@ -49,6 +51,8 @@ describe('validateFinalReviewValues', () => {
     expect(canonicalizeFinalReviewValue('origin_country', 'Cafe\u0301')).toBe('Café');
     expect(canonicalizeFinalReviewValue('production_method', 'Pêche sauvage')).toBe('wild_caught');
     expect(canonicalizeFinalReviewValue('production_method', 'Élevage')).toBe('farmed');
+    expect(canonicalizeFinalReviewValue('allergens', 'Poisson\n\n- Crustacés'))
+      .toBe('Poisson, Crustacés');
   });
 
   it('rejects invalid weight and Celsius ranges', () => {
@@ -95,16 +99,35 @@ describe('validateFinalReviewValues', () => {
     ]);
   });
 
-  it('accepts NC for every strict field but never accepts blanks', () => {
+  it('accepts NC only for non-critical fields and never accepts blanks', () => {
     expect(validateFinalReviewValues({
-      expiry_date: 'NC',
-      production_method: 'nc',
       gtin: 'NC',
       weight: 'NC',
-      storage_temperature: 'NC',
     })).toEqual([]);
     expect(validateFinalReviewValues({ weight: '  ' })).toEqual([
       expect.objectContaining({ fieldName: 'weight' }),
     ]);
+  });
+
+  it('requires real values for critical traceability fields', () => {
+    const required = [
+      'commercial_designation',
+      'expiry_date',
+      'packaging_date',
+      'FAO_area',
+      'origin_country',
+      'health_mark',
+      'batch_number',
+      'production_method',
+      'storage_temperature',
+    ];
+    expect(required.every((fieldName) => !allowsNotCommunicated(fieldName))).toBe(true);
+    expect(allowsNotCommunicated('allergens')).toBe(true);
+
+    const errors = validateFinalReviewValues(
+      Object.fromEntries(required.map((fieldName) => [fieldName, 'NC'])),
+    );
+    expect(errors.map((error) => error.fieldName)).toEqual(required);
+    expect(errors.every((error) => error.message.includes('NC n’est pas autorisée'))).toBe(true);
   });
 });

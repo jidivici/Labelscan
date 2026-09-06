@@ -1,8 +1,27 @@
-import { parseGs1, formatGs1WeightKg, gs1FieldValues } from '../services/gs1';
+import {
+  parseGs1,
+  formatGs1WeightKg,
+  gs1FieldValues,
+  preferredBarcodePayload,
+  barcodePayloadAtShutter,
+} from '../services/gs1';
 
 const FNC1 = '\x1d';
 
 describe('GS1 parser (client mirror of server domain/gs1.py)', () => {
+  it('prefers the Android raw payload so FNC1 separators are preserved', () => {
+    const raw = '0193000502900206703025034108593' + FNC1 + '10107083';
+    expect(preferredBarcodePayload({ data: '93000502900206', raw })).toBe(raw);
+    expect(preferredBarcodePayload({ data: '93000502900206' })).toBe('93000502900206');
+  });
+
+  it('never attaches an expired barcode to the next photo', () => {
+    const candidate = { result: { data: '0193000502900206' }, detectedAt: 1_000 };
+    expect(barcodePayloadAtShutter(candidate, 1_500)).toBe('0193000502900206');
+    expect(barcodePayloadAtShutter(candidate, 1_751)).toBeUndefined();
+    expect(barcodePayloadAtShutter(null, 1_500)).toBeUndefined();
+  });
+
   it('parenthesised: GTIN + lot + expiry', () => {
     const r = parseGs1('(01)03700161210047(17)251231(10)LOT123');
     expect(r.gtin).toBe('03700161210047');

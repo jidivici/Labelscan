@@ -370,6 +370,53 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].ingestionId).toBe('ing-2');
   });
 
+  it('surfaces a retryable upload failure instead of spinning forever', async () => {
+    const op = fakeOp();
+    mockedEnqueueCapture.mockResolvedValue(op);
+    mockedExecute.mockResolvedValueOnce({ kind: 'pending', code: 'NETWORK_ERROR' });
+
+    await enqueueScan({
+      tempUri: 'file:///cache/offline.jpg',
+      capturedAt: '2026-09-06T12:00:00Z',
+    });
+    await flush();
+
+    expect(getSnapshot().scans[0]).toMatchObject({
+      status: 'submit_error',
+      submitOpId: op.id,
+      errorCode: 'NETWORK_ERROR',
+    });
+  });
+
+  it('retries a transient upload with the existing idempotent operation', async () => {
+    const op = fakeOp();
+    mockedEnqueueCapture.mockResolvedValue(op);
+    mockedExecute.mockResolvedValueOnce({ kind: 'pending', code: 'TIMEOUT' });
+
+    const scan = await enqueueScan({
+      tempUri: 'file:///cache/retry.jpg',
+      capturedAt: '2026-09-06T12:00:00Z',
+    });
+    await flush();
+    expect(getSnapshot().scans[0].status).toBe('submit_error');
+
+    mockedGetOp.mockResolvedValue(op);
+    mockedExecute.mockResolvedValueOnce({
+      kind: 'succeeded',
+      ingestionId: 'ing-retried',
+      replayed: false,
+    });
+    await retryScan(scan.id);
+    await flush();
+
+    expect(mockedEnqueueCapture).toHaveBeenCalledTimes(1);
+    expect(mockedExecute).toHaveBeenLastCalledWith(op.id);
+    expect(getSnapshot().scans[0]).toMatchObject({
+      status: 'extracting',
+      ingestionId: 'ing-retried',
+    });
+  });
+
   it('poll ready without a loadable run becomes retryable and stays non-confirmable', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
@@ -405,6 +452,21 @@ describe('scanQueue', () => {
     expect(getSnapshot().results).toBeDefined();
   });
 
+  it('does not override an explicit server decision that the photo is reviewable', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-reviewable', replayed: false });
+    mockedWait.mockResolvedValue({
+      kind: 'ready',
+      ingestion: { ingestion_id: 'ing-reviewable', recapture_required: false } as never,
+      run: { fields: [] } as never,
+    });
+
+    await enqueueScan({ tempUri: 'file:///cache/reviewable.jpg', capturedAt: '2026-08-20T10:00:00Z' });
+    await flush(6);
+
+    expect(getSnapshot().scans[0].status).toBe('ready');
+  });
+
   it('persists the recapture decision and restores it safely after an offline restart', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-offline-bad', replayed: false });
@@ -432,20 +494,38 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].status).toBe('recapture_required');
   });
 
-  it('a terminal extraction failure requires a new photo instead of re-polling', async () => {
+  it('a terminal extraction failure stays retryable unless the server rejects the photo', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
-    mockedWait.mockResolvedValueOnce({ kind: 'failed', status: 'extraction_failed' });
+    mockedWait.mockResolvedValueOnce({
+      kind: 'failed',
+      status: 'extraction_failed',
+      ingestion: { recapture_required: false } as never,
+    });
 
     const scan = await enqueueScan({ tempUri: 'file:///cache/x.jpg', capturedAt: '2026-07-05T10:00:00Z' });
     await flush(6);
-    expect(getSnapshot().scans[0].status).toBe('recapture_required');
+    expect(getSnapshot().scans[0].status).toBe('extract_error');
 
     const pollCalls = mockedWait.mock.calls.length;
     await retryScan(scan.id);
     await flush();
+    expect(getSnapshot().scans[0].status).toBe('extracting');
+    expect(mockedWait).toHaveBeenCalledTimes(pollCalls + 1);
+  });
+
+  it('requires a new photo only when the server explicitly marks it for recapture', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-blurry', replayed: false });
+    mockedWait.mockResolvedValueOnce({
+      kind: 'failed',
+      status: 'ocr_failed',
+      ingestion: { recapture_required: true } as never,
+    });
+
+    await enqueueScan({ tempUri: 'file:///cache/blurry.jpg', capturedAt: '2026-07-05T10:00:00Z' });
+    await flush(6);
     expect(getSnapshot().scans[0].status).toBe('recapture_required');
-    expect(mockedWait).toHaveBeenCalledTimes(pollCalls);
   });
 
   it('caps concurrent polls at 3 and drains the FIFO wait list as slots free up', async () => {

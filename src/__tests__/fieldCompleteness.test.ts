@@ -50,7 +50,7 @@ describe('fieldCompleteness', () => {
     expect(normalizeFinalReviewValue('  Cabillaud  ')).toBe('Cabillaud');
   });
 
-  it('keeps a machine absence unconfirmed until the operator explicitly chooses NC', () => {
+  it('keeps a required designation incomplete even when its value is NC', () => {
     const extractedValue: string | null = null;
 
     const initialDraft = initialHumanReviewValue(extractedValue, 'missing');
@@ -58,7 +58,7 @@ describe('fieldCompleteness', () => {
     expect(filledCountFromValues({ commercial_designation: initialDraft })).toBe(0);
 
     const explicitHumanDecision = NOT_COMMUNICATED_VALUE;
-    expect(filledCountFromValues({ commercial_designation: explicitHumanDecision })).toBe(1);
+    expect(filledCountFromValues({ commercial_designation: explicitHumanDecision })).toBe(0);
     expect(extractedValue).toBeNull();
   });
 
@@ -191,6 +191,21 @@ describe('fieldCompleteness', () => {
     expect(filledCountFromValues(null)).toBe(0);
     expect(filledCountFromValues({})).toBe(0);
     expect(filledCountFromValues(undefined)).toBe(0);
+  });
+
+  it('does not count NC as complete for fields that require a real value', () => {
+    expect(filledCountFromValues({
+      commercial_designation: 'NC',
+      expiry_date: 'NC',
+      packaging_date: 'NC',
+      FAO_area: 'NC',
+      origin_country: 'NC',
+      health_mark: 'NC',
+      batch_number: 'NC',
+      production_method: 'NC',
+      storage_temperature: 'NC',
+      allergens: 'NC',
+    })).toBe(1);
   });
 
   it('a run can reach the full /16 when every canonical field is present', () => {

@@ -60,6 +60,10 @@ import { persistPendingPhoto, deletePendingPhoto } from '../services/storage';
 import { logLatency } from '../services/latencyLog';
 import { computeFrameCrop } from '../services/frameCrop';
 import { physicalRotationForLandscapeOutput } from '../services/captureOrientation';
+import {
+  BARCODE_CAPTURE_FRESH_MS,
+  barcodePayloadAtShutter,
+} from '../services/gs1';
 import { colors, spacing, typography } from '../theme';
 import { RootStackParamList } from '../navigation/RootNavigator';
 import { useAuth } from '../context/AuthContext';
@@ -115,7 +119,11 @@ export function CameraScreen() {
 
   const cameraRef = useRef<CameraView>(null);
   const flashRef = useRef<FlashOverlayRef>(null);
-  const lastBarcodeRef = useRef<BarcodeScanningResult | null>(null);
+  const lastBarcodeRef = useRef<{
+    result: BarcodeScanningResult;
+    detectedAt: number;
+  } | null>(null);
+  const barcodeExpiryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // `width > height` is not a reliable indicator on iOS: the camera may preserve
   // a portrait-sized pixel buffer while the phone was held landscape. Expo Camera
   // supplies the physical orientation independently of the locked app UI.
@@ -131,6 +139,7 @@ export function CameraScreen() {
   useEffect(() => {
     return () => {
       mountedRef.current = false;
+      if (barcodeExpiryRef.current) clearTimeout(barcodeExpiryRef.current);
     };
   }, []);
 
@@ -138,6 +147,7 @@ export function CameraScreen() {
   useEffect(() => {
     if (isFocused) {
       lastBarcodeRef.current = null;
+      if (barcodeExpiryRef.current) clearTimeout(barcodeExpiryRef.current);
       setFrameState('ready');
     }
   }, [isFocused]);
@@ -154,6 +164,10 @@ export function CameraScreen() {
     // `taking` is the ONLY lock: N scans in flight is the point of the chained
     // workflow, so nothing here waits on the previous submit or extraction.
     if (!cameraRef.current || taking) return;
+    const shutterAt = Date.now();
+    const barcodeRaw = barcodePayloadAtShutter(lastBarcodeRef.current, shutterAt);
+    lastBarcodeRef.current = null;
+    if (barcodeExpiryRef.current) clearTimeout(barcodeExpiryRef.current);
     // Freeze the physical orientation at the shutter press. A user turning the
     // phone while the JPEG is written must not change this photo's transform.
     const orientationAtShutter = captureOrientationRef.current;
@@ -198,9 +212,7 @@ export function CameraScreen() {
     if (!photo || !mountedRef.current) return;
 
     const capturedPhoto = photo;
-    const capturedAt = new Date().toISOString();
-    const barcodeRaw = lastBarcodeRef.current?.data;
-    lastBarcodeRef.current = null;
+    const capturedAt = new Date(shutterAt).toISOString();
 
     void (async () => {
       let durableRawUri: string | null = null;
@@ -340,7 +352,12 @@ export function CameraScreen() {
   const handleBarcodeScanned = useCallback(
     (result: BarcodeScanningResult) => {
       if (taking) return;
-      lastBarcodeRef.current = result;
+      lastBarcodeRef.current = { result, detectedAt: Date.now() };
+      if (barcodeExpiryRef.current) clearTimeout(barcodeExpiryRef.current);
+      barcodeExpiryRef.current = setTimeout(() => {
+        lastBarcodeRef.current = null;
+        if (mountedRef.current) setFrameState('ready');
+      }, BARCODE_CAPTURE_FRESH_MS);
       setFrameState('barcodeFound');
     },
     [taking]

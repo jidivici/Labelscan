@@ -76,8 +76,8 @@ normalization. Use color to communicate state, not an unexplained AI score.
 
 ## Mobile development
 
-The application is pinned to Expo SDK 54 and the package versions in `package.json`. Use
-the [versioned Expo SDK 54 reference](https://docs.expo.dev/versions/v54.0.0/) rather than
+The application is pinned to Expo SDK 57 and the package versions in `package.json`. Use
+the [versioned Expo SDK 57 reference](https://docs.expo.dev/versions/v57.0.0/) rather than
 examples for a newer SDK.
 
 ### Structure a mobile change

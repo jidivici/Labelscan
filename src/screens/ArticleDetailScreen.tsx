@@ -59,12 +59,14 @@ import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
 import { queryClient } from '../services/queryClient';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
 import { RotatedPhoto } from '../components/RotatedPhoto';
+import { ProductionMethodSelector } from '../components/ProductionMethodSelector';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import { useAuth } from '../context/AuthContext';
 import { useAuthenticatedImageSource } from '../hooks/useAuthenticatedImageSource';
 import { catalogQueryKey } from '../services/catalogApi';
 import { operatorContextKey } from '../services/authStorage';
+import { suggestAllergen } from '../services/allergenSuggestions';
 import {
   canonicalizeFinalReviewValue,
   validateFinalReviewValues,
@@ -137,7 +139,6 @@ const LONG_FORM_FIELDS = new Set([
   'product_description',
   'ingredients',
   'additives',
-  'allergens',
   'use_instructions',
   'reheating_instructions',
   'raw_warnings',
@@ -224,7 +225,7 @@ function TempRangeEditor({ draft, onChange }: { draft: string; onChange: (t: str
             setMin(t);
             onChange(formatTemp(t, max));
           }}
-          keyboardType="numbers-and-punctuation"
+          keyboardType="numeric"
           placeholder="min"
           placeholderTextColor={colors.onSurfaceVariant}
           style={[typography.bodyLarge, styles.editInput, styles.affixInput]}
@@ -237,7 +238,7 @@ function TempRangeEditor({ draft, onChange }: { draft: string; onChange: (t: str
             setMax(t);
             onChange(formatTemp(min, t));
           }}
-          keyboardType="numbers-and-punctuation"
+          keyboardType="numeric"
           placeholder="max"
           placeholderTextColor={colors.onSurfaceVariant}
           style={[typography.bodyLarge, styles.editInput, styles.affixInput]}
@@ -255,12 +256,14 @@ function FieldCard({
   editing,
   draft,
   onChange,
+  suggestion,
   last,
 }: {
   field: ArticleField;
   editing: boolean;
   draft: string;
   onChange: (name: string, text: string) => void;
+  suggestion?: string | null;
   last: boolean;
 }) {
   const name = field.field_name;
@@ -279,26 +282,45 @@ function FieldCard({
       <View style={styles.cardBody}>
         <Text style={[typography.labelSmall, styles.cardLabel]}>{fieldLabelFr(name)}</Text>
         {editable ? (
-          name === 'storage_temperature' && normalizeFinalReviewValue(draft) !== NOT_COMMUNICATED_VALUE ? (
+          name === 'production_method' ? (
+            <ProductionMethodSelector value={draft} onChange={emit} />
+          ) : name === 'storage_temperature' ? (
             <TempRangeEditor draft={draft} onChange={emit} />
           ) : (
-            <TextInput
-              value={draft}
-              onChangeText={emit}
-              placeholder="Saisir une valeur"
-              placeholderTextColor={colors.onSurfaceVariant}
-              style={[
-                typography.bodyLarge,
-                styles.editInput,
-                styles.editInputText,
-                LONG_FORM_FIELDS.has(name) && styles.editInputMultiline,
-              ]}
-              autoCapitalize="words"
-              autoCorrect={false}
-              multiline={LONG_FORM_FIELDS.has(name)}
-              returnKeyType={LONG_FORM_FIELDS.has(name) ? 'default' : 'done'}
-              accessibilityLabel={`Champ ${fieldLabelFr(name)}`}
-            />
+            <>
+              <TextInput
+                value={draft}
+                onChangeText={emit}
+                placeholder="Saisir une valeur"
+                placeholderTextColor={colors.onSurfaceVariant}
+                style={[
+                  typography.bodyLarge,
+                  styles.editInput,
+                  styles.editInputText,
+                  LONG_FORM_FIELDS.has(name) && styles.editInputMultiline,
+                ]}
+                autoCapitalize="words"
+                autoCorrect={false}
+                multiline={LONG_FORM_FIELDS.has(name)}
+                returnKeyType={LONG_FORM_FIELDS.has(name) ? 'default' : 'done'}
+                accessibilityLabel={`Champ ${fieldLabelFr(name)}`}
+              />
+              {name === 'allergens' &&
+              (!draft.trim() || draft.trim().toUpperCase() === NOT_COMMUNICATED_VALUE) &&
+              suggestion ? (
+                <Pressable
+                  onPress={() => emit(suggestion)}
+                  style={styles.allergenSuggestion}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Utiliser la suggestion ${suggestion}`}
+                >
+                  <MaterialCommunityIcons name="lightbulb-outline" size={14} color={colors.primary} />
+                  <Text style={[typography.labelSmall, styles.allergenSuggestionText]}>
+                    Suggestion : {suggestion}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </>
           )
         ) : (
           <>
@@ -438,6 +460,15 @@ export function ArticleDetailScreen() {
   const groupedFields = useMemo(
     () => groupFields(article?.fields ?? [], articleProfile.groups),
     [article, articleProfile.groups],
+  );
+  const allergenSuggestion = useMemo(
+    () => suggestAllergen(
+      (article?.fields ?? []).map((field) => ({
+        field_name: field.field_name,
+        value: drafts[field.field_name] ?? field.value,
+      })),
+    ),
+    [article, drafts],
   );
   const fieldCount = useMemo(
     () => groupedFields.reduce((total, group) => total + group.fields.length, 0),
@@ -803,7 +834,7 @@ export function ArticleDetailScreen() {
                   resizeMode="cover"
                   halfTurn={article.photo_rotation_degrees === 180}
                   baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
-                  style={StyleSheet.absoluteFillObject}
+                  style={StyleSheet.absoluteFill}
                 />
                 <View style={styles.photoHint}>
                   <MaterialCommunityIcons name="arrow-expand" size={14} color={colors.onPrimary} />
@@ -931,6 +962,7 @@ export function ArticleDetailScreen() {
                         displayFinalFieldValue(field.field_name, field.value)
                       }
                       onChange={handleFieldChange}
+                      suggestion={field.field_name === 'allergens' ? allergenSuggestion : undefined}
                       last={index === group.fields.length - 1}
                     />
                   ))}
@@ -1392,6 +1424,22 @@ const styles = StyleSheet.create({
   editInputMultiline: {
     minHeight: 96,
     textAlignVertical: 'top',
+  },
+  allergenSuggestion: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: spacing.xs,
+    marginTop: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    borderRadius: radius.full,
+    backgroundColor: colors.primaryContainer,
+  },
+  allergenSuggestionText: {
+    color: colors.onPrimaryContainer,
   },
   affixRow: {
     flexDirection: 'row',

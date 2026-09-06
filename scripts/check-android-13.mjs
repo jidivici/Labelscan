@@ -3,6 +3,7 @@ import fs from 'node:fs';
 
 const require = createRequire(import.meta.url);
 const base = require('../app.json');
+const packageJson = require('../package.json');
 const resolveConfig = require('../app.config.js');
 const eas = require('../eas.json');
 const sourceConfig = fs.readFileSync(new URL('../src/config.ts', import.meta.url), 'utf8');
@@ -30,7 +31,7 @@ const developmentAndroidBuild = developmentConfig.plugins.find(
 )?.[1]?.android;
 const blockedPermissions = config.android?.blockedPermissions ?? [];
 const checks = [
-  ['Expo SDK 54', base.expo.sdkVersion === '54.0.0'],
+  ['Expo SDK 57', /^\^?57\./.test(packageJson.dependencies.expo)],
   ['Android minimum API 33 (Android 13)', androidBuild?.minSdkVersion === 33],
   ['HTTP clair interdit en production', androidBuild?.usesCleartextTraffic === false],
   ['Repli sans profil interdit le HTTP clair', fallbackAndroidBuild?.usesCleartextTraffic === false],
@@ -67,7 +68,7 @@ const checks = [
     sourceConfig.includes("DEFAULT_RELEASE_API_BASE_URL = 'https://label-scan.fr'"),
   ],
   [
-    'Transport JSON Android Expo SDK 54',
+    'Transport JSON Android Expo SDK 57',
     apiClient.includes("from 'expo/fetch'") &&
       apiClient.includes("process.env.EXPO_OS === 'android'"),
   ],

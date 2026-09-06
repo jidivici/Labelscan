@@ -72,7 +72,7 @@ design.
 ### Prerequisites
 
 - Node.js **22.12 or newer on a supported LTS release** and npm. CI and the container
-  build currently use Node 22; Expo SDK 54 targets React Native 0.81 and React 19.1.
+  build currently use Node 22; Expo SDK 57 targets React Native 0.86 and React 19.2.
 - Python 3.11 or newer for backend development outside Docker.
 - Docker with Compose for PostgreSQL, the API, demo data, and extraction workers.
 - PostgreSQL 16 command-line binaries when running `server/scripts/run_local_proofs.sh`;
@@ -81,8 +81,8 @@ design.
   These keys stay on the server and are never included in the mobile bundle.
 - Android Studio or Xcode when building a native development app.
 
-This repository is pinned to Expo SDK 54. Use the
-[versioned Expo SDK 54 documentation](https://docs.expo.dev/versions/v54.0.0/) and keep
+This repository is pinned to Expo SDK 57. Use the
+[versioned Expo SDK 57 documentation](https://docs.expo.dev/versions/v57.0.0/) and keep
 the package versions already recorded in `package.json`.
 
 ### 1. Prepare local configuration

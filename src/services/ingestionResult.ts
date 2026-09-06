@@ -18,7 +18,7 @@ import type { ExtractionRunResponse, IngestionStatusResponse } from '../types/ap
 
 export type IngestionResult =
   | { kind: 'ready'; ingestion: IngestionStatusResponse; run: ExtractionRunResponse | null }
-  | { kind: 'failed'; status: string }
+  | { kind: 'failed'; status: string; ingestion: IngestionStatusResponse }
   | { kind: 'timeout' } // bounded polling exhausted while still processing
   | { kind: 'aborted' } // cancelled by the caller's AbortSignal
   | { kind: 'error'; code: string; message: string };

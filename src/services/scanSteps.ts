@@ -18,7 +18,7 @@ export interface ScanStepsView {
   steps: [ScanStepStatus, ScanStepStatus, ScanStepStatus];
   /** Label for whichever step is currently active or errored. */
   activeLabel: string;
-  /** True if the card is tappable (status 'ready' → opens Review). */
+  /** True if the card is tappable and can open its live/error detail. */
   openable: boolean;
 }
 
@@ -35,7 +35,7 @@ const LABELS = {
 export function scanStepFromStatus(status: PendingScanStatus, ocrDone: boolean): ScanStepsView {
   switch (status) {
     case 'submitting':
-      return { steps: ['active', 'pending', 'pending'], activeLabel: LABELS.submitting, openable: false };
+      return { steps: ['active', 'pending', 'pending'], activeLabel: LABELS.submitting, openable: true };
     case 'extracting':
       // Openable DURING analysis: Review opens mid-extraction and shows the 3-step
       // progress box + the fields filling in live (GS1 → interim → LLM run).
@@ -49,8 +49,8 @@ export function scanStepFromStatus(status: PendingScanStatus, ocrDone: boolean):
     case 'recapture_required':
       return { steps: ['done', 'error', 'pending'], activeLabel: LABELS.recapture, openable: true };
     case 'submit_error':
-      return { steps: ['error', 'pending', 'pending'], activeLabel: LABELS.submitError, openable: false };
+      return { steps: ['error', 'pending', 'pending'], activeLabel: LABELS.submitError, openable: true };
     case 'extract_error':
-      return { steps: ['done', 'error', 'pending'], activeLabel: LABELS.extractError, openable: false };
+      return { steps: ['done', 'error', 'pending'], activeLabel: LABELS.extractError, openable: true };
   }
 }

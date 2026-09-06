@@ -342,18 +342,26 @@ async function runPoll(
         status:
           result.run == null
             ? 'extract_error'
-            : hasExploitableExtraction(result.run.fields, findScan(id)?.tradeCode)
-              ? 'ready'
-              : 'recapture_required',
+            : result.ingestion.recapture_required === true
+              ? 'recapture_required'
+              : result.ingestion.recapture_required === false
+                ? 'ready'
+                : hasExploitableExtraction(result.run.fields, findScan(id)?.tradeCode)
+                  ? 'ready'
+                  : 'recapture_required',
         ocrDone: true,
         errorCode: result.run ? undefined : 'FIELDS_UNAVAILABLE',
       });
       return false;
     case 'failed':
       pollStartedAt.delete(id);
-      // These are terminal server states. Re-polling the same ingestion cannot repair
-      // its immutable source image; guide the operator to a fresh capture instead.
-      updateScan(id, { status: 'recapture_required', errorCode: result.status });
+      // Only the backend's explicit image-quality verdict asks for a new photo.
+      // Provider/system failures remain retryable extraction errors: the mobile must
+      // never blame the captured image merely because OCR or the LLM failed.
+      updateScan(id, {
+        status: result.ingestion.recapture_required ? 'recapture_required' : 'extract_error',
+        errorCode: result.status,
+      });
       return false;
     case 'error':
       pollStartedAt.delete(id);
@@ -398,8 +406,11 @@ function handleSubmitOutcome(
     updateScan(id, { status: 'submit_error', errorCode: outcome.code });
     return;
   }
-  // 'pending': the op stays on the outbox with its backoff; the drain replays it and
-  // reconcileScanQueue() (drain hook / foreground) advances this scan when it lands.
+  // A retryable transport failure stays durable in the outbox, but the UI must not
+  // spin forever on "Envoi de la photo". Surface the failure immediately; a manual
+  // retry reuses this exact operation/idempotency key, and a foreground drain may
+  // still replay it automatically.
+  updateScan(id, { status: 'submit_error', errorCode: outcome.code });
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────────
@@ -564,8 +575,20 @@ export async function retryScan(id: string): Promise<void> {
     return;
   }
   if (scan.status === 'submit_error') {
-    // New op, new stable keys — the server dedups identical content by hash, so a
-    // retry can never create a duplicate ingestion.
+    // A transient failure leaves the original operation pending. Reuse its exact
+    // idempotency key on an explicit retry instead of creating another outbox row.
+    const existing = await getOperation(scan.submitOpId);
+    if (!workflowIsCurrent(generation, fence)) return;
+    if (existing?.status === 'pending') {
+      updateScan(id, { status: 'submitting', errorCode: undefined });
+      void executeCreateIngestionOp(existing.id).then(
+        (outcome) => handleSubmitOutcome(id, outcome, generation, fence),
+        () => undefined,
+      );
+      return;
+    }
+    // A terminal or missing operation needs a fresh outbox row. Server-side content
+    // deduplication still protects against a response lost after successful storage.
     const op = await enqueueCapture({
       fileUri: scan.photoUri,
       barcodeRaw: scan.barcodeRaw,
@@ -656,7 +679,7 @@ export async function reconcileScanQueue(): Promise<void> {
         }
         updateScan(scan.id, { reviewSyncStatus: 'pending' });
       }
-      if (scan.status === 'submitting') {
+      if (scan.status === 'submitting' || scan.status === 'submit_error') {
         const op = await getOperation(scan.submitOpId);
         if (!workflowIsCurrent(generation, fence)) return;
         if (!op) {
