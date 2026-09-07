@@ -483,25 +483,23 @@ describe('IAM bounded actions', () => {
     ));
   });
 
-  it('opens and saves the manager account without asking for the old password', async () => {
+  it('opens a password-only manager account dialog and saves without asking for the old password', async () => {
     const user = userEvent.setup();
     renderAt('/o/labelscan/administration', adminSession);
     const section = (await screen.findByRole('heading', { name: 'Managers' })).closest('section')!;
 
     await user.click(within(section).getByRole('button', { name: 'Compte de manager.lyon' }));
-    const dialog = screen.getByRole('dialog', { name: 'Nora Petit' });
-    expect(within(dialog).getByLabelText('Identifiant')).toHaveValue('manager.lyon');
-    expect(within(dialog).getByLabelText('Nom et prénom')).toHaveValue('Nora Petit');
+    const dialog = screen.getByRole('dialog', { name: 'manager.lyon' });
+    expect(within(dialog).queryByLabelText('Identifiant')).not.toBeInTheDocument();
+    expect(within(dialog).queryByLabelText('Nom et prénom')).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText('Mot de passe actuel')).not.toBeInTheDocument();
 
-    await user.clear(within(dialog).getByLabelText('Nom et prénom'));
-    await user.type(within(dialog).getByLabelText('Nom et prénom'), 'Nora Martin');
     await user.type(within(dialog).getByLabelText('Nouveau mot de passe'), 'nouveau-secret');
     await user.type(within(dialog).getByLabelText('Confirmer le nouveau mot de passe'), 'nouveau-secret');
     await user.click(within(dialog).getByRole('button', { name: 'Enregistrer le compte' }));
 
     await waitFor(() => expect(updateManagerAccount).toHaveBeenCalledWith(adminSession, manager.id, {
-      display_name: 'Nora Martin',
+      display_name: 'Nora Petit',
       new_password: 'nouveau-secret',
     }));
   });

@@ -87,15 +87,13 @@ function ManagerAccountDialog({ manager, saving, error, onClose, onSave }: {
   saving: boolean;
   error: string;
   onClose: () => void;
-  onSave: (manager: IamUser, displayName: string, newPassword?: string) => Promise<boolean>;
+  onSave: (manager: IamUser, newPassword?: string) => Promise<boolean>;
 }) {
-  const [displayName, setDisplayName] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmation, setConfirmation] = useState('');
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
 
   useEffect(() => {
-    setDisplayName(manager?.display_name ?? '');
     setNewPassword('');
     setConfirmation('');
     setFieldErrors({});
@@ -114,10 +112,7 @@ function ManagerAccountDialog({ manager, saving, error, onClose, onSave }: {
     event.preventDefault();
     if (!manager || saving) return;
     const form = event.currentTarget;
-    const name = displayName.trim();
     const nextErrors: FieldErrors = {};
-    if (!name) nextErrors.displayName = 'Renseignez le nom et le prénom.';
-    else if (name.length > 120) nextErrors.displayName = 'Le nom et le prénom ne peuvent pas dépasser 120 caractères.';
     if (newPassword.length > 128) nextErrors.newPassword = 'Le mot de passe ne peut pas dépasser 128 caractères.';
     if (newPassword !== confirmation) nextErrors.confirmation = 'Les deux nouveaux mots de passe ne correspondent pas.';
     if (Object.keys(nextErrors).length > 0) {
@@ -125,22 +120,20 @@ function ManagerAccountDialog({ manager, saving, error, onClose, onSave }: {
       focusFirstInvalidField(form, Object.keys(nextErrors));
       return;
     }
-    if (await onSave(manager, name, newPassword || undefined)) onClose();
+    if (await onSave(manager, newPassword || undefined)) onClose();
   }
 
   if (!manager) return null;
   return <div className="modal-backdrop" onMouseDown={() => !saving && onClose()}>
     <section className="modal-card manager-account-card" role="dialog" aria-modal="true" aria-labelledby="manager-account-title" onMouseDown={(event) => event.stopPropagation()}>
       <header className="manager-account-header">
-        <div><span className="eyebrow">Compte manager</span><h2 id="manager-account-title">{manager.display_name || manager.username}</h2></div>
+        <div><span className="eyebrow">Compte manager</span><h2 id="manager-account-title">{manager.username}</h2></div>
         <button type="button" className="modal-close" aria-label="Fermer" disabled={saving} onClick={onClose}>×</button>
       </header>
       <ErrorNotice message={error} />
       <form className="account-password-form" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
-        <div className="field"><label htmlFor="manager-account-username">Identifiant</label><input id="manager-account-username" value={manager.username} readOnly /></div>
-        <div className="field"><label htmlFor="manager-account-display-name">Nom et prénom</label><input id="manager-account-display-name" name="displayName" value={displayName} maxLength={120} autoFocus onChange={(event) => { setDisplayName(event.target.value); clearFieldError(setFieldErrors, 'displayName'); }} aria-invalid={Boolean(fieldErrors.displayName)} aria-describedby={fieldErrors.displayName ? 'manager-account-display-name-error' : undefined} /><FieldError id="manager-account-display-name-error" message={fieldErrors.displayName} /></div>
         <div className="manager-password-section"><strong>Modifier le mot de passe</strong><p>Laissez les champs vides pour conserver le mot de passe actuel.</p></div>
-        <PasswordField id="manager-account-new-password" name="newPassword" label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} autoComplete="new-password" preserveAutofill error={fieldErrors.newPassword} onClearError={() => clearFieldError(setFieldErrors, 'newPassword')} />
+        <PasswordField id="manager-account-new-password" name="newPassword" label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} autoFocus autoComplete="new-password" preserveAutofill error={fieldErrors.newPassword} onClearError={() => clearFieldError(setFieldErrors, 'newPassword')} />
         <PasswordField id="manager-account-password-confirmation" name="confirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} autoComplete="new-password" preserveAutofill error={fieldErrors.confirmation} onClearError={() => clearFieldError(setFieldErrors, 'confirmation')} />
         <div className="form-actions"><button type="button" className="button secondary" disabled={saving} onClick={onClose}>Annuler</button><button type="submit" className="button primary" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer le compte'}</button></div>
       </form>
@@ -353,18 +346,18 @@ export function AdminPage() {
     }
   }
 
-  async function saveManagerAccount(manager: IamUser, displayName: string, newPassword?: string): Promise<boolean> {
+  async function saveManagerAccount(manager: IamUser, newPassword?: string): Promise<boolean> {
     if (!session) return false;
     setSaving(true);
     setSuccess('');
     setError('');
     try {
       await updateManagerAccount(session, manager.id, {
-        display_name: displayName,
+        display_name: manager.display_name,
         ...(newPassword ? { new_password: newPassword } : {}),
       });
       await load();
-      setSuccess(`Le compte de ${displayName} a été mis à jour.`);
+      setSuccess(`Le compte de ${manager.username} a été mis à jour.`);
       return true;
     } catch (cause) {
       setError(message(cause));
