@@ -1997,9 +1997,11 @@ components:
     ChangePasswordRequest:
       properties:
         current_password:
-          type: string
-          maxLength: 128
-          minLength: 1
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+          - type: 'null'
           title: Current Password
         new_password:
           type: string
@@ -2009,7 +2011,6 @@ components:
       additionalProperties: false
       type: object
       required:
-      - current_password
       - new_password
       title: ChangePasswordRequest
     ConfirmIngestionResponse:
