@@ -170,3 +170,21 @@ def test_long_poll_concurrency_limits_and_release(monkeypatch):
 
     limits.release_hold("alice")
     limits.acquire_hold("carol")
+
+
+def test_default_ingestion_limit_accepts_forty_arrivals_in_ten_minutes(monkeypatch):
+    monkeypatch.delenv("LABELSCAN_INGESTION_BURST_LIMIT", raising=False)
+    monkeypatch.delenv("LABELSCAN_INGESTION_BURST_WINDOW_SECONDS", raising=False)
+    monkeypatch.delenv("LABELSCAN_INGESTION_SUSTAINED_LIMIT", raising=False)
+    monkeypatch.delenv("LABELSCAN_INGESTION_SUSTAINED_WINDOW_SECONDS", raising=False)
+    limits = RateLimits()
+
+    for _ in range(40):
+        limits.check_ingestion("receiving-operator")
+
+    # The default keeps operational headroom above the requested workload.
+    for _ in range(20):
+        limits.check_ingestion("receiving-operator")
+    with pytest.raises(LimitExceeded) as limited:
+        limits.check_ingestion("receiving-operator")
+    assert limited.value.scope == "ingestion_burst"

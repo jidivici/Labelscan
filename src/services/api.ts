@@ -511,6 +511,23 @@ export function getIngestionStatus(
   return apiRequest<IngestionStatusResponse>(path, opts);
 }
 
+export interface RetryExtractionResponse {
+  ingestion_id: string;
+  status: string;
+  replayed: boolean;
+}
+
+/** Queue a fresh server analysis using the ingestion's already-stored source photo. */
+export function retryIngestionAnalysis(
+  ingestionId: string,
+  options: RequestOptions = {},
+): Promise<RetryExtractionResponse> {
+  return apiRequest<RetryExtractionResponse>(
+    `/v1/ingestions/${encodeURIComponent(ingestionId)}/retry`,
+    { ...options, method: 'POST' },
+  );
+}
+
 /** Response of POST /v1/ingestions/{id}/confirm (the finalized review state). */
 export interface ConfirmIngestionResponse {
   ingestion_id: string;

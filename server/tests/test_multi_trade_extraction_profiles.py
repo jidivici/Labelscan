@@ -98,6 +98,23 @@ def test_llm_schema_and_prompt_are_built_from_the_selected_profile(
     assert profile.display_name in prompt
     assert all(field_name in prompt for field_name in profile.specific_fields)
     assert "FAO_area" not in prompt
+    assert "MANDATORY COMPLETE-LABEL PASS" in prompt
+    assert "audit every field" in prompt
+    assert "incorrectly returned as missing is also a defect" in prompt
+
+
+def test_charcuterie_prompt_reads_wrapped_ingredients_and_explicit_preservatives() -> None:
+    prompt = _system_text_for(trade_profile("charcuterie_traiteur"))
+    assert "continue until the next clearly labelled information block" in prompt
+    assert '"conservateur"' in prompt
+    assert "never identify an additive using outside knowledge" in prompt
+
+
+def test_boucherie_prompt_keeps_each_origin_stage_and_approval_separate() -> None:
+    prompt = _system_text_for(trade_profile("boucherie"))
+    assert '"né", "élevé", "abattu"' in prompt
+    assert "country from one stage to another" in prompt
+    assert "do not swap or merge the two marks" in prompt
 
 
 @pytest.mark.parametrize(

@@ -475,7 +475,7 @@ rollback_image() {
     docker compose -f "$COMPOSE_FILE" up -d --no-deps db || true
     docker compose -f "$COMPOSE_FILE" exec -T db \
       sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' || true
-    docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=2 api worker caddy || true
+    docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=4 api worker caddy || true
   fi
   exit "$exit_code"
 }
@@ -544,7 +544,7 @@ if [[ ! -f "$DEMO_CREDENTIALS_MARKER" ]]; then
 fi
 
 printf '==> Recreating API and workers without running demo seed data\n'
-docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=2 api worker caddy
+docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=4 api worker caddy
 
 printf '==> Waiting for the public readiness endpoint\n'
 ready=0

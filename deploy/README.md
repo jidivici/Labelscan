@@ -187,7 +187,7 @@ On the VPS, [`hostinger/deploy.sh`](hostinger/deploy.sh):
    their OCI revision labels;
 6. maintains separate database-owner and runtime credentials;
 7. validates Caddy, applies migrations with the owner credential, and starts one API plus
-   two workers with the runtime credential;
+   four workers with the runtime credential;
 8. checks readiness, release identity, private documentation routes, anonymous and forged
    authentication, browser origin, redirect safety, public headers, unknown hosts, and an
    oversized upload;

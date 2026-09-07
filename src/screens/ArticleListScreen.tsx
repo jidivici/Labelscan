@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
-import { StackNavigationProp } from '@react-navigation/stack';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { ArticleCard, CARD_HEIGHT } from '../components/ArticleCard';
@@ -67,7 +67,7 @@ const SEARCH_OPEN_HEIGHT = 44 + spacing.sm * 2;
 
 export function ArticleListScreen() {
   const insets = useSafeAreaInsets();
-  const navigation = useNavigation<StackNavigationProp<RootStackParamList>>();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const {
     signOut,
     organizationId,

@@ -46,6 +46,11 @@ ERROR_CATALOG: dict[str, tuple[int, str, bool]] = {
         "Ingestion is not in a review-ready state",
         False,
     ),
+    "INGESTION_NOT_RETRYABLE": (
+        409,
+        "Ingestion analysis cannot be retried from its current state",
+        False,
+    ),
     "ALERT_INVALID_TRANSITION": (
         409,
         "Alert lifecycle transition not allowed from the current state",

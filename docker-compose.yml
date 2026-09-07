@@ -93,7 +93,7 @@ services:
     # outbox claim uses FOR UPDATE SKIP LOCKED (audit §1.5) — and each replica keeps its
     # OWN heartbeat file, so the per-container healthcheck stays correct.
     deploy:
-      replicas: 2
+      replicas: 4
     env_file: ./server/.env
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:?POSTGRES_USER is required}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}@db:5432/labelscan_demo

@@ -30,7 +30,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { StackNavigationProp } from '@react-navigation/stack';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { getArticleById } from '../services/storage';
@@ -77,7 +77,7 @@ import {
 } from '../services/fieldCompleteness';
 
 type DetailRoute = RouteProp<ArticlesStackParamList, 'ArticleDetail'>;
-type DetailNav = StackNavigationProp<ArticlesStackParamList, 'ArticleDetail'>;
+type DetailNav = NativeStackNavigationProp<ArticlesStackParamList, 'ArticleDetail'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const DISMISS_DISTANCE = 112;

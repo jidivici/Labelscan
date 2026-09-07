@@ -59,9 +59,9 @@ Every real Google Vision and Anthropic call is measured at the SDK boundary. Eac
 logs an `external_api_metrics` JSON event once per minute with `requests_total`, success /
 failure / rate-limited totals, requests in the last second, in-flight calls, latency average
 and maximum, and its `configured_rps`. Configure `LABELSCAN_GOOGLE_VISION_RPS` and
-`LABELSCAN_ANTHROPIC_RPS` per worker. With two workers, set each value to at most half of
-the account quota; these process-local limits deliberately do not pretend to be a shared
-multi-worker quota.
+`LABELSCAN_ANTHROPIC_RPS` per worker. With four workers, set each value to at most one
+quarter of the account quota; these process-local limits deliberately do not pretend to
+be a shared multi-worker quota.
 
 ## Code organization
 

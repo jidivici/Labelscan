@@ -133,6 +133,7 @@ change; historical identities and business records remain addressable.
 |---|---|---|---|
 | `POST` | `/v1/ingestions` | `ingestion:write` | Header required |
 | `GET` | `/v1/ingestions/{ingestion_id}` | `ingestion:read` | Read-only |
+| `POST` | `/v1/ingestions/{ingestion_id}/retry` | `ingestion:write` | State-idempotent |
 | `GET` | `/v1/extraction-runs/{run_id}` | `ingestion:read` | Read-only |
 | `PATCH` | `/v1/ingestions/{ingestion_id}/fields/{field_name}` | `extraction:review` | Header optional |
 | `POST` | `/v1/ingestions/{ingestion_id}/reviews` | `extraction:review` | Header required |
@@ -187,6 +188,14 @@ assuming a fixed client-side enum.
 
 When a review-ready run has no usable value, the read model sets
 `recapture_required: true` and supplies a machine-readable reason.
+
+#### Retry a failed analysis
+
+`POST /v1/ingestions/{id}/retry` reuses the already-stored source photo and queues a
+new append-only extraction attempt. It is accepted only from `extraction_failed`;
+calling it again while that retry is queued or running returns `202` with
+`replayed: true` and never creates a duplicate event. Review-ready, confirmed, and
+image-quality rejection states are not retryable through this route.
 
 #### Finalize a review
 

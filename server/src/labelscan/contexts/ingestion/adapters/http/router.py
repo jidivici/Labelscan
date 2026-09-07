@@ -61,6 +61,12 @@ from labelscan.contexts.ingestion.application.override_field import (
     UnknownField,
 )
 from labelscan.contexts.ingestion.application.ports import ConfirmNotAllowed
+from labelscan.contexts.ingestion.application.retry_extraction import (
+    ExtractionRetryNotAllowed,
+    ExtractionRetryNotFound,
+    RetryExtraction,
+    RetryExtractionCommand,
+)
 from labelscan.contexts.ingestion.application.submit_ingestion import (
     IngestionIdempotencyConflict,
     SubmitIngestion,
@@ -125,6 +131,26 @@ def get_submit_ingestion() -> SubmitIngestion:
                     build_raw_store(), SqlIngestionRepository(make_engine())
                 )
     return _DEFAULT_USE_CASE
+
+
+_DEFAULT_RETRY_USE_CASE: RetryExtraction | None = None
+_RETRY_USE_CASE_LOCK = threading.Lock()
+
+
+def get_retry_extraction() -> RetryExtraction:
+    global _DEFAULT_RETRY_USE_CASE
+    if _DEFAULT_RETRY_USE_CASE is None:
+        with _RETRY_USE_CASE_LOCK:
+            if _DEFAULT_RETRY_USE_CASE is None:
+                from labelscan.contexts.ingestion.adapters.sql_extraction_retry_repository import (
+                    SqlExtractionRetryRepository,
+                )
+                from labelscan.platform.db.engine import make_engine
+
+                _DEFAULT_RETRY_USE_CASE = RetryExtraction(
+                    SqlExtractionRetryRepository(make_engine())
+                )
+    return _DEFAULT_RETRY_USE_CASE
 
 
 async def _require_strict_ingestion_form(request: Request) -> None:
@@ -251,6 +277,55 @@ def submit_ingestion(
         status=result.status,
         replayed=result.replayed,
         correlation_id=request.state.correlation_id,
+    )
+
+
+class RetryExtractionResponse(BaseModel):
+    ingestion_id: str
+    status: str
+    replayed: bool
+
+
+@router.post(
+    "/v1/ingestions/{ingestion_id}/retry",
+    response_model=RetryExtractionResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+def retry_extraction(
+    request: Request,
+    ingestion_id: str = Path(min_length=1, max_length=128),
+    principal: Principal = Depends(require_scope("ingestion:write")),
+    use_case: RetryExtraction = Depends(get_retry_extraction),
+) -> RetryExtractionResponse:
+    """Queue a fresh extraction attempt against the already-stored source photo."""
+
+    ingestion_id = _canonical_uuid(ingestion_id, label="ingestion_id")
+    if not principal.organization_id:
+        raise ApiError("UNAUTHENTICATED", "organization context is missing")
+    try:
+        result = use_case(
+            RetryExtractionCommand(
+                ingestion_id=ingestion_id,
+                organization_id=principal.organization_id,
+                actor_id=principal.actor_id,
+                correlation_id=request.state.correlation_id,
+                trace_id=request.state.trace_id,
+                access=access_context_for_principal(principal),
+            )
+        )
+    except ExtractionRetryNotFound:
+        raise ApiError("NOT_FOUND", f"ingestion {ingestion_id} not found")
+    except ExtractionRetryNotAllowed as exc:
+        raise ApiError(
+            "INGESTION_NOT_RETRYABLE",
+            f"ingestion is '{exc.status}' — only a failed analysis can be retried",
+        )
+    except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.InterfaceError, OSError):
+        raise ApiError("DEPENDENCY_UNAVAILABLE", "storage unavailable; retry")
+    return RetryExtractionResponse(
+        ingestion_id=result.ingestion_id,
+        status=result.status,
+        replayed=result.replayed,
     )
 
 

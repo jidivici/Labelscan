@@ -15,7 +15,7 @@
 import React, { Suspense } from 'react';
 import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
 import { CameraScreen } from '../screens/CameraScreen';
 import { ReviewScreen } from '../screens/ReviewScreen';
@@ -49,7 +49,7 @@ export type ArticlesStackParamList = RootStackParamList;
 
 // ── Navigator ────────────────────────────────────────────────────────────────
 
-const RootStack = createStackNavigator<RootStackParamList>();
+const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 // Lazy "Fiche Produit": its module is loaded only the first time a record is opened
 // (its data is already fetched on demand via getArticleById). NOTE: under Metro this
@@ -90,7 +90,7 @@ function AppNavigator() {
           gestureEnabled: true,
           // Let the downward dismiss gesture start well below the small top handle.
           // The default vertical response area is only 135 px in this stack version.
-          gestureResponseDistance: 320,
+          gestureResponseDistance: { top: 320 },
         }}
       />
     </RootStack.Navigator>

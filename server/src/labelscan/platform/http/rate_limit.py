@@ -105,7 +105,10 @@ class RateLimits:
         self._window(
             "ingestion_burst",
             actor_id,
-            limit=_positive_int("LABELSCAN_INGESTION_BURST_LIMIT", 20),
+            # A receiving operator must be able to process at least 40 arrivals in
+            # ten minutes. Keep 50% headroom for quick retakes and overlapping
+            # uploads while retaining a bounded per-actor abuse control.
+            limit=_positive_int("LABELSCAN_INGESTION_BURST_LIMIT", 60),
             window_seconds=_positive_int(
                 "LABELSCAN_INGESTION_BURST_WINDOW_SECONDS", 600
             ),
@@ -113,7 +116,7 @@ class RateLimits:
         self._window(
             "ingestion_sustained",
             actor_id,
-            limit=_positive_int("LABELSCAN_INGESTION_SUSTAINED_LIMIT", 120),
+            limit=_positive_int("LABELSCAN_INGESTION_SUSTAINED_LIMIT", 360),
             window_seconds=_positive_int(
                 "LABELSCAN_INGESTION_SUSTAINED_WINDOW_SECONDS", 3600
             ),

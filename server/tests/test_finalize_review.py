@@ -12,7 +12,11 @@ from labelscan.app.http_app import create_app
 from labelscan.contexts.ingestion.adapters.extraction_consumer import ExtractionConsumer
 from labelscan.contexts.ingestion.adapters.http.router import (
     get_finalize_review,
+    get_retry_extraction,
     get_submit_ingestion,
+)
+from labelscan.contexts.ingestion.adapters.sql_extraction_retry_repository import (
+    SqlExtractionRetryRepository,
 )
 from labelscan.contexts.ingestion.adapters.sql_ingestion_repository import (
     SqlIngestionRepository,
@@ -24,6 +28,7 @@ from labelscan.contexts.ingestion.application.finalize_review import (
     FINAL_REVIEW_FIELDS,
     FinalizeReview,
 )
+from labelscan.contexts.ingestion.application.retry_extraction import RetryExtraction
 from labelscan.contexts.ingestion.application.submit_ingestion import SubmitIngestion
 from labelscan.contexts.ingestion.domain.extraction import RuleSet
 from labelscan.contexts.traceability.adapters.registration_consumer import (
@@ -48,6 +53,9 @@ def atomic_client(engine, raw_store):
     )
     app.dependency_overrides[get_finalize_review] = lambda: FinalizeReview(
         SqlReviewRepository(engine)
+    )
+    app.dependency_overrides[get_retry_extraction] = lambda: RetryExtraction(
+        SqlExtractionRetryRepository(engine)
     )
     return TestClient(app)
 
@@ -137,6 +145,65 @@ def _fields() -> dict[str, str | None]:
         }
     )
     return fields
+
+
+def test_failed_analysis_can_be_requeued_with_the_existing_photo(
+    atomic_client, engine, raw_store
+):
+    ingestion_id = _seed_review_ready(atomic_client, engine, raw_store)
+    with engine.begin() as conn:
+        correlation_id = f"retry-seed-{uuid.uuid4().hex}"
+        set_audit_context(
+            conn,
+            actor_id=str(uuid.uuid4()),
+            action="ingestion.test_failed",
+            correlation_id=correlation_id,
+            trace_id=correlation_id,
+        )
+        conn.execute(
+            text(
+                "UPDATE ingestion.ingestion SET status = 'extraction_failed' "
+                "WHERE id = :id"
+            ),
+            {"id": ingestion_id},
+        )
+
+    first = atomic_client.post(
+        f"/v1/ingestions/{ingestion_id}/retry",
+        headers=_review_headers(engine, f"retry-{uuid.uuid4().hex}"),
+    )
+    second = atomic_client.post(
+        f"/v1/ingestions/{ingestion_id}/retry",
+        headers=_review_headers(engine, f"retry-{uuid.uuid4().hex}"),
+    )
+
+    assert first.status_code == 202, first.text
+    assert first.json() == {
+        "ingestion_id": ingestion_id,
+        "status": "raw_stored",
+        "replayed": False,
+    }
+    assert second.status_code == 202
+    assert second.json()["replayed"] is True
+    with engine.connect() as conn:
+        assert (
+            conn.execute(
+                text("SELECT status FROM ingestion.ingestion WHERE id = :id"),
+                {"id": ingestion_id},
+            ).scalar_one()
+            == "raw_stored"
+        )
+        assert (
+            conn.execute(
+                text(
+                    "SELECT count(*) FROM platform.outbox "
+                    "WHERE event_type = 'ingestion.raw_stored' "
+                    "AND payload->>'ingestion_id' = :id AND published_at IS NULL"
+                ),
+                {"id": ingestion_id},
+            ).scalar_one()
+            == 1
+        )
 
 
 def test_atomic_review_replays_without_duplicate_and_updates_projection(

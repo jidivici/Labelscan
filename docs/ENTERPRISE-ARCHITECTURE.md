@@ -168,7 +168,7 @@ The Hostinger profile runs Caddy, PostgreSQL, API, workers, and filesystem raw s
 one host. Only Caddy publishes ports. The database network is internal and raw bytes live
 in a private Docker volume. The release script separates database owner/runtime
 credentials, creates local pre-release database/image backups, applies migrations, starts
-one API with two workers, and runs public smoke checks.
+one API with four workers, and runs public smoke checks.
 
 This topology has a larger failure domain: the application, database, raw images, and
 local release backups share one VPS. Off-host encrypted backup and tested restore are

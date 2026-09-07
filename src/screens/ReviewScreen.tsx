@@ -22,7 +22,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { StackNavigationProp } from '@react-navigation/stack';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
@@ -111,7 +111,7 @@ import type { ExtractionField } from '../types/api';
 import type { Article, ArticleField } from '../types/Article';
 
 type RouteType = RouteProp<RootStackParamList, 'Review'>;
-type NavProp = StackNavigationProp<RootStackParamList, 'Review'>;
+type NavProp = NativeStackNavigationProp<RootStackParamList, 'Review'>;
 type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const FIELD_GROUP_ICON: Record<string, IconName> = {
@@ -966,9 +966,9 @@ export function ReviewScreen() {
     complete;
   const showFinalFieldProjection =
     ready ||
-    requiresRecapture ||
-    scan?.status === 'submit_error' ||
-    scan?.status === 'extract_error';
+    requiresRecapture;
+  const analysisFailed =
+    scan?.status === 'submit_error' || scan?.status === 'extract_error';
 
   return (
     <View style={styles.root}>
@@ -1045,7 +1045,7 @@ export function ReviewScreen() {
               </Text>
             </View>
           ) : null}
-        {!requiresRecapture && (scan?.status === 'submit_error' || scan?.status === 'extract_error') ? (
+        {!requiresRecapture && analysisFailed ? (
             <View style={styles.ocrCard}>
               <Text style={[typography.bodyMedium, { color: colors.onSurfaceVariant }]}>
                 {scan.status === 'submit_error'
@@ -1070,10 +1070,9 @@ export function ReviewScreen() {
             </View>
           ) : null}
 
-        {/* Alerts never replace the contract: every profile row stays visible. A machine
-            absence stays blank/à vérifier until the operator explicitly supplies a value
-            or marks it NC. */}
-        {!requiresRecapture && !showFinalFieldProjection ? (
+        {/* During submission/extraction the profile remains stable. A terminal error is
+            deliberately message-only: no empty or stale analysis form is projected. */}
+        {!requiresRecapture && !analysisFailed && !showFinalFieldProjection ? (
           <ExtractionProgress
             startedAt={mountedAt}
             ready={false}
@@ -1088,7 +1087,7 @@ export function ReviewScreen() {
             }
           />
         ) : null}
-        {!requiresRecapture ? fieldGroups.map((group) => (
+        {!requiresRecapture && !analysisFailed ? fieldGroups.map((group) => (
                 <View key={group.id} style={styles.fieldGroup}>
                   <View style={styles.fieldGroupHeader}>
                     <View style={styles.fieldGroupIcon}>
@@ -1170,34 +1169,36 @@ export function ReviewScreen() {
             <Text style={[typography.labelLarge, { color: colors.primary }]}>Retour</Text>
           </Pressable>
 
-          <Pressable
-            onPress={requiresRecapture ? handleRecapture : canSave ? handleSave : undefined}
-            disabled={requiresRecapture ? false : !canSave || saving}
-            style={[
-              styles.saveButton,
-              requiresRecapture && styles.recaptureButton,
-              !requiresRecapture && (!canSave || saving) && styles.saveButtonDisabled,
-            ]}
-            android_ripple={{ color: colors.primaryContainer }}
-            accessibilityRole="button"
-            accessibilityLabel={requiresRecapture ? 'Reprendre la photo' : 'Enregistrer l’arrivage'}
-          >
-            <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>
-              {requiresRecapture
-                ? 'Reprendre la photo'
-                : saving
-                  ? 'Enregistrement…'
-                  : waitingForSync
-                    ? 'Réessayer la synchronisation'
-                    : scan?.reviewSyncStatus === 'dead_letter'
-                      ? 'Réessayer l’envoi'
-                      : !ready
-                        ? 'Analyse en cours…'
-                        : !complete
-                          ? `Compléter (${filledCount}/${fieldOrder.length})`
-                          : 'Enregistrer l’arrivage'}
-            </Text>
-          </Pressable>
+          {!analysisFailed ? (
+            <Pressable
+              onPress={requiresRecapture ? handleRecapture : canSave ? handleSave : undefined}
+              disabled={requiresRecapture ? false : !canSave || saving}
+              style={[
+                styles.saveButton,
+                requiresRecapture && styles.recaptureButton,
+                !requiresRecapture && (!canSave || saving) && styles.saveButtonDisabled,
+              ]}
+              android_ripple={{ color: colors.primaryContainer }}
+              accessibilityRole="button"
+              accessibilityLabel={requiresRecapture ? 'Reprendre la photo' : 'Enregistrer l’arrivage'}
+            >
+              <Text style={[typography.labelLarge, { color: colors.onPrimary }]}>
+                {requiresRecapture
+                  ? 'Reprendre la photo'
+                  : saving
+                    ? 'Enregistrement…'
+                    : waitingForSync
+                      ? 'Réessayer la synchronisation'
+                      : scan?.reviewSyncStatus === 'dead_letter'
+                        ? 'Réessayer l’envoi'
+                        : !ready
+                          ? 'Analyse en cours…'
+                          : !complete
+                            ? `Compléter (${filledCount}/${fieldOrder.length})`
+                            : 'Enregistrer l’arrivage'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
     </View>
   );

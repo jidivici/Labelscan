@@ -54,6 +54,9 @@ anthropic_model(_MODEL)
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v3.2.0 — complete-label coverage pass before classification: visible explicit values
+# must not be dropped merely because OCR layout split a label from its value or because
+# a token is noisy.  Missing is now allowed only after a second whole-label audit.
 # v3.1.0 — evidence for an absent value is consistently the empty array required by
 # the provider schema; the post-decode contract now enforces bounded values/evidence/
 # warnings plus value-confidence-evidence-status invariants. Cache identity includes
@@ -86,7 +89,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v3.1.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.2.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -365,7 +368,8 @@ You are a deterministic information-extraction function for seafood product labe
 You read OCR text captured from ONE physical seafood product label and return exactly \
 one strict JSON object describing a fixed set of label fields. You are part of a \
 food-safety (HACCP) traceability system: correctness and honesty about uncertainty \
-matter more than completeness. Under-extracting is safe; inventing is a defect.
+matter as much as complete coverage of the explicit label content. Inventing is a \
+defect, but leaving an explicitly printed target value null is also a defect.
 
 OUTPUT FORMAT (absolute, non-negotiable):
 - Output exactly ONE JSON object and nothing else. No text before or after it. No \
@@ -376,6 +380,21 @@ and has EXACTLY these keys: "name", "value", "confidence", "evidence", \
 "validation_status", "warnings".
 - Emit one element for EVERY name in the closed set below, present even when the value \
 is null. Never add a field outside the set; never omit one; never list a name twice.
+
+COMPLETE-LABEL COVERAGE (perform internally before emitting JSON):
+1. Read the ENTIRE OCR text from beginning to end. Inspect headings, isolated lines, \
+small-print blocks, stamps/approval marks, footer text and repeated or multilingual text. \
+Do not stop after finding the required fields or the first plausible product block.
+2. Build a candidate inventory for all 16 target fields. OCR layout can put a field label \
+on one line and its value on the next, or split one printed value across adjacent lines. \
+Use those explicit layout relationships when the lexical label makes the association clear; \
+cite each exact OCR substring used as evidence. This is reading layout, not guessing.
+3. Resolve conflicts and normalize only with the rules below. A noisy but explicit token is \
+still information: keep it verbatim as present, unnormalizable, invalid, or ambiguous when \
+the field rules permit. Do not silently discard it because spelling or separators are poor.
+4. Before setting ANY field to missing, search the whole OCR text a second time for its \
+field labels, synonyms, abbreviations and likely value block. Missing means that this audit \
+found no explicit candidate anywhere on the label.
 
 CLOSED FIELD SET ("name" is exactly one of these 16 strings, each appearing once):
 commercial_designation, scientific_name, producer_name, reseller_brand, batch_number, \
@@ -420,8 +439,9 @@ code from garbled text; "correcting" OCR spelling into a nicer word.
 2. Every non-null "value" MUST be backed by "evidence" that is an exact substring of \
 the OCR text. If you cannot quote the OCR text for a value, you do not have that value: \
 set it to null.
-3. When in doubt, prefer null plus a warning over a guess. Under-extraction is safe; \
-fabrication is not.
+3. When printed evidence genuinely permits several incompatible readings, prefer null plus \
+a warning over a guess. This is not permission to skip a visible candidate: complete the \
+whole-label coverage pass first. Fabrication is never allowed.
 4. Do not normalize beyond what the rules below specify. When normalization is \
 impossible, keep the original text and set "validation_status" to "unnormalizable" \
 (or "ambiguous" for order/identity ambiguity) with a warning.
@@ -722,18 +742,42 @@ Return only the JSON object."""
 
 
 _TRADE_GUIDANCE = {
-    "boucherie": (
-        "For animal_species and cut_name copy the explicit species and cut. "
-        "Keep birth_country, rearing_country, slaughter_country and cutting_country "
-        "separate; never infer one country from another. Copy slaughterhouse_approval "
-        "and cutting_plant_approval only from explicit establishment approval marks."
-    ),
-    "charcuterie_traiteur": (
-        "Distinguish product_family from commercial_designation and manufacturer_name "
-        "from reseller_brand. Copy preparation_date, conditioning_type, storage_mode, "
-        "use_instructions and reheating_instructions only when explicit. Ingredients "
-        "and additives must remain verbatim and must never be reconstructed."
-    ),
+    "boucherie": """\
+BOUCHERIE FIELD ROUTING:
+- animal_species: the explicitly printed animal species. animal_category: an explicitly
+  printed category/classification. cut_name: the explicitly printed cut or piece name.
+  Do not derive any of these from another one.
+- birth_country, rearing_country, slaughter_country and cutting_country are four
+  independent traceability facts. Match cues such as "né", "élevé", "abattu" and
+  "découpé" even when the cue and country are on adjacent OCR lines. Never copy a
+  country from one stage to another and never use an approval-mark prefix as a country.
+- slaughterhouse_approval is only the establishment/approval number explicitly tied to
+  slaughter or an abattoir. cutting_plant_approval is only the number explicitly tied to
+  cutting or an atelier de découpe. Keep the complete printed mark, including country
+  prefix and CE/UE suffix when present; do not swap or merge the two marks.
+""",
+    "charcuterie_traiteur": """\
+CHARCUTERIE / TRAITEUR FIELD ROUTING:
+- commercial_designation is the printed product name. product_family is a separately
+  printed family/category; do not manufacture a family from the product name.
+- manufacturer_name is the entity explicitly introduced by "fabriqué", "préparé" or
+  "élaboré par". reseller_brand is an explicit brand, retailer, distributor or
+  "fabriqué pour" entity. producer_name is reserved for a separately stated producer.
+  A postal address alone does not prove a role.
+- ingredients is the complete explicit ingredient declaration. It may wrap over many
+  consecutive OCR lines: continue until the next clearly labelled information block,
+  and preserve the readable wording instead of returning only its first line.
+- additives is explicit additive/preservative information introduced by wording such as
+  "additifs", "conservateur", "antioxydant", "stabilisant" or an explicitly printed
+  E-number. Copy the printed tokens; never identify an additive using outside knowledge.
+- preparation_date is only a date explicitly tied to preparation/fabrication. Keep it
+  separate from packaging_date and expiry_date.
+- conditioning_type covers explicit packaging such as "sous vide" or "conditionné sous
+  atmosphère protectrice". storage_mode is an explicit preservation instruction or mode;
+  storage_temperature holds the numeric temperature when one is printed.
+- use_instructions and reheating_instructions may span adjacent lines. Capture their
+  complete explicit wording, but never invent a cooking time or temperature.
+""",
 }
 
 
@@ -743,33 +787,85 @@ def _system_text_for(profile: TradeProfile) -> str:
     names = ", ".join(profile.fields)
     required = ", ".join(profile.required_fields)
     return f"""\
-You are a deterministic information-extraction function for a French food label in
-the {profile.display_name} trade. Return only one JSON object with a fields array.
-The closed field set is exactly: {names}.
-Return each field exactly once. Required operational fields are: {required}.
-For an absent value return null, confidence 0, empty evidence, status missing and no
-warning. Never guess, translate, repair OCR, use outside knowledge, or infer a value
-from another field. Every non-null value must be copied from the OCR text and every
-evidence item must be an exact OCR substring. Use ambiguous when several readings are
-possible and explain only in warnings. Dates use YYYY-MM-DD only when unambiguous;
-otherwise return null. GTIN and other GS1-resolved fields are supplied separately and
-must not be derived from unrelated numbers. Health/approval marks do not prove origin.
-{_TRADE_GUIDANCE.get(profile.code, "Apply the seafood traceability rules without inventing values.")}
+You are a deterministic information-extraction function for ONE French food label in
+the {profile.display_name} trade. Exhaustively extract explicit label information while
+remaining strictly evidence-grounded. A fabricated value is a defect, and an explicitly
+printed target value incorrectly returned as missing is also a defect.
+
+OUTPUT CONTRACT:
+- Return exactly one JSON object with one top-level key, "fields", and nothing else.
+- The closed field set is exactly: {names}.
+- Return every field exactly once and no other field. Required operational fields are:
+  {required}. Finding those required fields does not end the analysis.
+- Every field object has exactly these keys: name, value, confidence, evidence,
+  validation_status, warnings.
+- value is a non-empty string or null. confidence is a finite number from 0 to 1.
+  evidence and warnings are arrays of strings. validation_status is exactly one of:
+  present, normalized, missing, ambiguous, unnormalizable, invalid.
+- If value is null, confidence must be 0, evidence must be [], and validation_status
+  must be missing or ambiguous. If value is non-null, confidence must be greater than
+  0, evidence must not be empty, and validation_status must not be missing.
+
+MANDATORY COMPLETE-LABEL PASS:
+1. Read the whole OCR block before assigning any field. Inspect headings, isolated
+   lines, stamps, small print, footers, addresses and repeated/multilingual blocks.
+2. Build an internal candidate inventory for EVERY field in the closed set. OCR often
+   separates a field label from its value with a newline or splits one value across
+   adjacent lines. Associate adjacent fragments only when an explicit lexical cue makes
+   the relationship clear, and cite every exact fragment used.
+3. Map all candidates to their own fields, resolve conflicts, and then audit every field
+   against the entire OCR a second time. Only after that audit may a field be missing.
+4. A noisy but explicit value is still information. Preserve its OCR spelling as
+   present, unnormalizable, invalid or ambiguous when possible; do not silently discard
+   it merely because it is imperfect. Never correct OCR spelling or fill missing text.
+
+GROUNDING AND COMMON FIELD ROUTING:
+- Every evidence item must be an exact character-for-character OCR substring. A
+  normalized value may differ only under an explicit normalization rule below.
+- Never guess, translate, use outside knowledge, or derive one field from another.
+  When evidence genuinely supports several incompatible readings, use null/ambiguous
+  and explain the conflict in warnings.
+- commercial_designation is the explicit product designation, not a company or brand.
+  producer_name is an explicitly identified producer. reseller_brand is an explicit
+  brand, retailer, distributor or "produit/fabriqué pour" entity. Do not duplicate one
+  uncertain company into several roles.
+- batch_number comes only from an explicit lot/batch cue. origin_country comes only from
+  explicit origin wording. A postal address and a health/approval-mark country prefix do
+  not prove origin.
+- expiry_date is only a use-by/best-before date. packaging_date is only a date explicitly
+  tied to packing/conditioning. Dates use YYYY-MM-DD only when their order is
+  unambiguous; otherwise return null/ambiguous with the raw date in warnings.
+- storage_temperature is the complete explicit Celsius value/range/instruction.
+  allergens contains explicitly declared allergens; precautionary "may contain traces"
+  wording belongs in warnings and is not a declared allergen.
+- health_mark is the complete explicit sanitary/identification approval mark and never
+  supplies origin. weight comes from an explicit net-weight statement; do not use a
+  calibre, unit price, gross weight or pack count as net weight.
+- gtin comes only from a complete human-readable GTIN or GS1 AI (01), never from an
+  unrelated number. Fields identified reliably from GS1 may be excluded in the user
+  message; obey that exclusion and focus the full coverage pass on the other fields.
+
+{_TRADE_GUIDANCE.get(profile.code, "Apply the trade traceability rules without inventing values.")}
 Return only the JSON object."""
 
 
 def _profile_prompt_version(profile: TradeProfile) -> str:
     if profile.code == "poissonnerie" and profile.version == "2":
         return _PROMPT_VERSION
-    return f"food-label-extraction/{profile.code}/v{profile.version}"
+    return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v2.0.0"
 
 
 def _user_prompt(ocr_text: str, known_field_names: tuple[str, ...]) -> str:
+    ocr_block = (
+        "Analyze the complete OCR data block through its final line and perform the "
+        f"required second coverage audit before returning JSON.\n<OCR_TEXT>\n{ocr_text}\n"
+        "</OCR_TEXT>"
+    )
     if not known_field_names:
-        return f"OCR TEXT:\n{ocr_text}"
+        return ocr_block
     known = ", ".join(sorted(known_field_names))
     return (
-        f"OCR TEXT:\n{ocr_text}\n\n"
+        f"{ocr_block}\n\n"
         "NOTE: these fields are already identified reliably from the barcode and MUST "
         f"NOT be re-extracted — set them to value=null, validation_status='missing': {known}. "
         "Focus on the remaining free-text fields (commercial designation, species, "

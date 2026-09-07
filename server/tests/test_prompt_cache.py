@@ -169,7 +169,7 @@ def test_cached_prefix_excludes_dynamic_and_secrets():
     assert "trace_id" not in _SYSTEM_TEXT
     # no wall-clock timestamp leaked (a HH:MM:SS would mean a per-request clock value).
     assert re.search(r"\d{2}:\d{2}:\d{2}", _SYSTEM_TEXT) is None
-    assert _PROMPT_VERSION == "seafood-label-extraction/v3.1.0"
+    assert _PROMPT_VERSION == "seafood-label-extraction/v3.2.0"
     assert re.search(r'"evidence"(?:\s+|:\s*)null', _SYSTEM_TEXT) is None
     assert '"evidence":[]' in _SYSTEM_TEXT
 
@@ -190,6 +190,8 @@ def test_all_prompt_examples_obey_the_closed_field_contract():
 def test_user_prompt_carries_ocr_without_hint_when_no_gs1():
     user = _user_prompt(_RUNTIME_OCR, ())
     assert _RUNTIME_OCR in user
+    assert "second coverage audit" in user
+    assert "</OCR_TEXT>" in user
     assert "already identified" not in user  # no GS1 hint block when nothing is known
 
 

@@ -62,6 +62,8 @@ services:
 
   worker:
     <<: *runtime
+    deploy:
+      replicas: 4
     command: ["worker"]
     environment:
       <<: *common-environment

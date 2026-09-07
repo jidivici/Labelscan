@@ -77,6 +77,29 @@ class IngestionWriteRepository(Protocol):
 
 
 @dataclass(frozen=True)
+class RetriedExtraction:
+    """A failed ingestion put back on the durable extraction queue."""
+
+    ingestion_id: str
+    status: str  # 'raw_stored'
+    replayed: bool  # True when a retry is already queued/running
+
+
+class ExtractionRetryRepository(Protocol):
+    """Requeues only a provider-failed ingestion, preserving the source photo."""
+
+    def retry(
+        self,
+        *,
+        ingestion_id: str,
+        organization_id: str,
+        audit: AuditContext,
+        action: str,
+        access: AccessContext | None = None,
+    ) -> RetriedExtraction | None: ...
+
+
+@dataclass(frozen=True)
 class OverriddenField:
     """The persisted human-validated field, returned for the override response."""
 

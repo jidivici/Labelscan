@@ -204,7 +204,7 @@ least-privilege production.
 
 The Hostinger workflow revalidates the exact commit, then calls a root-owned wrapper on a
 self-hosted runner. The deploy script creates a database dump and raw-image archive,
-installs the reviewed contracts, applies migrations, starts one API and two workers, and
+installs the reviewed contracts, applies migrations, starts one API and four workers, and
 runs public smoke tests.
 
 Its automatic rollback restores the previous Compose/Caddy contracts and images. It does

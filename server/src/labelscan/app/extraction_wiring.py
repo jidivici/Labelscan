@@ -99,6 +99,15 @@ def thresholds_from_env() -> Thresholds:
     return Thresholds(review_below=review_below, high_at=high_at, medium_at=medium_at)
 
 
+def provider_max_attempts_from_env() -> int:
+    """Bounded retry budget for transient provider errors, including HTTP 429."""
+
+    attempts = _env_int("LABELSCAN_PROVIDER_MAX_ATTEMPTS", 6)
+    if attempts < 1:
+        raise RuntimeError("LABELSCAN_PROVIDER_MAX_ATTEMPTS must be >= 1")
+    return attempts
+
+
 def register_extraction_consumer(
     worker: OutboxWorker,
     *,
@@ -130,6 +139,7 @@ def register_extraction_consumer(
         llm=ClaudeLlmExtractor(),
         rule_set=rule_set,
         thresholds=thresholds_from_env(),
+        max_provider_attempts=provider_max_attempts_from_env(),
         escalation_llm=ClaudeLlmExtractor(model=ESCALATION_MODEL),
         escalation_enabled=ESCALATION_ENABLED,
         ocr_quality=ocr_quality,

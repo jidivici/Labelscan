@@ -26,6 +26,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { AppState, type AppStateStatus } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { ApiError, retryIngestionAnalysis } from './api';
 import { waitForIngestionResult } from './ingestionResult';
 import { enqueueCapture, executeCreateIngestionOp, type SubmitOutcome } from './ingestionSubmit';
 import { getOperation } from './outbox';
@@ -56,7 +57,7 @@ const QUEUE_SCHEMA_VERSION = 2 as const;
 // Cap on simultaneous long-polls (each holds a server connection ~25 s). Scans beyond
 // the cap wait in FIFO — with Tier 4 discovery at ~0 ms and extractions at ~10-20 s,
 // the line moves fast; N slow parallel cadences would be harder on the server pool.
-const MAX_CONCURRENT_POLLS = 3;
+const MAX_CONCURRENT_POLLS = 4;
 // First poll pass rides the long-poll; past it we degrade to a slow classic cadence
 // until the total budget runs out (the server keeps extracting regardless).
 const FIRST_PASS_MS = 45_000;
@@ -306,6 +307,8 @@ async function runPoll(
   const remaining = TOTAL_POLL_BUDGET_MS - elapsed;
   if (remaining <= 0) {
     pollStartedAt.delete(id);
+    delete results[id];
+    delete interim[id];
     updateScan(id, { status: 'extract_error', errorCode: 'TIMEOUT' });
     return false;
   }
@@ -335,26 +338,38 @@ async function runPoll(
 
   switch (result.kind) {
     case 'ready':
+      if (result.run == null) {
+        delete results[id];
+        delete interim[id];
+        pollStartedAt.delete(id);
+        updateScan(id, {
+          status: 'extract_error',
+          ocrDone: true,
+          errorCode: 'FIELDS_UNAVAILABLE',
+        });
+        return false;
+      }
       results[id] = { ingestion: result.ingestion, run: result.run };
       delete interim[id];
       pollStartedAt.delete(id);
       updateScan(id, {
-        status:
-          result.run == null
-            ? 'extract_error'
-            : result.ingestion.recapture_required === true
-              ? 'recapture_required'
-              : result.ingestion.recapture_required === false
-                ? 'ready'
-                : hasExploitableExtraction(result.run.fields, findScan(id)?.tradeCode)
-                  ? 'ready'
-                  : 'recapture_required',
+        status: result.ingestion.recapture_required === true
+          ? 'recapture_required'
+          : result.ingestion.recapture_required === false
+            ? 'ready'
+            : hasExploitableExtraction(result.run.fields, findScan(id)?.tradeCode)
+              ? 'ready'
+              : 'recapture_required',
         ocrDone: true,
-        errorCode: result.run ? undefined : 'FIELDS_UNAVAILABLE',
+        errorCode: undefined,
       });
       return false;
     case 'failed':
       pollStartedAt.delete(id);
+      // A failed analysis has no reviewable payload. Drop the non-authoritative OCR
+      // preview so the error screen and a later retry cannot expose stale values.
+      delete results[id];
+      delete interim[id];
       // Only the backend's explicit image-quality verdict asks for a new photo.
       // Provider/system failures remain retryable extraction errors: the mobile must
       // never blame the captured image merely because OCR or the LLM failed.
@@ -365,6 +380,8 @@ async function runPoll(
       return false;
     case 'error':
       pollStartedAt.delete(id);
+      delete results[id];
+      delete interim[id];
       updateScan(id, { status: 'extract_error', errorCode: result.code });
       return false;
     case 'timeout':
@@ -566,7 +583,7 @@ export async function enqueueScan(input: EnqueueScanInput): Promise<PendingScan>
   return scan;
 }
 
-/** Retry an errored scan: new submission op (submit_error) or fresh poll budget. */
+/** Retry an errored scan: replay its upload or queue a fresh server analysis. */
 export async function retryScan(id: string): Promise<void> {
   const generation = queueGeneration;
   const fence = await captureActiveSession();
@@ -603,8 +620,27 @@ export async function retryScan(id: string): Promise<void> {
     return;
   }
   if (scan.status === 'extract_error') {
-    pollStartedAt.delete(id); // fresh budget
+    pollStartedAt.delete(id);
+    delete results[id];
+    delete interim[id];
     updateScan(id, { status: 'extracting', errorCode: undefined });
+    // A terminal provider failure needs a NEW server-side extraction event. Merely
+    // polling the old terminal status would immediately show the same error again.
+    if (scan.errorCode === 'extraction_failed' && scan.ingestionId) {
+      try {
+        await retryIngestionAnalysis(scan.ingestionId, { signal: fence.signal });
+      } catch (error) {
+        if (!workflowIsCurrent(generation, fence) || !findScan(id)) return;
+        updateScan(id, {
+          status: 'extract_error',
+          // Keep the terminal cause so another tap calls the retry endpoint again;
+          // this is essential when the first 202 response was lost in transit.
+          errorCode: scan.errorCode ?? (error instanceof ApiError ? error.code : 'RETRY_FAILED'),
+        });
+        return;
+      }
+    }
+    if (!workflowIsCurrent(generation, fence) || !findScan(id)) return;
     schedulePoll(id);
   }
 }

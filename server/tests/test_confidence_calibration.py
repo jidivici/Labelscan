@@ -12,7 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from labelscan.app.extraction_wiring import thresholds_from_env
+from labelscan.app.extraction_wiring import (
+    provider_max_attempts_from_env,
+    thresholds_from_env,
+)
 
 # Import the offline harness from scripts/ (not part of the runtime package).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
@@ -48,6 +51,17 @@ def test_medium_must_not_exceed_high(monkeypatch):
     monkeypatch.setenv("LABELSCAN_BAND_HIGH_AT", "0.90")
     with pytest.raises(RuntimeError):
         thresholds_from_env()
+
+
+def test_provider_retry_budget_has_rate_limit_headroom(monkeypatch):
+    monkeypatch.delenv("LABELSCAN_PROVIDER_MAX_ATTEMPTS", raising=False)
+    assert provider_max_attempts_from_env() == 6
+
+
+def test_provider_retry_budget_must_be_positive(monkeypatch):
+    monkeypatch.setenv("LABELSCAN_PROVIDER_MAX_ATTEMPTS", "0")
+    with pytest.raises(RuntimeError):
+        provider_max_attempts_from_env()
 
 
 # ── calibration recommendation ───────────────────────────────────────────────

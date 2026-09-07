@@ -664,6 +664,35 @@ paths:
                 $ref: '#/components/schemas/Problem'
       security:
       - bearerAuth: []
+  /v1/ingestions/{ingestion_id}/retry:
+    post:
+      summary: Retry Extraction
+      description: Queue a fresh extraction attempt against the already-stored source photo.
+      operationId: retry_extraction_v1_ingestions__ingestion_id__retry_post
+      parameters:
+      - name: ingestion_id
+        in: path
+        required: true
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+          title: Ingestion Id
+      responses:
+        '202':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RetryExtractionResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
   /v1/ingestions/{ingestion_id}/fields/{field_name}:
     patch:
       summary: Override Field
@@ -2920,6 +2949,23 @@ components:
       required:
       - refresh_token
       title: RefreshRequest
+    RetryExtractionResponse:
+      properties:
+        ingestion_id:
+          type: string
+          title: Ingestion Id
+        status:
+          type: string
+          title: Status
+        replayed:
+          type: boolean
+          title: Replayed
+      type: object
+      required:
+      - ingestion_id
+      - status
+      - replayed
+      title: RetryExtractionResponse
     RunSummary:
       properties:
         run_id:

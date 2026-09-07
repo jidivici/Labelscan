@@ -46,7 +46,7 @@ import * as ImageManipulator from 'expo-image-manipulator';
 import * as Haptics from 'expo-haptics';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useIsFocused, useNavigation, useRoute, RouteProp } from '@react-navigation/native';
-import { StackNavigationProp } from '@react-navigation/stack';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import 'react-native-get-random-values'; // crypto polyfill for uuid (also imported in App.tsx)
@@ -80,7 +80,7 @@ const BOTTOM_CONTROLS_H = 88;
 // Reserve a little room below the frame for the instruction caption.
 const CAPTION_RESERVE = 36;
 
-type NavProp = StackNavigationProp<RootStackParamList, 'Camera'>;
+type NavProp = NativeStackNavigationProp<RootStackParamList, 'Camera'>;
 type RouteType = RouteProp<RootStackParamList, 'Camera'>;
 
 export function CameraScreen() {

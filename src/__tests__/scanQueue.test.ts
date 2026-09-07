@@ -34,6 +34,13 @@ jest.mock('../services/ingestionResult', () => ({
   waitForIngestionResult: jest.fn(),
 }));
 
+jest.mock('../services/api', () => ({
+  ApiError: class ApiError extends Error {
+    code = 'API_ERROR';
+  },
+  retryIngestionAnalysis: jest.fn(),
+}));
+
 jest.mock('../services/outbox', () => ({
   getOperation: jest.fn(),
 }));
@@ -57,6 +64,7 @@ import {
 } from '../services/storage';
 import { enqueueCapture, executeCreateIngestionOp } from '../services/ingestionSubmit';
 import { waitForIngestionResult } from '../services/ingestionResult';
+import { retryIngestionAnalysis } from '../services/api';
 import { getOperation } from '../services/outbox';
 import { captureActiveSession, getOperatorContext } from '../services/authStorage';
 import {
@@ -76,6 +84,7 @@ import {
 const mockedEnqueueCapture = enqueueCapture as jest.MockedFunction<typeof enqueueCapture>;
 const mockedExecute = executeCreateIngestionOp as jest.MockedFunction<typeof executeCreateIngestionOp>;
 const mockedWait = waitForIngestionResult as jest.MockedFunction<typeof waitForIngestionResult>;
+const mockedRetryAnalysis = retryIngestionAnalysis as jest.MockedFunction<typeof retryIngestionAnalysis>;
 const mockedGetOp = getOperation as jest.MockedFunction<typeof getOperation>;
 const mockedPersistPhoto = persistPendingPhoto as jest.MockedFunction<typeof persistPendingPhoto>;
 const mockedDeletePhoto = deletePendingPhoto as jest.MockedFunction<typeof deletePendingPhoto>;
@@ -146,6 +155,11 @@ describe('scanQueue', () => {
     mockedEnqueueCapture.mockReset();
     mockedExecute.mockReset();
     mockedWait.mockReset();
+    mockedRetryAnalysis.mockReset().mockResolvedValue({
+      ingestion_id: 'ing-retried',
+      status: 'raw_stored',
+      replayed: false,
+    });
     mockedGetOp.mockReset();
     mockedPersistPhoto.mockReset().mockImplementation(async (id: string) => `file:///pending/${id}.jpg`);
     mockedDeletePhoto.mockReset().mockResolvedValue(undefined);
@@ -432,7 +446,7 @@ describe('scanQueue', () => {
     const snap = getSnapshot();
     expect(snap.scans[0].status).toBe('extract_error');
     expect(snap.scans[0].errorCode).toBe('FIELDS_UNAVAILABLE');
-    expect(snap.results[scan.id]).toBeDefined();
+    expect(snap.results[scan.id]).toBeUndefined();
     expect(snap.interim[scan.id]).toBeUndefined();
   });
 
@@ -494,7 +508,7 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].status).toBe('recapture_required');
   });
 
-  it('a terminal extraction failure stays retryable unless the server rejects the photo', async () => {
+  it('a terminal extraction failure queues a fresh server analysis with the same photo', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
     mockedWait.mockResolvedValueOnce({
@@ -506,11 +520,14 @@ describe('scanQueue', () => {
     const scan = await enqueueScan({ tempUri: 'file:///cache/x.jpg', capturedAt: '2026-07-05T10:00:00Z' });
     await flush(6);
     expect(getSnapshot().scans[0].status).toBe('extract_error');
+    expect(getSnapshot().results[scan.id]).toBeUndefined();
+    expect(getSnapshot().interim[scan.id]).toBeUndefined();
 
     const pollCalls = mockedWait.mock.calls.length;
     await retryScan(scan.id);
     await flush();
     expect(getSnapshot().scans[0].status).toBe('extracting');
+    expect(mockedRetryAnalysis).toHaveBeenCalledWith('ing-1', expect.anything());
     expect(mockedWait).toHaveBeenCalledTimes(pollCalls + 1);
   });
 
@@ -528,7 +545,7 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].status).toBe('recapture_required');
   });
 
-  it('caps concurrent polls at 3 and drains the FIFO wait list as slots free up', async () => {
+  it('caps concurrent polls at 4 and drains the FIFO wait list as slots free up', async () => {
     mockedEnqueueCapture.mockImplementation(async () => fakeOp());
     mockedExecute.mockImplementation(async () => ({
       kind: 'succeeded',
@@ -543,19 +560,19 @@ describe('scanQueue', () => {
         }),
     );
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 5; i++) {
       await enqueueScan({ tempUri: `file:///cache/${i}.jpg`, capturedAt: '2026-07-05T10:00:00Z' });
     }
     await flush(6);
 
-    // Only 3 concurrent polls may be in flight — the 4th scan waits in FIFO.
-    expect(mockedWait).toHaveBeenCalledTimes(3);
-    expect(getSnapshot().scans.filter((s) => s.status === 'extracting')).toHaveLength(4);
+    // Match the four extraction workers; the fifth scan waits in FIFO.
+    expect(mockedWait).toHaveBeenCalledTimes(4);
+    expect(getSnapshot().scans.filter((s) => s.status === 'extracting')).toHaveLength(5);
 
     // Resolve one — the waiting scan's poll should start.
     resolvers[0]({ kind: 'ready', ingestion: { ingestion_id: 'x' } as never, run: null });
     await flush(6);
-    expect(mockedWait).toHaveBeenCalledTimes(4);
+    expect(mockedWait).toHaveBeenCalledTimes(5);
   });
 
   it('replayed submit onto an already-active ingestion silently drops the duplicate entry', async () => {
@@ -597,7 +614,11 @@ describe('scanQueue', () => {
   it('completeScan removes the entry and its result/interim state', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
-    mockedWait.mockResolvedValue({ kind: 'ready', ingestion: { ingestion_id: 'ing-1' } as never, run: null });
+    mockedWait.mockResolvedValue({
+      kind: 'ready',
+      ingestion: { ingestion_id: 'ing-1', recapture_required: false } as never,
+      run: { fields: [] } as never,
+    });
 
     const scan = await enqueueScan({ tempUri: 'file:///cache/x.jpg', capturedAt: '2026-07-05T10:00:00Z' });
     await flush(6);
