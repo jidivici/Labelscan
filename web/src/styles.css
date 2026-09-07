@@ -404,6 +404,14 @@ tbody tr:hover { background: #fafcfb; }
 .store-arrivals-link strong { color: var(--primary); }
 .store-arrivals-link small { color: var(--muted); font-size: 10px; font-weight: 650; }
 .store-arrivals-link:hover strong, .store-arrivals-link:focus-visible strong { text-decoration: underline; }
+.manager-account-card { width: min(620px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow-y: auto; text-align: left; }
+.manager-account-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
+.manager-account-header h2 { margin: 3px 0 0; }
+.manager-account-header .modal-close { position: static; flex: 0 0 auto; }
+.manager-account-card input[readonly] { background: var(--surface-soft); color: var(--muted); }
+.manager-password-section { padding-top: 4px; border-top: 1px solid var(--line); }
+.manager-password-section strong { display: block; margin-top: 14px; font-size: 13px; }
+.manager-password-section p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
 .password-requirements { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: #fafcfb; }
 .password-requirements-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .password-requirements-heading strong { font-size: 11px; }

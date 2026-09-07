@@ -428,6 +428,39 @@ paths:
                 $ref: '#/components/schemas/Problem'
       security:
       - bearerAuth: []
+  /v1/managers/{user_id}/account:
+    patch:
+      summary: Update Manager Account
+      operationId: update_manager_account_v1_managers__user_id__account_patch
+      parameters:
+      - name: user_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: User Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManagerAccountRequest'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
   /v1/managers/{user_id}:
     patch:
       summary: Set Manager Active
@@ -2606,6 +2639,25 @@ components:
       - expires_in
       - user
       title: LoginResponse
+    ManagerAccountRequest:
+      properties:
+        display_name:
+          type: string
+          maxLength: 120
+          minLength: 1
+          title: Display Name
+        new_password:
+          anyOf:
+          - type: string
+            maxLength: 128
+            minLength: 1
+          - type: 'null'
+          title: New Password
+      additionalProperties: false
+      type: object
+      required:
+      - display_name
+      title: ManagerAccountRequest
     ManagerAssignmentsRequest:
       properties:
         business_portal_ids:

@@ -136,6 +136,17 @@ class AccessRepository(Protocol):
         actor_roles: frozenset[str],
     ) -> None: ...
 
+    def update_manager_account(
+        self,
+        audit: IdentityAudit,
+        *,
+        target_user_id: str,
+        actor_roles: frozenset[str],
+        display_name: str,
+        password: str | None,
+        password_hash: str | None,
+    ) -> ManagedUser: ...
+
     def own_credentials(self, audit: IdentityAudit) -> tuple[str, str]: ...
 
     def manager_password_in_use(
@@ -275,6 +286,28 @@ class AccessManagementService:
             audit,
             target_user_id=target_user_id,
             actor_roles=actor_roles,
+        )
+
+    def update_manager_account(
+        self,
+        audit: IdentityAudit,
+        *,
+        target_user_id: str,
+        actor_roles: frozenset[str],
+        display_name: str,
+        new_password: str | None,
+    ) -> ManagedUser:
+        normalized_name = _bounded_text(display_name, "display_name", 120)
+        password_hash = (
+            _password(new_password, role=MANAGER_ROLE) if new_password else None
+        )
+        return self._repository.update_manager_account(
+            audit,
+            target_user_id=target_user_id,
+            actor_roles=actor_roles,
+            display_name=normalized_name,
+            password=new_password,
+            password_hash=password_hash,
         )
 
     def change_own_password(

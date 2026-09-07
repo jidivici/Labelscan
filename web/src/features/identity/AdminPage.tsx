@@ -24,6 +24,7 @@ import {
   replaceManagerPortals,
   setStoreActive,
   setStorePortalActive,
+  updateManagerAccount,
 } from './client';
 import {
   ActiveBadge,
@@ -51,12 +52,14 @@ function ManagerRow({
   portals,
   saving,
   onAssignments,
+  onAccount,
   onDelete,
 }: {
   manager: IamUser;
   portals: IamPortal[];
   saving: boolean;
   onAssignments: (manager: IamUser, portalIds: string[]) => Promise<boolean>;
+  onAccount: (manager: IamUser) => void;
   onDelete: (manager: IamUser) => void;
 }) {
   const activePortalIds = portals.filter((portal) => portal.active).map((portal) => portal.id);
@@ -72,10 +75,77 @@ function ManagerRow({
     <td><strong>{manager.username}</strong></td>
     <td><ManagerPortalSelect portals={portals} selected={selected} onChange={(portalId) => void changeAssignment(portalId)} name={`manager-${manager.id}`} ariaLabel={`Magasin et métier de ${manager.username}`} inTable disabled={saving} /></td>
     <td><ActiveBadge active={manager.active} /></td>
+    <td><button className="button secondary small" type="button" disabled={saving} onClick={() => onAccount(manager)} aria-label={`Compte de ${manager.username}`}>Compte</button></td>
     <td><div className="table-actions">
       <button className="button text small danger-text" type="button" disabled={saving} onClick={() => onDelete(manager)}>Supprimer</button>
     </div></td>
   </tr>;
+}
+
+function ManagerAccountDialog({ manager, saving, error, onClose, onSave }: {
+  manager: IamUser | null;
+  saving: boolean;
+  error: string;
+  onClose: () => void;
+  onSave: (manager: IamUser, displayName: string, newPassword?: string) => Promise<boolean>;
+}) {
+  const [displayName, setDisplayName] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmation, setConfirmation] = useState('');
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+
+  useEffect(() => {
+    setDisplayName(manager?.display_name ?? '');
+    setNewPassword('');
+    setConfirmation('');
+    setFieldErrors({});
+  }, [manager]);
+
+  useEffect(() => {
+    if (!manager) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !saving) onClose();
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => document.removeEventListener('keydown', closeOnEscape);
+  }, [manager, onClose, saving]);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!manager || saving) return;
+    const form = event.currentTarget;
+    const name = displayName.trim();
+    const nextErrors: FieldErrors = {};
+    if (!name) nextErrors.displayName = 'Renseignez le nom et le prénom.';
+    else if (name.length > 120) nextErrors.displayName = 'Le nom et le prénom ne peuvent pas dépasser 120 caractères.';
+    if (newPassword.length > 128) nextErrors.newPassword = 'Le mot de passe ne peut pas dépasser 128 caractères.';
+    if (newPassword !== confirmation) nextErrors.confirmation = 'Les deux nouveaux mots de passe ne correspondent pas.';
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors);
+      focusFirstInvalidField(form, Object.keys(nextErrors));
+      return;
+    }
+    if (await onSave(manager, name, newPassword || undefined)) onClose();
+  }
+
+  if (!manager) return null;
+  return <div className="modal-backdrop" onMouseDown={() => !saving && onClose()}>
+    <section className="modal-card manager-account-card" role="dialog" aria-modal="true" aria-labelledby="manager-account-title" onMouseDown={(event) => event.stopPropagation()}>
+      <header className="manager-account-header">
+        <div><span className="eyebrow">Compte manager</span><h2 id="manager-account-title">{manager.display_name || manager.username}</h2></div>
+        <button type="button" className="modal-close" aria-label="Fermer" disabled={saving} onClick={onClose}>×</button>
+      </header>
+      <ErrorNotice message={error} />
+      <form className="account-password-form" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
+        <div className="field"><label htmlFor="manager-account-username">Identifiant</label><input id="manager-account-username" value={manager.username} readOnly /></div>
+        <div className="field"><label htmlFor="manager-account-display-name">Nom et prénom</label><input id="manager-account-display-name" name="displayName" value={displayName} maxLength={120} autoFocus onChange={(event) => { setDisplayName(event.target.value); clearFieldError(setFieldErrors, 'displayName'); }} aria-invalid={Boolean(fieldErrors.displayName)} aria-describedby={fieldErrors.displayName ? 'manager-account-display-name-error' : undefined} /><FieldError id="manager-account-display-name-error" message={fieldErrors.displayName} /></div>
+        <div className="manager-password-section"><strong>Modifier le mot de passe</strong><p>Laissez les champs vides pour conserver le mot de passe actuel.</p></div>
+        <PasswordField id="manager-account-new-password" name="newPassword" label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} autoComplete="new-password" preserveAutofill error={fieldErrors.newPassword} onClearError={() => clearFieldError(setFieldErrors, 'newPassword')} />
+        <PasswordField id="manager-account-password-confirmation" name="confirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} autoComplete="new-password" preserveAutofill error={fieldErrors.confirmation} onClearError={() => clearFieldError(setFieldErrors, 'confirmation')} />
+        <div className="form-actions"><button type="button" className="button secondary" disabled={saving} onClick={onClose}>Annuler</button><button type="submit" className="button primary" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer le compte'}</button></div>
+      </form>
+    </section>
+  </div>;
 }
 
 export function AdminPage() {
@@ -100,6 +170,7 @@ export function AdminPage() {
   const [managerFieldErrors, setManagerFieldErrors] = useState<FieldErrors>({});
   const [storeFieldErrors, setStoreFieldErrors] = useState<FieldErrors>({});
   const [pendingDeletion, setPendingDeletion] = useState<{ kind: 'manager'; item: IamUser } | { kind: 'store'; item: StoreItem } | null>(null);
+  const [managedAccount, setManagedAccount] = useState<IamUser | null>(null);
   const [deletionError, setDeletionError] = useState('');
 
   const stores = useMemo(
@@ -282,6 +353,27 @@ export function AdminPage() {
     }
   }
 
+  async function saveManagerAccount(manager: IamUser, displayName: string, newPassword?: string): Promise<boolean> {
+    if (!session) return false;
+    setSaving(true);
+    setSuccess('');
+    setError('');
+    try {
+      await updateManagerAccount(session, manager.id, {
+        display_name: displayName,
+        ...(newPassword ? { new_password: newPassword } : {}),
+      });
+      await load();
+      setSuccess(`Le compte de ${displayName} a été mis à jour.`);
+      return true;
+    } catch (cause) {
+      setError(message(cause));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function removeManager(manager: IamUser) {
     if (!session) return;
     setSaving(true);
@@ -420,8 +512,8 @@ export function AdminPage() {
         ? <IdentityEmpty title={scopeActive ? 'Aucun manager dans ce périmètre' : 'Aucun manager'} description={scopeActive ? 'Aucun compte ne correspond au magasin et au métier sélectionnés.' : 'Créez un manager et attribuez-lui un magasin et un métier.'} />
         : <IdentityPanel title="Managers" description="Un manager est rattaché à un seul magasin et un seul métier.">
           <div className="table-scroll paged-content" key={`managers-${managerPage}`}><table className="identity-admin-table">
-            <thead><tr><th>Identifiant</th><th>Magasin et métier</th><th>Statut</th><th>Actions</th></tr></thead>
-            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={scopedPortals} saving={saving} onAssignments={saveAssignments} onDelete={(item) => { setDeletionError(''); setPendingDeletion({ kind: 'manager', item }); }} />)}</tbody>
+            <thead><tr><th>Identifiant</th><th>Magasin et métier</th><th>Statut</th><th>Compte</th><th>Actions</th></tr></thead>
+            <tbody>{visibleManagers.map((manager) => <ManagerRow key={manager.id} manager={manager} portals={scopedPortals} saving={saving} onAssignments={saveAssignments} onAccount={setManagedAccount} onDelete={(item) => { setDeletionError(''); setPendingDeletion({ kind: 'manager', item }); }} />)}</tbody>
           </table></div>
           <CompactPager page={managerPage} total={scopedManagers.length} onChange={setManagerPage} label="des managers" />
         </IdentityPanel>}
@@ -469,5 +561,6 @@ export function AdminPage() {
       onClose={() => { setDeletionError(''); setPendingDeletion(null); }}
       onConfirm={() => pendingDeletion?.kind === 'manager' ? removeManager(pendingDeletion.item) : pendingDeletion ? toggleStore(pendingDeletion.item) : Promise.resolve()}
     />
+    <ManagerAccountDialog manager={managedAccount} saving={saving} error={error} onClose={() => { setManagedAccount(null); setError(''); }} onSave={saveManagerAccount} />
   </section>;
 }

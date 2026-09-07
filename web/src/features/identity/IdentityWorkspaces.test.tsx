@@ -20,6 +20,7 @@ import {
   listStorePortals,
   replaceManagerPortals,
   setStorePortalActive,
+  updateManagerAccount,
 } from './client';
 import type { IamOverview, IamPortal, IamUser } from './types';
 
@@ -35,6 +36,7 @@ vi.mock('./client', () => ({
   listStorePortals: vi.fn(),
   replaceManagerPortals: vi.fn(),
   setStorePortalActive: vi.fn(),
+  updateManagerAccount: vi.fn(),
 }));
 
 const portals: IamPortal[] = [
@@ -182,6 +184,7 @@ beforeEach(() => {
   vi.mocked(listStorePortals).mockResolvedValue(portals.filter((portal) => portal.store_id === 'store-paris'));
   vi.mocked(deleteManager).mockResolvedValue(undefined);
   vi.mocked(replaceManagerPortals).mockResolvedValue(manager);
+  vi.mocked(updateManagerAccount).mockResolvedValue(manager);
   vi.mocked(setStorePortalActive).mockImplementation(async (_session, _storeId, portalId, active) => ({
     ...portals.find((portal) => portal.id === portalId)!,
     active,
@@ -478,6 +481,29 @@ describe('IAM bounded actions', () => {
       manager.id,
       ['portal-fish-paris'],
     ));
+  });
+
+  it('opens and saves the manager account without asking for the old password', async () => {
+    const user = userEvent.setup();
+    renderAt('/o/labelscan/administration', adminSession);
+    const section = (await screen.findByRole('heading', { name: 'Managers' })).closest('section')!;
+
+    await user.click(within(section).getByRole('button', { name: 'Compte de manager.lyon' }));
+    const dialog = screen.getByRole('dialog', { name: 'Nora Petit' });
+    expect(within(dialog).getByLabelText('Identifiant')).toHaveValue('manager.lyon');
+    expect(within(dialog).getByLabelText('Nom et prénom')).toHaveValue('Nora Petit');
+    expect(within(dialog).queryByLabelText('Mot de passe actuel')).not.toBeInTheDocument();
+
+    await user.clear(within(dialog).getByLabelText('Nom et prénom'));
+    await user.type(within(dialog).getByLabelText('Nom et prénom'), 'Nora Martin');
+    await user.type(within(dialog).getByLabelText('Nouveau mot de passe'), 'nouveau-secret');
+    await user.type(within(dialog).getByLabelText('Confirmer le nouveau mot de passe'), 'nouveau-secret');
+    await user.click(within(dialog).getByRole('button', { name: 'Enregistrer le compte' }));
+
+    await waitFor(() => expect(updateManagerAccount).toHaveBeenCalledWith(adminSession, manager.id, {
+      display_name: 'Nora Martin',
+      new_password: 'nouveau-secret',
+    }));
   });
 
   it('removes a manager from the front through the soft-delete endpoint', async () => {

@@ -424,6 +424,30 @@ def test_manager_password_accepts_a_single_character(iam_v2):
     assert response.status_code == 201
 
 
+def test_admin_updates_manager_account_name_and_password_without_old_password(iam_v2):
+    client, ids, organization_id, prefix = iam_v2
+    manager = _create_manager(client, ids, organization_id, prefix, [ids["portal"]])
+    headers = _headers(
+        "identity:managers:manage", "admin", ids["admin"], organization_id
+    )
+
+    updated = client.patch(
+        f"/v1/managers/{manager['id']}/account",
+        headers=headers,
+        json={"display_name": "Nora Martin", "new_password": "nouveau-secret"},
+    )
+
+    assert updated.status_code == 200
+    assert updated.json()["display_name"] == "Nora Martin"
+    assert (
+        client.post(
+            "/v1/auth/login",
+            json={"username": manager["username"], "password": "nouveau-secret"},
+        ).status_code
+        == 200
+    )
+
+
 def test_old_activation_routes_are_absent(iam_v2):
     client, *_ = iam_v2
     assert client.post("/v1/auth/activate", json={}).status_code == 404

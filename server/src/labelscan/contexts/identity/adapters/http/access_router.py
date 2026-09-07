@@ -181,6 +181,18 @@ class ManagerAssignmentsRequest(_StrictRequest):
     business_portal_ids: list[CanonicalUUID] = Field(min_length=1, max_length=1)
 
 
+class ManagerAccountRequest(_StrictRequest):
+    display_name: str = Field(min_length=1, max_length=120)
+    new_password: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("display_name", mode="before")
+    @classmethod
+    def validate_display_name(cls, value: object) -> object:
+        if not isinstance(value, str):
+            return value
+        return normalize_identity_text(value, field="display_name", maximum=120)
+
+
 class ActiveRequest(_StrictRequest):
     active: bool
 
@@ -459,6 +471,28 @@ def change_manager_portals(
             target_role=MANAGER_ROLE,
             portal_ids=tuple(str(value) for value in body.business_portal_ids),
             actor_roles=frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}),
+        )
+        return UserResponse.from_domain(user)
+    except Exception as exc:
+        _map_error(exc)
+        raise
+
+
+@router.patch("/v1/managers/{user_id}/account", response_model=UserResponse)
+def update_manager_account(
+    user_id: UUID,
+    body: ManagerAccountRequest,
+    request: Request,
+    principal: Principal = Depends(require_scope("identity:managers:manage")),
+    service: AccessManagementService = Depends(get_access_management_service),
+) -> UserResponse:
+    try:
+        user = service.update_manager_account(
+            _audit(request, principal),
+            target_user_id=str(user_id),
+            actor_roles=frozenset({SUPER_ADMIN_ROLE, ADMIN_ROLE}),
+            display_name=body.display_name,
+            new_password=body.new_password,
         )
         return UserResponse.from_domain(user)
     except Exception as exc:

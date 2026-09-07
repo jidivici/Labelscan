@@ -83,6 +83,17 @@ export function replaceManagerPortals(
   );
 }
 
+export function updateManagerAccount(
+  session: IamSession,
+  userId: string,
+  draft: { display_name: string; new_password?: string },
+): Promise<IamUser> {
+  return request<IamUser>(`/v1/managers/${encodeURIComponent(userId)}/account`, session, {
+    method: 'PATCH',
+    ...json(draft),
+  });
+}
+
 export function listAdmins(session: IamSession): Promise<IamUser[]> {
   return request<IamUser[]>('/v1/admins', session);
 }

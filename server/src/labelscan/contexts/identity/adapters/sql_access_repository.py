@@ -778,6 +778,97 @@ class SqlAccessRepository(AccessRepository):
             )
             _revoke_sessions(conn, audit.organization_id, target_user_id)
 
+    def update_manager_account(
+        self,
+        audit: IdentityAudit,
+        *,
+        target_user_id: str,
+        actor_roles: frozenset[str],
+        display_name: str,
+        password: str | None,
+        password_hash: str | None,
+    ) -> ManagedUser:
+        with self._engine.begin() as conn:
+            set_tenant_context(conn, audit.organization_id)
+            actor_role = _actor_role(conn, audit)
+            _require_role(actor_role, actor_roles)
+            target = _managed(conn, audit.organization_id, target_user_id)
+            if target.role != MANAGER_ROLE:
+                raise IdentityNotFound()
+            if actor_role == ADMIN_ROLE and not set(target.business_portal_ids) <= {
+                portal.id
+                for portal in _admin_portals(
+                    conn, audit.organization_id, audit.actor_id
+                )
+            }:
+                raise IdentityNotFound()
+
+            if password is not None:
+                if target.store_id is None:
+                    raise IdentityNotFound()
+                conn.execute(
+                    text("SELECT pg_advisory_xact_lock(hashtextextended(:store_id, 0))"),
+                    {"store_id": target.store_id},
+                )
+                existing_hashes = conn.execute(
+                    text(
+                        "SELECT password_hash FROM identity.app_user "
+                        "WHERE organization_id = :organization_id "
+                        "AND store_id = CAST(:store_id AS uuid) AND role = 'manager' "
+                        "AND id <> CAST(:user_id AS uuid) AND deleted_at IS NULL"
+                    ),
+                    {
+                        "organization_id": audit.organization_id,
+                        "store_id": target.store_id,
+                        "user_id": target_user_id,
+                    },
+                ).scalars()
+                if any(verify_password(password, value) for value in existing_hashes):
+                    raise IdentityPasswordAlreadyExists()
+                same_identifier_elsewhere = conn.execute(
+                    text(
+                        "SELECT password_hash FROM identity.app_user "
+                        "WHERE organization_id = :organization_id "
+                        "AND store_id <> CAST(:store_id AS uuid) AND role = 'manager' "
+                        "AND lower(username) = lower(:username) "
+                        "AND deleted_at IS NULL"
+                    ),
+                    {
+                        "organization_id": audit.organization_id,
+                        "store_id": target.store_id,
+                        "username": target.username,
+                    },
+                ).scalars()
+                if any(
+                    verify_password(password, value)
+                    for value in same_identifier_elsewhere
+                ):
+                    raise IdentityCredentialPairAlreadyExists()
+
+            set_audit_context(
+                conn,
+                actor_id=audit.actor_id,
+                action="identity.manager_account_changed",
+                correlation_id=audit.correlation_id,
+                trace_id=audit.trace_id,
+            )
+            conn.execute(
+                text(
+                    "UPDATE identity.app_user SET display_name = :display_name, "
+                    "password_hash = COALESCE(:password_hash, password_hash), "
+                    "updated_at = clock_timestamp() "
+                    "WHERE organization_id = :organization_id AND id = :user_id"
+                ),
+                {
+                    "organization_id": audit.organization_id,
+                    "user_id": target_user_id,
+                    "display_name": display_name,
+                    "password_hash": password_hash,
+                },
+            )
+            _revoke_sessions(conn, audit.organization_id, target_user_id)
+            return _managed(conn, audit.organization_id, target_user_id)
+
     def own_credentials(self, audit: IdentityAudit) -> tuple[str, str]:
         with self._engine.begin() as conn:
             set_tenant_context(conn, audit.organization_id)
