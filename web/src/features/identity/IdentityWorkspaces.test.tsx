@@ -493,6 +493,8 @@ describe('IAM bounded actions', () => {
     expect(within(dialog).queryByLabelText('Identifiant')).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText('Nom et prénom')).not.toBeInTheDocument();
     expect(within(dialog).queryByLabelText('Mot de passe actuel')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Modifier le mot de passe')).not.toBeInTheDocument();
+    expect(within(dialog).queryByText('Laissez les champs vides pour conserver le mot de passe actuel.')).not.toBeInTheDocument();
 
     await user.type(within(dialog).getByLabelText('Nouveau mot de passe'), 'nouveau-secret');
     await user.type(within(dialog).getByLabelText('Confirmer le nouveau mot de passe'), 'nouveau-secret');

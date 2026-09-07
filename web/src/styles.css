@@ -408,9 +408,6 @@ tbody tr:hover { background: #fafcfb; }
 .manager-account-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 22px; }
 .manager-account-header h2 { margin: 3px 0 0; }
 .manager-account-header .modal-close { position: static; flex: 0 0 auto; }
-.manager-password-section { padding-top: 4px; border-top: 1px solid var(--line); }
-.manager-password-section strong { display: block; margin-top: 14px; font-size: 13px; }
-.manager-password-section p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
 .password-requirements { padding: 13px 14px; border: 1px solid var(--line); border-radius: 11px; background: #fafcfb; }
 .password-requirements-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .password-requirements-heading strong { font-size: 11px; }

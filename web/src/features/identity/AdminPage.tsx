@@ -132,7 +132,6 @@ function ManagerAccountDialog({ manager, saving, error, onClose, onSave }: {
       </header>
       <ErrorNotice message={error} />
       <form className="account-password-form" noValidate aria-busy={saving} onSubmit={(event) => void submit(event)}>
-        <div className="manager-password-section"><strong>Modifier le mot de passe</strong><p>Laissez les champs vides pour conserver le mot de passe actuel.</p></div>
         <PasswordField id="manager-account-new-password" name="newPassword" label="Nouveau mot de passe" value={newPassword} onChange={setNewPassword} autoFocus autoComplete="new-password" preserveAutofill error={fieldErrors.newPassword} onClearError={() => clearFieldError(setFieldErrors, 'newPassword')} />
         <PasswordField id="manager-account-password-confirmation" name="confirmation" label="Confirmer le nouveau mot de passe" value={confirmation} onChange={setConfirmation} autoComplete="new-password" preserveAutofill error={fieldErrors.confirmation} onClearError={() => clearFieldError(setFieldErrors, 'confirmation')} />
         <div className="form-actions"><button type="button" className="button secondary" disabled={saving} onClick={onClose}>Annuler</button><button type="submit" className="button primary" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer le compte'}</button></div>
