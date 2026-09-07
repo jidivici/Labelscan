@@ -109,6 +109,19 @@ describe('validateFinalReviewValues', () => {
     ]);
   });
 
+  it('accepts FAO NC only when seafood is explicitly farmed', () => {
+    expect(validateFinalReviewValues({
+      production_method: 'farmed',
+      FAO_area: 'NC',
+    })).toEqual([]);
+    expect(validateFinalReviewValues({
+      production_method: 'wild_caught',
+      FAO_area: 'NC',
+    })).toEqual([
+      expect.objectContaining({ fieldName: 'FAO_area' }),
+    ]);
+  });
+
   it('requires real values for critical traceability fields', () => {
     const required = [
       'commercial_designation',

@@ -41,6 +41,7 @@ from labelscan.contexts.ingestion.application.extraction_ports import (
     OcrProvider,
     OcrResult,
     PermanentProviderError,
+    RetryableProviderOutputError,
 )
 from labelscan.contexts.ingestion.domain.extraction import (
     GateOutcome,
@@ -56,7 +57,11 @@ from labelscan.contexts.ingestion.domain.gs1 import parse_gs1
 from labelscan.contexts.ingestion.domain.input_validation import (
     validate_human_field_value,
 )
-from labelscan.contexts.ingestion.domain.interim_fields import extract_interim_fields
+from labelscan.contexts.ingestion.domain.interim_fields import (
+    InterimField,
+    extract_high_precision_ocr_fields,
+    extract_interim_fields,
+)
 from labelscan.contexts.ingestion.domain.reconciliation import (
     adjusted_outcome,
     gs1_resolved_field_names,
@@ -113,6 +118,11 @@ _RETRYABLE_EXCEPTION_NAMES = frozenset(
 )
 _PROVIDER_BACKOFF_BASE_SECONDS = 0.25
 _PROVIDER_BACKOFF_MAX_SECONDS = 8.0
+# Generated structured output is stochastic: production has observed a locally
+# invalid response followed by a valid response for the exact same OCR input.  One
+# automatic regeneration removes that false operator-facing failure without allowing
+# a malformed-output loop to consume the normal six-attempt transport budget.
+_MAX_PROVIDER_OUTPUT_ATTEMPTS = 2
 
 _MAX_OCR_TEXT_CHARS = 100_000
 _MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024
@@ -124,6 +134,36 @@ _MAX_WARNING_CHARS = 512
 _VALIDATION_STATUSES = frozenset(
     {"present", "missing", "ambiguous", "normalized", "unnormalizable", "invalid"}
 )
+
+
+def _apply_high_precision_ocr_fields(
+    fields: tuple[LlmField, ...], deterministic: tuple[InterimField, ...]
+) -> tuple[LlmField, ...]:
+    """Replace weak model readings with exact deterministic OCR-backed values.
+
+    The result still crosses `evaluate`, including exact-substring grounding and
+    confidence thresholds. This is a complement to Claude, not a gate bypass.
+    """
+    replacements = {
+        field.name: LlmField(
+            name=field.name,
+            value=field.value,
+            llm_confidence=0.99,
+            evidence=(field.evidence,) if field.evidence else (),
+            validation_status=field.validation_status,
+            warnings=(),
+        )
+        for field in deterministic
+    }
+    merged: list[LlmField] = []
+    emitted: set[str] = set()
+    for field in fields:
+        merged.append(replacements.get(field.name, field))
+        emitted.add(field.name)
+    merged.extend(
+        field for name, field in replacements.items() if name not in emitted
+    )
+    return tuple(merged)
 
 
 def _provider_status_code(exc: Exception) -> int | None:
@@ -177,6 +217,8 @@ def _safe_provider_error(exc: Exception | None) -> str:
         return f"provider failure (HTTP {status})"
     if isinstance(exc, PermanentProviderError):
         return "provider rejected request"
+    if isinstance(exc, RetryableProviderOutputError):
+        return "provider returned invalid structured output"
     if isinstance(exc, ValueError):
         return "invalid local provider result"
     return f"provider failure ({type(exc).__name__})"
@@ -502,6 +544,16 @@ class ExtractionConsumer:
                 },
             )
 
+        deterministic = (
+            extract_high_precision_ocr_fields(ocr.full_text)
+            if profile.code == "poissonnerie"
+            else ()
+        )
+        # Claude need not spend output tokens re-extracting the two exact fields
+        # already established by conservative OCR rules. They are merged back below
+        # and still pass through the ordinary anti-fabrication gate.
+        llm_known = tuple(sorted(set(known) | {field.name for field in deterministic}))
+
         _llm_t0 = time.monotonic()
         try:
             llm = self._with_provider_retry(
@@ -509,7 +561,7 @@ class ExtractionConsumer:
                     ingestion_id,
                     organization_id,
                     ocr.full_text,
-                    known,
+                    llm_known,
                     corr,
                     trace,
                     profile=profile,
@@ -545,8 +597,9 @@ class ExtractionConsumer:
             },
         )
 
-        # The anti-fabrication gate runs on the PRIMARY LLM fields UNCHANGED.
-        verdict = self._gate(llm.fields, ocr, active_rule_set)
+        primary_fields = _apply_high_precision_ocr_fields(llm.fields, deterministic)
+        # Every model and deterministic value crosses the same anti-fabrication gate.
+        verdict = self._gate(primary_fields, ocr, active_rule_set)
 
         # --- Two-tier escalation (Work Item A), BETWEEN the gate and reconcile. ---
         # The gate, GS1 precedence, and domain stay untouched. Escalate at most ONCE,
@@ -555,7 +608,7 @@ class ExtractionConsumer:
         # they stay needs_review). The escalation call counts toward the bounded provider
         # budget; on exhaustion we fall back to the primary verdict (no unbounded loop).
         escalation_model: str | None = None
-        recoverable = self._recoverable_free_text(verdict, known)
+        recoverable = self._recoverable_free_text(verdict, llm_known)
         if (
             self._escalation_enabled
             and self._escalation_llm is not None
@@ -577,7 +630,7 @@ class ExtractionConsumer:
                         ingestion_id,
                         organization_id,
                         ocr.full_text,
-                        known,
+                        llm_known,
                         corr,
                         trace,
                         profile=profile,
@@ -604,11 +657,14 @@ class ExtractionConsumer:
                 # Per field keep the better of {primary, escalated}; re-gate the merged
                 # set ONCE so missing_required/unverifiable/etc. are the gate's own
                 # verdict (no relaxation, no re-implementation of the gate).
+                escalated_fields = _apply_high_precision_ocr_fields(
+                    esc.fields, deterministic
+                )
                 merged = _merge_raw_fields(
-                    llm.fields,
-                    esc.fields,
+                    primary_fields,
+                    escalated_fields,
                     verdict.fields,
-                    self._gate(esc.fields, ocr, active_rule_set).fields,
+                    self._gate(escalated_fields, ocr, active_rule_set).fields,
                 )
                 verdict = self._gate(merged, ocr, active_rule_set)
                 escalation_model = self._escalation_llm.model
@@ -721,6 +777,21 @@ class ExtractionConsumer:
                 # Repeating the same rejected request cannot recover. Convert it to
                 # the consumer's terminal provider state after exactly one attempt so
                 # the extraction is recorded FAILED instead of poisoning the outbox.
+                raise _ProviderExhausted(_safe_provider_error(e)) from e
+            except RetryableProviderOutputError as e:
+                # A fresh generation can recover from malformed/incomplete model
+                # output. Retry exactly once: more attempts would turn a persistent
+                # schema problem into minutes of head-of-line blocking.
+                last = e
+                if attempt + 1 < min(
+                    self._max_provider_attempts, _MAX_PROVIDER_OUTPUT_ATTEMPTS
+                ):
+                    exponential = min(
+                        _PROVIDER_BACKOFF_MAX_SECONDS,
+                        _PROVIDER_BACKOFF_BASE_SECONDS * (2**attempt),
+                    )
+                    time.sleep(exponential * random.uniform(0.75, 1.25))
+                    continue
                 raise _ProviderExhausted(_safe_provider_error(e)) from e
             except ExternalApiRateLimitExceeded as e:
                 # Wait for the local one-second window rather than immediately

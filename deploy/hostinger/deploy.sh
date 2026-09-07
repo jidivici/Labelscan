@@ -13,6 +13,7 @@ readonly REPOSITORY_CADDY="deploy/caddy/Caddyfile"
 readonly BACKUP_ROOT="${APP_ROOT}/backups"
 readonly SECRETS_ROOT="${APP_ROOT}/secrets"
 readonly APP_SECRET_GID="10001"
+readonly EXPECTED_WORKER_COUNT="4"
 readonly DB_ROLE_MARKER="${APP_ROOT}/.database-roles-v4"
 readonly DEMO_CREDENTIALS_MARKER="${APP_ROOT}/.demo-credentials-secured"
 readonly JWT_ROTATION_MARKER="${APP_ROOT}/.jwt-secret-v2"
@@ -475,7 +476,8 @@ rollback_image() {
     docker compose -f "$COMPOSE_FILE" up -d --no-deps db || true
     docker compose -f "$COMPOSE_FILE" exec -T db \
       sh -c 'until pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do sleep 1; done' || true
-    docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=4 api worker caddy || true
+    docker compose -f "$COMPOSE_FILE" up -d --no-deps \
+      --scale "worker=${EXPECTED_WORKER_COUNT}" api worker caddy || true
   fi
   exit "$exit_code"
 }
@@ -544,7 +546,8 @@ if [[ ! -f "$DEMO_CREDENTIALS_MARKER" ]]; then
 fi
 
 printf '==> Recreating API and workers without running demo seed data\n'
-docker compose -f "$COMPOSE_FILE" up -d --no-deps --scale worker=4 api worker caddy
+docker compose -f "$COMPOSE_FILE" up -d --no-deps \
+  --scale "worker=${EXPECTED_WORKER_COUNT}" api worker caddy
 
 printf '==> Waiting for the public readiness endpoint\n'
 ready=0
@@ -557,6 +560,13 @@ for attempt in $(seq 1 30); do
   sleep 5
 done
 [[ "$ready" -eq 1 ]] || die "readiness endpoint did not become healthy"
+
+# Readiness proves that at least one worker heartbeat is fresh; it cannot prove the
+# requested throughput capacity. Fail the release when Compose did not materialize
+# the configured replicas, so a silent two-worker deployment can never pass again.
+worker_count="$(docker compose -f "$COMPOSE_FILE" ps -q worker | sed '/^$/d' | wc -l | tr -d ' ')"
+[[ "$worker_count" -eq "$EXPECTED_WORKER_COUNT" ]] \
+  || die "expected ${EXPECTED_WORKER_COUNT} extraction workers, found ${worker_count}"
 
 printf '==> Verifying public production security gates\n'
 for private_path in /docs /redoc /openapi.json; do
@@ -615,6 +625,12 @@ status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http
 rm -f "$oversized_probe"
 oversized_probe=""
 [[ "$status_code" == "413" ]] || die "reverse proxy accepted an oversized anonymous upload (HTTP ${status_code})"
+
+# The runner invokes this reviewed root wrapper from /usr/local/sbin. Refresh that
+# installed copy only after the new revision has passed every health/security gate;
+# otherwise an old hard-coded deployment policy can silently survive newer releases.
+install -o root -g root -m 755 \
+  "${checkout_root}/deploy/hostinger/deploy.sh" /usr/local/sbin/labelscan-deploy
 
 trap - ERR
 

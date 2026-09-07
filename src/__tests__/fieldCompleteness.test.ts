@@ -208,6 +208,17 @@ describe('fieldCompleteness', () => {
     })).toBe(1);
   });
 
+  it('counts FAO as not applicable when the production method is farmed', () => {
+    expect(filledCountFromValues({
+      production_method: 'farmed',
+      FAO_area: 'NC',
+    })).toBe(2);
+    expect(filledCountFromValues({
+      production_method: 'wild_caught',
+      FAO_area: 'NC',
+    })).toBe(1);
+  });
+
   it('a run can reach the full /16 when every canonical field is present', () => {
     // Build all 16 canonical fields as present — the score caps at 16.
     const fields = [

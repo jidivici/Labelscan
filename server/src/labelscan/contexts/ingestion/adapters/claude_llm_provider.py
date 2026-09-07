@@ -23,6 +23,7 @@ from labelscan.contexts.ingestion.adapters.anthropic_models import anthropic_mod
 from labelscan.contexts.ingestion.application.extraction_ports import (
     LlmResult,
     PermanentProviderError,
+    RetryableProviderOutputError,
 )
 from labelscan.contexts.ingestion.domain.extraction import LlmField
 from labelscan.contexts.ingestion.domain.input_validation import (
@@ -54,6 +55,10 @@ anthropic_model(_MODEL)
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v3.3.0 — sparse output: Claude still audits all 16 fields but emits only fields
+# with explicit content or a real ambiguity/anomaly. Missing and deterministically
+# resolved fields are omitted; validation_status/warnings are omitted at their defaults.
+# This cuts generated tokens without weakening evidence grounding or coverage.
 # v3.2.0 — complete-label coverage pass before classification: visible explicit values
 # must not be dropped merely because OCR layout split a label from its value or because
 # a token is noisy.  Missing is now allowed only after a second whole-label audit.
@@ -81,7 +86,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Because the closed set changed this is a MAJOR bump: the extracted_field.field_name CHECK is
 # widened by migration 0011 (SUPERSET — legacy product_name/supplier_name kept for the immutable
 # historical rows), and the eval regression gate must be re-run before rollout. The few-shots
-# below now show the 16-element V2 array. Editing this prefix invalidates the prompt cache once.
+# below use the sparse V2 array. Editing this prefix invalidates the prompt cache once.
 # v1.2.0 — FAO_area now captures the FULL printed designation (major area + sub-area /
 # sous-zone + division + sub-division), numeric ("27.8.b.1") OR official worded / Roman
 # form ("Atlantique Nord-Est, sous-zone VIII et autres sous-zones"), verbatim — it no
@@ -89,7 +94,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v3.2.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.3.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -155,10 +160,8 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
             "fields": {
                 "type": "array",
                 # Claude structured outputs only accepts array minItems values of
-                # 0 or 1.  The prompt requires one item per field and the adapter
-                # validates the exact, duplicate-free field set after decoding, so
-                # cardinality remains enforced without sending unsupported schema
-                # constraints to the provider.
+                # 0 or 1. Sparse output deliberately permits an empty list; the
+                # adapter validates the duplicate-free closed-set subset locally.
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -167,8 +170,6 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
                         "value",
                         "confidence",
                         "evidence",
-                        "validation_status",
-                        "warnings",
                     ],
                     "properties": {
                         "name": {"type": "string", "enum": names},
@@ -187,6 +188,7 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
                         },
                         "validation_status": {
                             "type": "string",
+                            "description": "Optional: omit for present values and ordinary missing values.",
                             "enum": [
                                 "present",
                                 "missing",
@@ -198,7 +200,7 @@ def _output_schema(field_names: tuple[str, ...] | list[str]) -> dict:
                         },
                         "warnings": {
                             "type": "array",
-                            "description": "At most 16 bounded diagnostic strings.",
+                            "description": "Optional: omit unless one concise diagnostic is needed.",
                             "items": {"type": "string"},
                         },
                     },
@@ -245,18 +247,20 @@ def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
     """Validate provider output beyond Anthropic's supported schema subset."""
 
     if not isinstance(data, dict) or set(data) != {"fields"}:
-        raise PermanentProviderError(
+        raise RetryableProviderOutputError(
             "Anthropic returned an invalid extraction envelope"
         )
     raw_fields = data["fields"]
-    if not isinstance(raw_fields, list) or len(raw_fields) != len(profile.fields):
-        raise PermanentProviderError("Anthropic returned an invalid field count")
+    if not isinstance(raw_fields, list) or len(raw_fields) > len(profile.fields):
+        raise RetryableProviderOutputError("Anthropic returned an invalid field count")
 
-    expected_keys = {
+    required_keys = {
         "name",
         "value",
         "confidence",
         "evidence",
+    }
+    allowed_keys = required_keys | {
         "validation_status",
         "warnings",
     }
@@ -269,34 +273,45 @@ def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
         "invalid",
     }
     names: list[str] = []
+    normalized_fields: list[dict] = []
     for field in raw_fields:
-        if not isinstance(field, dict) or set(field) != expected_keys:
-            raise PermanentProviderError("Anthropic returned an invalid field envelope")
+        if (
+            not isinstance(field, dict)
+            or not required_keys.issubset(field)
+            or not set(field).issubset(allowed_keys)
+        ):
+            raise RetryableProviderOutputError(
+                "Anthropic returned an invalid field envelope"
+            )
         name = field["name"]
         value = field["value"]
         confidence = field["confidence"]
         evidence = field["evidence"]
-        status = field["validation_status"]
-        warnings = field["warnings"]
+        status = field.get("validation_status")
+        if status is None:
+            status = "missing" if value is None else "present"
+        warnings = field.get("warnings", [])
 
         if not isinstance(name, str):
-            raise PermanentProviderError("Anthropic returned an invalid field name")
+            raise RetryableProviderOutputError("Anthropic returned an invalid field name")
         names.append(name)
         if value is not None and (
             not isinstance(value, str)
             or not value.strip()
             or len(value) > _MAX_VALUE_CHARS
         ):
-            raise PermanentProviderError("Anthropic returned an invalid field value")
+            raise RetryableProviderOutputError(
+                "Anthropic returned an invalid field value"
+            )
         if value is not None:
             try:
                 canonical_value = validate_human_field_value(name, value)
             except ValueError as exc:
-                raise PermanentProviderError(
+                raise RetryableProviderOutputError(
                     f"Anthropic returned a non-canonical value for {name!r}"
                 ) from exc
             if canonical_value == "NC" or canonical_value != value:
-                raise PermanentProviderError(
+                raise RetryableProviderOutputError(
                     f"Anthropic returned a non-canonical value for {name!r}"
                 )
         if (
@@ -305,7 +320,9 @@ def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
             or not math.isfinite(float(confidence))
             or not 0.0 <= float(confidence) <= 1.0
         ):
-            raise PermanentProviderError("Anthropic returned an invalid confidence")
+            raise RetryableProviderOutputError(
+                "Anthropic returned an invalid confidence"
+            )
         if (
             not isinstance(evidence, list)
             or len(evidence) > _MAX_EVIDENCE_ITEMS
@@ -316,9 +333,9 @@ def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
                 for item in evidence
             )
         ):
-            raise PermanentProviderError("Anthropic returned invalid evidence")
+            raise RetryableProviderOutputError("Anthropic returned invalid evidence")
         if not isinstance(status, str) or status not in allowed_statuses:
-            raise PermanentProviderError(
+            raise RetryableProviderOutputError(
                 "Anthropic returned an invalid validation status"
             )
         if (
@@ -331,7 +348,7 @@ def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
                 for item in warnings
             )
         ):
-            raise PermanentProviderError("Anthropic returned invalid warnings")
+            raise RetryableProviderOutputError("Anthropic returned invalid warnings")
 
         if value is None:
             if (
@@ -339,19 +356,23 @@ def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
                 or evidence
                 or status not in {"missing", "ambiguous"}
             ):
-                raise PermanentProviderError(
+                raise RetryableProviderOutputError(
                     "Anthropic violated the absent-value extraction invariant"
                 )
         elif not evidence or status == "missing" or float(confidence) == 0.0:
-            raise PermanentProviderError(
+            raise RetryableProviderOutputError(
                 "Anthropic violated the grounded-value extraction invariant"
             )
 
-    if len(set(names)) != len(names) or set(names) != set(profile.fields):
-        raise PermanentProviderError(
+        normalized_fields.append(
+            {**field, "validation_status": status, "warnings": warnings}
+        )
+
+    if len(set(names)) != len(names) or not set(names).issubset(profile.fields):
+        raise RetryableProviderOutputError(
             f"Anthropic returned an invalid {profile.code} field contract"
         )
-    return raw_fields
+    return normalized_fields
 
 
 # STATIC, cacheable system prefix (Work Item B). Authored faithfully to the
@@ -375,11 +396,13 @@ OUTPUT FORMAT (absolute, non-negotiable):
 - Output exactly ONE JSON object and nothing else. No text before or after it. No \
 explanations, no commentary, no markdown, and no code fences of any kind.
 - The object has exactly one top-level key: "fields".
-- "fields" is an ARRAY. Each element is an object describing exactly ONE target field \
-and has EXACTLY these keys: "name", "value", "confidence", "evidence", \
-"validation_status", "warnings".
-- Emit one element for EVERY name in the closed set below, present even when the value \
-is null. Never add a field outside the set; never omit one; never list a name twice.
+- "fields" is a SPARSE ARRAY. Each element describes exactly ONE target field and has \
+the required keys "name", "value", "confidence", "evidence". The keys \
+"validation_status" and "warnings" are optional diagnostics.
+- Internally audit EVERY name in the closed set, but EMIT an element only when it has \
+a non-null explicit value or a genuine ambiguity/anomaly that needs review. Omit ordinary \
+missing fields entirely. Also omit every field listed as already resolved in the user \
+message. Never add an outside field and never list a name twice.
 
 COMPLETE-LABEL COVERAGE (perform internally before emitting JSON):
 1. Read the ENTIRE OCR text from beginning to end. Inspect headings, isolated lines, \
@@ -396,7 +419,7 @@ the field rules permit. Do not silently discard it because spelling or separator
 field labels, synonyms, abbreviations and likely value block. Missing means that this audit \
 found no explicit candidate anywhere on the label.
 
-CLOSED FIELD SET ("name" is exactly one of these 16 strings, each appearing once):
+CLOSED FIELD SET ("name" is exactly one of these 16 strings, each appearing at most once):
 commercial_designation, scientific_name, producer_name, reseller_brand, batch_number, \
 origin_country, FAO_area, production_method, fishing_gear_or_farming_method, \
 expiry_date, packaging_date, storage_temperature, allergens, health_mark, weight, gtin.
@@ -411,15 +434,17 @@ not explicitly present on the label. Every value in this contract is one string 
 - "evidence": an array of the EXACT verbatim substrings copied from the OCR text that \
 justify "value". Each entry MUST appear character-for-character in the OCR text you \
 were given. If "value" is null, "evidence" MUST be the empty array [].
-- "validation_status": one of "present", "normalized", "missing", "ambiguous", \
-"unnormalizable", "invalid" (defined below).
-- "warnings": an array of strings (may be empty) explaining a normalization choice, an \
-ambiguity, an OCR-noise note, or an anomaly for THIS field.
+- "validation_status": OPTIONAL. Omit it for an ordinary present value (the server \
+defaults it to "present"). Include it only for "normalized", "ambiguous", \
+"unnormalizable", or "invalid".
+- "warnings": OPTIONAL. Omit it unless a real ambiguity or anomaly needs explanation. \
+When needed, emit at most ONE concise warning (maximum 120 characters). Never narrate \
+normal routing, copied values, missing fields, or successful normalization.
 
 VALIDATION_STATUS definitions:
 - "present": value found, no normalization needed.
 - "normalized": value found and transformed to canonical form (date to ISO, F to C, etc.).
-- "missing": field not on the label; value MUST be null.
+- "missing": field not on the label; OMIT its field element from the sparse array.
 - "ambiguous": something relevant IS on the label but cannot be resolved to one \
 confident value (an order-ambiguous numeric date, a place name with no FAO number, \
 wording that maps to no controlled term). Use this - never guess.
@@ -427,12 +452,12 @@ wording that maps to no controlled term). Use this - never guess.
 canonical form.
 - "invalid": a token was read but is self-contradictory or fails a basic sanity check \
 (e.g. a negative weight); keep what was read and add a warning.
-When "value" is null, "validation_status" MUST be "missing" or "ambiguous".
+When an emitted element has "value" null, "validation_status" MUST be "ambiguous".
 
 ABSOLUTE RULES (a violation is a defect, not a stylistic choice):
 1. NEVER invent, infer, complete, or correct a value that is not explicitly present in \
-the OCR text. If it is not on the label, "value" is null and "validation_status" is \
-"missing". Forbidden inference includes: guessing a scientific name from a common name; \
+the OCR text. If it is not on the label, omit that field element. Forbidden inference \
+includes: guessing a scientific name from a common name; \
 mapping a sea, ocean, or region name to an FAO area number; choosing wild vs farmed \
 when the label does not say; resolving an order-ambiguous date; guessing a country ISO \
 code from garbled text; "correcting" OCR spelling into a nicer word.
@@ -602,140 +627,73 @@ label. Never derive a GTIN from other numbers.
 
 EMPTY OR UNREADABLE OCR:
 - If the OCR text is empty, whitespace-only, or has no legible seafood-label content, \
-return the full object with every field's "value" null, "confidence" 0.0, "evidence" \
-[], "validation_status" "missing", "warnings" []. Still return valid JSON - never \
-refuse, never apologize.
+return {"fields":[]}. Still return valid JSON - never refuse, never apologize.
 
 EXAMPLES (canonical OCR text -> expected JSON). Illustrative: apply the rules above, \
-not these literals. Each shows the complete 16-element array.
+not these literals. Missing fields are intentionally absent from every sparse array.
 
-EXAMPLE 1 - clean, fully-populated label.
+EXAMPLE 1 - clean label. Ordinary present values omit optional diagnostics.
 OCR TEXT:
-ATLANTIC CATCH LTD
-Fresh Atlantic Cod Fillet
 Cabillaud de l'Atlantique
 Gadus morhua
 Wild caught
 FAO 27 - North East Atlantic
-Caught by: bottom trawl
 Origin: Norway
 Lot: L24-0917
 Best before: 2026-06-20
-Packed on: 2026-06-12
-Keep refrigerated 0-4 C
-Allergens: Fish
-Net weight: 320 g
 Approval: FR 12.345.678 CE
 EXPECTED JSON:
 {"fields":[\
-{"name":"commercial_designation","value":"Cabillaud de l'Atlantique","confidence":0.9,"evidence":["Cabillaud de l'Atlantique"],"validation_status":"present","warnings":["French wording preferred over English 'Fresh Atlantic Cod Fillet' (RULE 7); no separate product_name field."]},\
-{"name":"scientific_name","value":"Gadus morhua","confidence":0.96,"evidence":["Gadus morhua"],"validation_status":"present","warnings":[]},\
-{"name":"batch_number","value":"L24-0917","confidence":0.95,"evidence":["Lot: L24-0917"],"validation_status":"present","warnings":[]},\
-{"name":"producer_name","value":"ATLANTIC CATCH LTD","confidence":0.85,"evidence":["ATLANTIC CATCH LTD"],"validation_status":"present","warnings":["Only one operator named, no 'Produit pour'/distributor -> treated as producer; reseller_brand left null (RULE 9)."]},\
-{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"origin_country","value":"Norway","confidence":0.95,"evidence":["Origin: Norway"],"validation_status":"present","warnings":["The 'FR' health-mark country is NOT used as origin (RULE 8)."]},\
-{"name":"FAO_area","value":"27","confidence":0.92,"evidence":["FAO 27 - North East Atlantic"],"validation_status":"present","warnings":["FAO number 27 copied verbatim; the region name 'North East Atlantic' is not used to derive it."]},\
-{"name":"production_method","value":"wild_caught","confidence":0.95,"evidence":["Wild caught"],"validation_status":"normalized","warnings":[]},\
-{"name":"fishing_gear_or_farming_method","value":"bottom trawl","confidence":0.9,"evidence":["Caught by: bottom trawl"],"validation_status":"present","warnings":[]},\
-{"name":"expiry_date","value":"2026-06-20","confidence":0.95,"evidence":["Best before: 2026-06-20"],"validation_status":"normalized","warnings":[]},\
-{"name":"packaging_date","value":"2026-06-12","confidence":0.95,"evidence":["Packed on: 2026-06-12"],"validation_status":"normalized","warnings":[]},\
-{"name":"storage_temperature","value":"0-4 C","confidence":0.92,"evidence":["Keep refrigerated 0-4 C"],"validation_status":"normalized","warnings":["Read as a 0 to 4 Celsius range."]},\
-{"name":"allergens","value":"Fish","confidence":0.95,"evidence":["Allergens: Fish"],"validation_status":"present","warnings":[]},\
-{"name":"health_mark","value":"FR 12.345.678 CE","confidence":0.9,"evidence":["Approval: FR 12.345.678 CE"],"validation_status":"present","warnings":["Sanitary mark; its 'FR' country is the establishment, not the origin (Norway)."]},\
-{"name":"weight","value":"320 g","confidence":0.95,"evidence":["Net weight: 320 g"],"validation_status":"normalized","warnings":["Net basis."]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":["GTIN is not printed as readable text; it comes from the scanned barcode."]}\
+{"name":"commercial_designation","value":"Cabillaud de l'Atlantique","confidence":0.9,"evidence":["Cabillaud de l'Atlantique"]},\
+{"name":"scientific_name","value":"Gadus morhua","confidence":0.96,"evidence":["Gadus morhua"]},\
+{"name":"production_method","value":"wild_caught","confidence":0.95,"evidence":["Wild caught"],"validation_status":"normalized"},\
+{"name":"FAO_area","value":"FAO 27 - North East Atlantic","confidence":0.92,"evidence":["FAO 27 - North East Atlantic"]},\
+{"name":"origin_country","value":"Norway","confidence":0.95,"evidence":["Origin: Norway"]},\
+{"name":"batch_number","value":"L24-0917","confidence":0.95,"evidence":["Lot: L24-0917"]},\
+{"name":"expiry_date","value":"2026-06-20","confidence":0.95,"evidence":["Best before: 2026-06-20"],"validation_status":"normalized"},\
+{"name":"health_mark","value":"FR 12.345.678 CE","confidence":0.9,"evidence":["Approval: FR 12.345.678 CE"]}\
 ]}
-(Note: the "Approval: FR 12.345.678 CE" line is the sanitary mark -> health_mark; its 'FR' \
-country must NOT leak into origin_country, which stays Norway, nor into producer_name.)
 
-EXAMPLE 2 - OCR-noisy: ambiguity, F-to-C conversion, place-name-only FAO, garble.
+EXAMPLE 2 - ambiguity and OCR noise. Emit only real candidates, with concise diagnostics.
 OCR TEXT:
-N0RDIC SEAF00D AS
 Smoked Sa1mon Slices
 Salmo sa1ar
 Resp0nsibly s0urced
 Catch area: North Sea
-Origin: N0rway
-L0T 7741-AB
 Best bef0re 04/05/2026
-Store bel0w 39 F
-Contains: FlSH. May c0ntain traces 0f S0Y.
-Wt 200g e
 EXPECTED JSON:
 {"fields":[\
-{"name":"commercial_designation","value":"Smoked Sa1mon Slices","confidence":0.6,"evidence":["Smoked Sa1mon Slices"],"validation_status":"present","warnings":["OCR garble retained verbatim (likely 'Salmon'); not corrected. No separate product_name field."]},\
-{"name":"scientific_name","value":"Salmo sa1ar","confidence":0.55,"evidence":["Salmo sa1ar"],"validation_status":"present","warnings":["OCR garble retained verbatim (likely 'Salmo salar'); not corrected."]},\
-{"name":"batch_number","value":"7741-AB","confidence":0.7,"evidence":["L0T 7741-AB"],"validation_status":"present","warnings":[]},\
-{"name":"producer_name","value":"N0RDIC SEAF00D AS","confidence":0.6,"evidence":["N0RDIC SEAF00D AS"],"validation_status":"present","warnings":["OCR garble retained verbatim; single operator, no distributor -> producer (RULE 9)."]},\
-{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"origin_country","value":"N0rway","confidence":0.4,"evidence":["Origin: N0rway"],"validation_status":"ambiguous","warnings":["Origin token is OCR-garbled; no ISO country is assigned from a corrupted string."]},\
-{"name":"FAO_area","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["Label names a sea ('North Sea') with no FAO area number; not mapped."]},\
-{"name":"production_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["'Resp0nsibly s0urced' maps to neither wild_caught nor farmed."]},\
-{"name":"fishing_gear_or_farming_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"expiry_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["'04/05/2026' is order-ambiguous: 4 May 2026 or 5 April 2026; not resolved."]},\
-{"name":"packaging_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"storage_temperature","value":"<=3.9 C","confidence":0.7,"evidence":["Store bel0w 39 F"],"validation_status":"normalized","warnings":["Converted 39 F to 3.9 C; 'bel0w' read as an upper bound."]},\
-{"name":"allergens","value":"FlSH","confidence":0.7,"evidence":["Contains: FlSH"],"validation_status":"present","warnings":["Only the declared 'Contains' allergen is listed; the precautionary 'May c0ntain traces 0f S0Y' is recorded here, not as a declared allergen."]},\
-{"name":"health_mark","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"weight","value":"200 g","confidence":0.7,"evidence":["Wt 200g e"],"validation_status":"normalized","warnings":["Trailing 'e' (estimated-sign) excluded; net/gross unspecified."]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]}\
+{"name":"commercial_designation","value":"Smoked Sa1mon Slices","confidence":0.6,"evidence":["Smoked Sa1mon Slices"]},\
+{"name":"scientific_name","value":"Salmo sa1ar","confidence":0.55,"evidence":["Salmo sa1ar"],"warnings":["OCR spelling retained verbatim."]},\
+{"name":"production_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["Sourcing claim does not identify wild or farmed."]},\
+{"name":"FAO_area","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["Sea named without an FAO designation."]},\
+{"name":"expiry_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["Numeric date order is ambiguous."]}\
 ]}
 
-EXAMPLE 3 - unreadable OCR, required fields missing.
+EXAMPLE 3 - unreadable OCR. Ordinary missing fields produce no elements.
 OCR TEXT:
-$$ ~~~ |||  ....
-xQ z   8&&  ##
-Lot
-.... %%%
+$$ ~~~ ||| ....
+xQ z 8&& ##
 EXPECTED JSON:
-{"fields":[\
-{"name":"commercial_designation","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"scientific_name","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"batch_number","value":null,"confidence":0.0,"evidence":[],"validation_status":"ambiguous","warnings":["The token 'Lot' is present but no lot value follows it; not invented."]},\
-{"name":"producer_name","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"reseller_brand","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"origin_country","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"FAO_area","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"production_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"fishing_gear_or_farming_method","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"expiry_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"packaging_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"storage_temperature","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"allergens","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"health_mark","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"weight","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]}\
-]}
+{"fields":[]}
 
-EXAMPLE 4 - FRENCH FARMED label: an explicit rearing statement OUTRANKS a stray "pêche" / gear word.
+EXAMPLE 4 - French farmed label. Rearing outranks generic fishing/gear wording.
 OCR TEXT:
-COOPERATIVE U VENDARGUES
 Truite Arc-en-Ciel
 Oncorhynchus Mykiss
 Truite d'aquaculture - Elevée en France
 Pisciculture FONT-ROME
 Engin de peche / d'elevage: bassins
-A conserver entre 0 et 2 C
-Poids net: 2 kg
 FR 07 019 003 UE
 EXPECTED JSON:
 {"fields":[\
-{"name":"commercial_designation","value":"Truite Arc-en-Ciel","confidence":0.9,"evidence":["Truite Arc-en-Ciel"],"validation_status":"present","warnings":[]},\
-{"name":"scientific_name","value":"Oncorhynchus Mykiss","confidence":0.93,"evidence":["Oncorhynchus Mykiss"],"validation_status":"present","warnings":[]},\
-{"name":"producer_name","value":"Pisciculture FONT-ROME","confidence":0.9,"evidence":["Pisciculture FONT-ROME"],"validation_status":"present","warnings":["Production cue 'Pisciculture' -> producer; 'COOPERATIVE U' is the retail enseigne -> reseller_brand (RULE 9)."]},\
-{"name":"reseller_brand","value":"COOPERATIVE U VENDARGUES","confidence":0.85,"evidence":["COOPERATIVE U VENDARGUES"],"validation_status":"present","warnings":[]},\
-{"name":"batch_number","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"origin_country","value":"France","confidence":0.9,"evidence":["Elevée en France"],"validation_status":"present","warnings":[]},\
-{"name":"FAO_area","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":["Farmed product; no FAO catch area printed ('Engin de peche / d'elevage' is a gear label, not a zone)."]},\
-{"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Truite d'aquaculture - Elevée en France"],"validation_status":"normalized","warnings":["Explicit rearing ('aquaculture'/'Elevée'/'Pisciculture') => farmed; the 'peche' in 'Engin de peche / d'elevage' names the gear, NOT a wild capture (PRECEDENCE)."]},\
-{"name":"fishing_gear_or_farming_method","value":"bassins","confidence":0.85,"evidence":["Engin de peche / d'elevage: bassins"],"validation_status":"present","warnings":[]},\
-{"name":"expiry_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"packaging_date","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"storage_temperature","value":"0-2 C","confidence":0.9,"evidence":["A conserver entre 0 et 2 C"],"validation_status":"normalized","warnings":[]},\
-{"name":"allergens","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":[]},\
-{"name":"health_mark","value":"FR 07 019 003 UE","confidence":0.9,"evidence":["FR 07 019 003 UE"],"validation_status":"present","warnings":["Estampille; 'FR' is the establishment country, not used as origin."]},\
-{"name":"weight","value":"2 kg","confidence":0.9,"evidence":["Poids net: 2 kg"],"validation_status":"normalized","warnings":[]},\
-{"name":"gtin","value":null,"confidence":0.0,"evidence":[],"validation_status":"missing","warnings":["GTIN comes from the scanned barcode, not readable text."]}\
+{"name":"commercial_designation","value":"Truite Arc-en-Ciel","confidence":0.9,"evidence":["Truite Arc-en-Ciel"]},\
+{"name":"scientific_name","value":"Oncorhynchus Mykiss","confidence":0.93,"evidence":["Oncorhynchus Mykiss"]},\
+{"name":"producer_name","value":"Pisciculture FONT-ROME","confidence":0.9,"evidence":["Pisciculture FONT-ROME"]},\
+{"name":"origin_country","value":"France","confidence":0.9,"evidence":["Elevée en France"]},\
+{"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Truite d'aquaculture - Elevée en France"],"validation_status":"normalized"},\
+{"name":"fishing_gear_or_farming_method","value":"bassins","confidence":0.85,"evidence":["Engin de peche / d'elevage: bassins"]},\
+{"name":"health_mark","value":"FR 07 019 003 UE","confidence":0.9,"evidence":["FR 07 019 003 UE"]}\
 ]}
 
 Return only the JSON object."""
@@ -866,10 +824,9 @@ def _user_prompt(ocr_text: str, known_field_names: tuple[str, ...]) -> str:
     known = ", ".join(sorted(known_field_names))
     return (
         f"{ocr_block}\n\n"
-        "NOTE: these fields are already identified reliably from the barcode and MUST "
-        f"NOT be re-extracted — set them to value=null, validation_status='missing': {known}. "
-        "Focus on the remaining free-text fields (commercial designation, species, "
-        "sanitary mark, origin, storage conditions, etc.)."
+        "NOTE: these fields are already identified reliably by the barcode or exact OCR "
+        f"rules and MUST NOT be re-extracted — omit their field elements entirely: {known}. "
+        "Focus only on the remaining fields."
     )
 
 
@@ -1073,7 +1030,7 @@ class ClaudeLlmExtractor:
             },
         )
         if resp.stop_reason != "end_turn":
-            raise PermanentProviderError(
+            raise RetryableProviderOutputError(
                 f"Anthropic extraction stopped without a complete result ({resp.stop_reason})"
             )
 
@@ -1081,7 +1038,7 @@ class ClaudeLlmExtractor:
         try:
             data = json.loads(text_out)
         except (json.JSONDecodeError, TypeError) as exc:
-            raise PermanentProviderError(
+            raise RetryableProviderOutputError(
                 "Anthropic returned invalid structured JSON"
             ) from exc
         raw_fields = _validated_fields(data, profile)

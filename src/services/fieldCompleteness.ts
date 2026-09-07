@@ -58,12 +58,22 @@ export function canonicalFieldCount(tradeCode?: string | null): number {
 }
 
 /** A field value counts as "filled" when it is a non-blank string. */
-function isFilledValue(value: string | null | undefined, fieldName?: string): boolean {
+function isFilledValue(
+  value: string | null | undefined,
+  fieldName?: string,
+  values?: Record<string, string>,
+): boolean {
   if (value == null || value.trim() === '') return false;
+  const farmedFaoNotApplicable =
+    fieldName === 'FAO_area' &&
+    value.trim().toUpperCase() === NOT_COMMUNICATED_VALUE &&
+    values?.production_method != null &&
+    ['farmed', 'élevage'].includes(values.production_method.trim().toLocaleLowerCase('fr-FR'));
   if (
     fieldName &&
     !allowsNotCommunicated(fieldName) &&
-    value.trim().toUpperCase() === NOT_COMMUNICATED_VALUE
+    value.trim().toUpperCase() === NOT_COMMUNICATED_VALUE &&
+    !farmedFaoNotApplicable
   ) return false;
   return true;
 }
@@ -127,7 +137,7 @@ export function filledCountFromValues(
   if (!values) return 0;
   let count = 0;
   for (const name of fieldOrderForTrade(tradeCode)) {
-    if (isFilledValue(values[name], name)) count += 1;
+    if (isFilledValue(values[name], name, values)) count += 1;
   }
   return count;
 }

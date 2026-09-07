@@ -17,8 +17,16 @@ class PermanentProviderError(RuntimeError):
     """A provider/configuration failure that cannot succeed with the same input.
 
     The worker records one failed extraction attempt but must not spend the normal
-    transient retry budget on rejected parameters, authentication, schema, refusal,
-    or a locally invalid structured response.
+    transient retry budget on rejected parameters, authentication, schema, or refusal.
+    """
+
+
+class RetryableProviderOutputError(RuntimeError):
+    """A completed model call whose generated output failed the local contract.
+
+    Unlike an HTTP 4xx or invalid request configuration, a fresh generation with the
+    same input can recover.  The consumer therefore retries this category once before
+    surfacing a terminal provider failure to the operator.
     """
 
 
@@ -53,9 +61,10 @@ class LlmExtractor(Protocol):
     """Turns OCR text into structured fields. Schema-conformance is the adapter's
     job; truth (no fabrication) is the domain gate's job.
 
-    `known_field_names` are fields already resolved deterministically (GS1) — a hint
-    so the adapter can focus the prompt and skip them. It is advisory only:
-    correctness never depends on it (the reconciliation layer always lets GS1 win)."""
+    `known_field_names` are fields already resolved deterministically (GS1 or exact
+    OCR rules) — a hint so the adapter can focus the prompt and omit them. It is
+    advisory only: correctness never depends on it (deterministic reconciliation
+    still wins)."""
 
     def run(
         self,

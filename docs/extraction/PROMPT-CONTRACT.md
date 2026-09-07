@@ -23,7 +23,8 @@ schema is built from the selected trade profile in the Claude adapter.
 The extractor receives:
 
 - OCR text from one captured image;
-- field names already resolved from the scanned barcode, when available;
+- field names already resolved from the scanned barcode or conservative exact-OCR
+  rules, when available;
 - the ingestion's snapshotted trade code and profile version.
 
 OCR text is untrusted input. The user message clearly labels it as OCR content,
@@ -31,9 +32,9 @@ but prompt wording is not the security boundary. The backend independently
 checks the returned field set, sizes, confidence values, evidence, and business
 rules.
 
-The barcode hint asks the model to return known GS1 fields as missing and focus on
-free text. Reconciliation applies GS1 precedence again after validation, so the
-hint is only an optimization.
+The deterministic hint asks the model to omit already resolved fields and focus on
+the remaining free text. Reconciliation applies deterministic precedence again
+after validation, so the hint is only an optimization.
 
 ## Current response shape
 
@@ -47,14 +48,14 @@ The provider must return one JSON object with exactly one top-level property:
       "value": "Example value",
       "confidence": 0.92,
       "evidence": ["Example value"],
-      "validation_status": "present",
-      "warnings": []
+      "validation_status": "normalized"
     }
   ]
 }
 ```
 
-Each field object has exactly these properties:
+The response is sparse: an ordinary missing field is omitted. Each emitted field
+object has four required properties and two optional diagnostics:
 
 | Property | Runtime type | Meaning |
 |---|---|---|
@@ -62,8 +63,8 @@ Each field object has exactly these properties:
 | `value` | string or null | Proposed value; all current values are flat strings |
 | `confidence` | number | Model confidence; the consumer later requires a finite value in `[0, 1]` |
 | `evidence` | array of strings | Exact OCR substrings offered in support of the value |
-| `validation_status` | string | Model self-assessment; advisory until checked |
-| `warnings` | array of strings | Field-specific ambiguity or normalization notes |
+| `validation_status` | optional string | Model self-assessment; defaults to `present` for a value and `missing` for null |
+| `warnings` | optional array of strings | Concise field-specific ambiguity or anomaly note |
 
 Allowed validation statuses are:
 
@@ -72,10 +73,10 @@ present, missing, ambiguous, normalized, unnormalizable, invalid
 ```
 
 The provider JSON schema closes the object against extra properties and constrains
-the `name` enum to the selected profile. Because the provider's supported schema
-subset cannot express the exact array cardinality used here, the adapter performs
-the decisive check after decoding: every profile field must appear exactly once,
-with no duplicate, omitted, or unexpected name.
+the `name` enum to the selected profile. The adapter accepts a duplicate-free subset
+of profile fields and rejects unexpected names. Required-field checks happen after
+decoding, so omitting ordinary missing fields saves output tokens without weakening
+review routing.
 
 The response does not contain `schema_version`, `raw_warnings`, polymorphic date,
 temperature, weight, or price objects. Prompt, extractor, model, OCR provider, and
@@ -98,9 +99,9 @@ It adds the following trade-specific fields:
 
 | Trade code | Additional fields | Complete response |
 |---|---|---:|
-| `poissonnerie` | `scientific_name`, `FAO_area`, `production_method`, `fishing_gear_or_farming_method` | 16 fields |
-| `boucherie` | `animal_species`, `animal_category`, `cut_name`, `birth_country`, `rearing_country`, `slaughter_country`, `cutting_country`, `slaughterhouse_approval`, `cutting_plant_approval` | 21 fields |
-| `charcuterie_traiteur` | `product_family`, `manufacturer_name`, `ingredients`, `additives`, `preparation_date`, `conditioning_type`, `storage_mode`, `use_instructions`, `reheating_instructions` | 21 fields |
+| `poissonnerie` | `scientific_name`, `FAO_area`, `production_method`, `fishing_gear_or_farming_method` | up to 16 fields |
+| `boucherie` | `animal_species`, `animal_category`, `cut_name`, `birth_country`, `rearing_country`, `slaughter_country`, `cutting_country`, `slaughterhouse_approval`, `cutting_plant_approval` | up to 21 fields |
+| `charcuterie_traiteur` | `product_family`, `manufacturer_name`, `ingredients`, `additives`, `preparation_date`, `conditioning_type`, `storage_mode`, `use_instructions`, `reheating_instructions` | up to 21 fields |
 
 The following fields are currently required by application configuration:
 
@@ -119,8 +120,8 @@ governed compliance-rule store yet.
 
 | Selection | Prompt identifier | Prompt style |
 |---|---|---|
-| Poissonnerie, profile 2 | `seafood-label-extraction/v3.1.0` | Detailed static prompt with examples |
-| Other profiles, including history | `food-label-extraction/{trade_code}/v{profile_version}` | Compact profile-generated prompt |
+| Poissonnerie, profile 2 | `seafood-label-extraction/v3.3.0` | Detailed cached sparse-output prompt with examples |
+| Other profiles, including history | `food-label-extraction/{trade_code}/profile-{profile_version}/prompt-v2.0.0` | Compact profile-generated prompt |
 
 Both prompt and extractor version columns receive the selected identifier. The
 model identifier is stored separately.
@@ -135,7 +136,7 @@ trade-specific labelled dataset demonstrating equal extraction quality.
 The prompts consistently aim for these behaviors:
 
 - return only the JSON object;
-- include every profile field exactly once;
+- audit every profile field, while emitting only present or genuinely ambiguous ones;
 - prefer null over an unsupported guess;
 - never translate, repair OCR spelling, or fill a value from outside knowledge;
 - cite exact substrings from OCR for every proposed value;
@@ -158,7 +159,7 @@ returns, the backend also enforces:
 - finite confidence in `[0, 1]`;
 - the allowed validation-status set;
 - bounded evidence and warning arrays;
-- expected and unique field names;
+- allowed and unique field names;
 - exact-substring evidence grounding;
 - configured vocabulary and date-order rules;
 - review routing for missing or weak required fields.
@@ -184,10 +185,10 @@ event is registered into the traceability catalogue.
 
 ## Evidence invariant
 
-The provider contract always uses an array. A missing or ambiguous value has
-`value: null`, `confidence: 0`, and `evidence: []`; diagnostic candidates belong in
-bounded warnings. The public read API likewise renders stored SQL `NULL` evidence
-as `[]`, so clients never need a nullable evidence branch.
+The provider contract always uses an array. An ordinary missing field is omitted. An
+emitted ambiguous field has `value: null`, `confidence: 0`, and `evidence: []`, with
+its concise diagnostic in `warnings`. The public read API still renders stored SQL
+`NULL` evidence as `[]`, so clients never need a nullable evidence branch.
 
 ## Verification when changing the contract
 

@@ -12,6 +12,7 @@ from labelscan.contexts.ingestion.adapters.extraction_consumer import (
 )
 from labelscan.contexts.ingestion.application.extraction_ports import (
     PermanentProviderError,
+    RetryableProviderOutputError,
 )
 from labelscan.contexts.ingestion.domain.extraction import RuleSet
 
@@ -155,3 +156,43 @@ def test_permanent_provider_error_fails_after_one_attempt():
     with pytest.raises(_ProviderExhausted):
         _consumer(max_attempts=3)._with_provider_retry(rejected_request)
     assert calls["n"] == 1
+
+
+def test_invalid_generated_output_is_retried_once_and_can_recover(monkeypatch):
+    calls = {"n": 0}
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "labelscan.contexts.ingestion.adapters.extraction_consumer.random.uniform",
+        lambda *_: 1.0,
+    )
+    monkeypatch.setattr(
+        "labelscan.contexts.ingestion.adapters.extraction_consumer.time.sleep",
+        sleeps.append,
+    )
+
+    def generate():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RetryableProviderOutputError("invalid generated envelope")
+        return "valid result"
+
+    assert _consumer(max_attempts=6)._with_provider_retry(generate) == "valid result"
+    assert calls["n"] == 2
+    assert sleeps == [0.25]
+
+
+def test_persistently_invalid_generated_output_stops_after_two_attempts(monkeypatch):
+    calls = {"n": 0}
+    monkeypatch.setattr(
+        "labelscan.contexts.ingestion.adapters.extraction_consumer.time.sleep",
+        lambda *_: None,
+    )
+
+    def generate():
+        calls["n"] += 1
+        raise RetryableProviderOutputError("private generated output")
+
+    with pytest.raises(_ProviderExhausted, match="invalid structured output") as caught:
+        _consumer(max_attempts=6)._with_provider_retry(generate)
+    assert calls["n"] == 2
+    assert "private generated output" not in str(caught.value)

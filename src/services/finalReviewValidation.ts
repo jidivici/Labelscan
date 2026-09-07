@@ -150,6 +150,8 @@ export function validateFinalReviewValues(
   values: Record<string, string | null>,
 ): FinalReviewValidationError[] {
   const errors: FinalReviewValidationError[] = [];
+  const farmed =
+    canonicalizeFinalReviewValue('production_method', values.production_method) === 'farmed';
   for (const [fieldName, rawValue] of Object.entries(values)) {
     const value = canonicalizeFinalReviewValue(fieldName, rawValue);
     const spec = FIELD_SPECS[fieldName] ?? DEFAULT_SPEC;
@@ -177,7 +179,8 @@ export function validateFinalReviewValues(
       continue;
     }
     if (value === 'NC') {
-      if (!allowsNotCommunicated(fieldName)) {
+      const faoNotApplicable = fieldName === 'FAO_area' && farmed;
+      if (!allowsNotCommunicated(fieldName) && !faoNotApplicable) {
         errors.push({ fieldName, message: 'La valeur NC n’est pas autorisée pour ce champ.' });
       }
       continue;

@@ -10,6 +10,7 @@ No DB, no providers. The invariants under test:
 from __future__ import annotations
 
 from labelscan.contexts.ingestion.domain.interim_fields import (
+    extract_high_precision_ocr_fields,
     extract_interim_fields,
 )
 
@@ -99,6 +100,42 @@ def test_batch_number_no_digit_rejected():
 
 def test_batch_number_two_distinct_lots_emit_nothing():
     assert "batch_number" not in _as_dict("LOT A123 ... LOT B456")
+
+
+# ── sanitary mark + production method ────────────────────────────────────────
+
+
+def test_health_mark_is_recovered_with_exact_multiline_evidence():
+    text = "Origine Espagne\nFR\n07 019 003\nUE\nLot A123"
+    fields = {field.name: field for field in extract_high_precision_ocr_fields(text)}
+    assert fields["health_mark"].value == "FR 07 019 003 UE"
+    assert fields["health_mark"].evidence == "FR\n07 019 003\nUE"
+    assert fields["health_mark"].validation_status == "normalized"
+
+
+def test_health_mark_does_not_confuse_origin_or_date():
+    assert "health_mark" not in _as_dict(
+        "Origine France\nDLC 20/09/2026\nEmballé en FR"
+    )
+
+
+def test_short_gb_health_mark_without_eu_suffix_is_recovered():
+    assert _as_dict("Packed in the UK\nGB BB004")["health_mark"] == "GB BB004"
+
+
+def test_explicit_elevage_sets_farmed():
+    got = _as_dict("Truite arc-en-ciel — Élevée en France")
+    assert got["production_method"] == "farmed"
+
+
+def test_generic_fishing_or_farming_heading_does_not_set_farmed():
+    got = _as_dict("Engin de pêche / d'élevage : bassins")
+    assert "production_method" not in got
+
+
+def test_generic_regulatory_boilerplate_does_not_set_farmed():
+    got = _as_dict("Produits de la pêche et de l'aquaculture")
+    assert "production_method" not in got
 
 
 # ── general ───────────────────────────────────────────────────────────────────

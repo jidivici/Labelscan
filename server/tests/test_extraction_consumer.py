@@ -15,11 +15,17 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
-from labelscan.contexts.ingestion.adapters.extraction_consumer import ExtractionConsumer
+from labelscan.contexts.ingestion.adapters.extraction_consumer import (
+    ExtractionConsumer,
+    _apply_high_precision_ocr_fields,
+)
 from labelscan.contexts.ingestion.application.submit_ingestion import (
     SubmitIngestionCommand,
 )
-from labelscan.contexts.ingestion.domain.extraction import RuleSet
+from labelscan.contexts.ingestion.domain.extraction import RuleSet, evaluate
+from labelscan.contexts.ingestion.domain.interim_fields import (
+    extract_high_precision_ocr_fields,
+)
 from labelscan.platform.outbox.worker import OutboxWorker
 from tests._fakes import FakeLlm, FakeOcr, field, good_fields
 from tests.conftest import ACTOR_ID
@@ -77,6 +83,31 @@ def _runs(engine, ingestion_id):
             .mappings()
             .all()
         )
+
+
+def test_exact_ocr_rules_recover_farmed_method_and_health_mark_before_gate():
+    text_value = (
+        "Gadus morhua\nUse by 2026-06-20\nÉlevée en France\nFR\n07 019 003\nUE"
+    )
+    base = (
+        field("scientific_name", "Gadus morhua", 0.96, ["Gadus morhua"]),
+        field("expiry_date", "2026-06-20", 0.95, ["2026-06-20"]),
+        field("production_method", None, 0.0, status="missing"),
+        field("health_mark", None, 0.0, status="missing"),
+    )
+    merged = _apply_high_precision_ocr_fields(
+        base, extract_high_precision_ocr_fields(text_value)
+    )
+    verdict = evaluate(
+        merged,
+        ocr_text=text_value,
+        ocr_confidence=0.95,
+        rule_set=RULES,
+    )
+    by_name = {field.name: field for field in verdict.fields}
+    assert by_name["production_method"].value == "farmed"
+    assert by_name["health_mark"].value == "FR 07 019 003 UE"
+    assert by_name["health_mark"].spans
 
 
 # ----- happy path -------------------------------------------------------------

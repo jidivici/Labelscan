@@ -28,6 +28,7 @@ from labelscan.contexts.ingestion.adapters.claude_llm_provider import (
 )
 from labelscan.contexts.ingestion.application.extraction_ports import (
     PermanentProviderError,
+    RetryableProviderOutputError,
 )
 from tests.conftest import capture_logger
 
@@ -169,7 +170,7 @@ def test_cached_prefix_excludes_dynamic_and_secrets():
     assert "trace_id" not in _SYSTEM_TEXT
     # no wall-clock timestamp leaked (a HH:MM:SS would mean a per-request clock value).
     assert re.search(r"\d{2}:\d{2}:\d{2}", _SYSTEM_TEXT) is None
-    assert _PROMPT_VERSION == "seafood-label-extraction/v3.2.0"
+    assert _PROMPT_VERSION == "seafood-label-extraction/v3.3.0"
     assert re.search(r'"evidence"(?:\s+|:\s*)null', _SYSTEM_TEXT) is None
     assert '"evidence":[]' in _SYSTEM_TEXT
 
@@ -184,7 +185,9 @@ def test_all_prompt_examples_obey_the_closed_field_contract():
         encoded = encoded.split("\n\nEXAMPLE ", 1)[0]
         encoded = encoded.split("\n\nReturn only", 1)[0].strip()
         decoded = json.loads(encoded)
-        assert len(_validated_fields(decoded, profile)) == len(profile.fields)
+        fields = _validated_fields(decoded, profile)
+        assert len(fields) <= len(profile.fields)
+        assert all(field["validation_status"] != "missing" for field in fields)
 
 
 def test_user_prompt_carries_ocr_without_hint_when_no_gs1():
@@ -362,9 +365,9 @@ def test_retryable_http_error_is_preserved_for_consumer_retry():
     assert caught.value is error
 
 
-def test_incomplete_stop_reason_is_permanent():
+def test_incomplete_stop_reason_can_be_regenerated():
     fake = FakeAnthropic(_REPLY, stop_reason="max_tokens")
-    with pytest.raises(PermanentProviderError, match="max_tokens"):
+    with pytest.raises(RetryableProviderOutputError, match="max_tokens"):
         _extractor(fake).run(_RUNTIME_OCR)
 
 
@@ -376,12 +379,12 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
     invalid = json.loads(_REPLY)
     invalid["fields"][0]["value"] = None
     invalid["fields"][0]["confidence"] = 0.2
-    with pytest.raises(PermanentProviderError, match="absent-value"):
+    with pytest.raises(RetryableProviderOutputError, match="absent-value"):
         _validated_fields(invalid, profile)
 
     invalid = json.loads(_REPLY)
     invalid["fields"][1]["evidence"] = ["x"] * 17
-    with pytest.raises(PermanentProviderError, match="evidence"):
+    with pytest.raises(RetryableProviderOutputError, match="evidence"):
         _validated_fields(invalid, profile)
 
     invalid = json.loads(_REPLY)
@@ -389,7 +392,7 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
         field for field in invalid["fields"] if field["name"] == "scientific_name"
     )
     scientific["evidence"] = ["   "]
-    with pytest.raises(PermanentProviderError, match="evidence"):
+    with pytest.raises(RetryableProviderOutputError, match="evidence"):
         _validated_fields(invalid, profile)
 
     invalid = json.loads(_REPLY)
@@ -402,7 +405,7 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
         evidence=["2026-08"],
         validation_status="normalized",
     )
-    with pytest.raises(PermanentProviderError, match="non-canonical"):
+    with pytest.raises(RetryableProviderOutputError, match="non-canonical"):
         _validated_fields(invalid, profile)
 
     invalid = json.loads(_REPLY)
@@ -415,8 +418,34 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
         evidence=["NC"],
         validation_status="present",
     )
-    with pytest.raises(PermanentProviderError, match="non-canonical"):
+    with pytest.raises(RetryableProviderOutputError, match="non-canonical"):
         _validated_fields(invalid, profile)
+
+
+def test_sparse_contract_accepts_subset_and_defaults_optional_diagnostics():
+    profile = trade_profile("poissonnerie")
+    sparse = {
+        "fields": [
+            {
+                "name": "scientific_name",
+                "value": "Gadus morhua",
+                "confidence": 0.9,
+                "evidence": ["Gadus morhua"],
+            },
+            {
+                "name": "FAO_area",
+                "value": None,
+                "confidence": 0.0,
+                "evidence": [],
+                "validation_status": "ambiguous",
+                "warnings": ["Sea named without an FAO designation."],
+            },
+        ]
+    }
+    fields = _validated_fields(sparse, profile)
+    assert fields[0]["validation_status"] == "present"
+    assert fields[0]["warnings"] == []
+    assert fields[1]["validation_status"] == "ambiguous"
 
 
 # ----- the static prefix clears each allow-listed model's cache floor ------------

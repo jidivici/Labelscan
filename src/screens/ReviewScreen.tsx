@@ -73,7 +73,7 @@ import {
   saveScanPhotoRotation,
 } from '../services/scanQueue';
 import {
-  filledCountFromRun,
+  filledCountFromValues,
   initialHumanReviewValue,
   normalizeFinalReviewValue,
   NOT_COMMUNICATED_VALUE,
@@ -653,9 +653,10 @@ export function ReviewScreen() {
   }, [interimValues, gs1Values]);
 
   // Effective value of each canonical field = the operator's draft if present, else the
-  // display-formatted extracted value. A machine absence deliberately remains blank:
-  // only a typed value or an explicit tap on "Marquer NC" completes it. This is exactly
-  // what handleSave persists, so the counter and the backend payload cannot diverge.
+  // display-formatted extracted value. For farmed seafood, a FAO catch area does not
+  // apply: project the explicit final-review value NC unless the operator entered a
+  // different FAO value. This is exactly what handleSave persists, so the counter and
+  // the backend payload cannot diverge.
   const effectiveValues = useMemo(() => {
     const out: Record<string, string> = {};
     for (const name of fieldOrder) {
@@ -670,8 +671,15 @@ export function ReviewScreen() {
         : displayFieldValue(name, permittedInitial) ?? '';
       out[name] = edits[name] ?? extracted;
     }
+    if (
+      reviewProfile.code === 'poissonnerie' &&
+      canonicalizeFinalReviewValue('production_method', out.production_method) === 'farmed' &&
+      !(edits.FAO_area?.trim())
+    ) {
+      out.FAO_area = NOT_COMMUNICATED_VALUE;
+    }
     return out;
-  }, [fieldsByName, edits, fieldOrder]);
+  }, [fieldsByName, edits, fieldOrder, reviewProfile.code]);
   // Recompute from the live denomination/species drafts, not only the original OCR.
   // The proposal remains explicit: it is applied only if the operator taps it.
   const allergenSuggestion = useMemo(
@@ -690,8 +698,8 @@ export function ReviewScreen() {
   );
   // "Enregistrer l'arrivage" unlocks only when every active profile field is non-blank.
   const filledCount = useMemo(
-    () => filledCountFromRun(fields, edits, reviewProfile.code),
-    [edits, fields, reviewProfile.code],
+    () => filledCountFromValues(effectiveValues, reviewProfile.code),
+    [effectiveValues, reviewProfile.code],
   );
 
   // GS1 wins on lot/DLC at T+0; the backend reconciles the same way, so the values stay

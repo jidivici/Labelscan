@@ -110,7 +110,7 @@ configuration, then:
 2. applies all Alembic migrations;
 3. seeds the demo in an idempotent one-shot service;
 4. serves the API and compiled back office on port `8000`;
-5. runs two extraction workers.
+5. runs four extraction workers.
 
 The back office is available at
 [http://localhost:8000/backoffice/o/labelscan/](http://localhost:8000/backoffice/o/labelscan/).
