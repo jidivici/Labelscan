@@ -18,10 +18,13 @@ LabelScan réunit une application de capture mobile, un back-office et un serveu
 | 16-18 · Interface API | Familles de routes, capture, revue et consultation |
 | 19-21 · Plateforme | Exécution, observabilité et qualité logicielle |
 | 22 · Références | Sources exécutables correspondant aux sections |
+| G01-G10 · Guide du dépôt | Installation, lecture du code, tests, livraison et repères RNCP 5 |
 
 Les quatre schémas sont des vues UML simplifiées : composants, séquence, états et classes de données. Leurs éléments sont éditables dans le [fichier Excalidraw](diagrams/labelscan.excalidraw). Les noms techniques correspondent aux identifiants du dépôt ; les flèches expriment un appel, une transition ou une association selon la légende.
 
 Le document est une synthèse du code LabelScan. Les numéros de version cités décrivent les dépendances et contrats enregistrés dans le dépôt. Les références S01 à S16 permettent de retrouver les implémentations détaillées. L'[inventaire OpenAPI](backend/openapi.v1.yaml) complète les exemples HTTP.
+
+Le [guide pédagogique](GUIDE-DU-DEPOT.md) accompagne la prise en main du dépôt. L'édition PDF réunit la synthèse technique et ce guide en 34 pages.
 
 <!-- page -->
 <a id="produit"></a>
@@ -167,7 +170,7 @@ Références : S04, S09, S12, S14.
 
 Le serveur forme un monolithe modulaire, exécuté dans des processus API et worker distincts. Les applications partagent la même API et le même catalogue métier.
 
-![UML de composants et connexions LabelScan](diagrams/01-composants.svg)
+![UML de composants et connexions LabelScan](diagrams/01-composants.png)
 
 Les traits pleins représentent les échanges d'exécution. Les services OCR et LLM sont appelés par le worker. PostgreSQL conserve les données structurées ; le stockage privé conserve les objets image et les artefacts de traitement.
 
@@ -230,7 +233,7 @@ Références : S05, S06, S07.
 
 Le diagramme distingue l'acceptation de la capture, l'extraction asynchrone, la revue humaine et l'enregistrement au catalogue.
 
-![UML de séquence capture et publication](diagrams/02-sequence.svg)
+![UML de séquence capture et publication](diagrams/02-sequence.png)
 
 La validation humaine et l'événement `review.finalized` sont écrits ensemble. Le consommateur de traçabilité enregistre le lot et sa projection ; le mobile et le web retrouvent ensuite l'arrivage par les routes de consultation.
 
@@ -244,7 +247,7 @@ Références : S05, S07, S08.
 
 L'état de l'ingestion décrit l'avancement serveur. Le résultat de l'extraction et la carte de scan mobile portent des informations complémentaires.
 
-![UML des états principaux d'ingestion](diagrams/03-etats.svg)
+![UML des états principaux d'ingestion](diagrams/03-etats.png)
 
 `ocr_done` identifie l'étape OCR enregistrée, avec ou sans champs d'aperçu. `extracted` et `needs_review` décrivent le résultat après gate et réconciliation ; la finalisation humaine conduit à `confirmed`. Le chemin `ocr_skipped_garbage` identifie un OCR jugé inutilisable. Une relance par `/retry` remet une extraction échouée à `raw_stored`.
 
@@ -312,7 +315,7 @@ Références : S06, S08, S10.
 
 La vue UML ci-dessous regroupe les relations qui relient capture, profil et historique. Les multiplicités indiquent le nombre de lignes associées ; les attributs sont volontairement limités aux identifiants et aux données structurantes.
 
-![UML des classes de données LabelScan](diagrams/04-modele.svg)
+![UML des classes de données LabelScan](diagrams/04-modele.png)
 
 Le portail appartient à un magasin et porte la profession. L'ingestion référence ce contexte et sa version de profil. Les artefacts et les runs appartiennent à l'ingestion ; les champs appartiennent à une run.
 
@@ -516,4 +519,4 @@ Les chemins ci-dessous identifient les sources de cette synthèse. Les référen
 | S15 | [OpenAPI](backend/openapi.v1.yaml) | Inventaire HTTP généré |
 | S16 | [Manifeste démo](../server/demo/manifest.v2.json) et [seed](../server/scripts/seed_demo.py) | Exemples photographiques |
 
-Le PDF et les SVG sont générés à partir de ce texte et des définitions de diagrammes par `scripts/build_documentation.py`. Le fichier Excalidraw rassemble les quatre schémas sur un même canevas éditable.
+Le PDF et les aperçus PNG sont générés à partir des sources Markdown et des définitions de diagrammes par `scripts/build_documentation.py`. Le fichier Excalidraw rassemble les quatre schémas sur un même canevas éditable.

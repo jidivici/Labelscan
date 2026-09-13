@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Build the public PDF, vector UML illustrations and editable Excalidraw board.
+"""Build the public PDF, GitHub PNG previews and editable Excalidraw board.
 
 Usage: python scripts/build_documentation.py
-Requires reportlab. Outputs are deterministic for the same source and fonts.
+Requires reportlab, DejaVu Sans and Poppler (pdftoppm).
+Outputs are deterministic for the same source, fonts and rendering tools.
 The Markdown and the diagram definitions below are the authoring sources.
 """
 
@@ -15,6 +16,9 @@ import math
 import os
 from pathlib import Path
 import re
+import shutil
+import subprocess
+import tempfile
 from urllib.parse import quote
 
 from reportlab.lib import colors
@@ -45,6 +49,8 @@ def register_fonts():
     for suffix, name in [("", "Doc"), ("-Bold", "Doc-Bold"), ("-Oblique", "Doc-Italic")]:
         pdfmetrics.registerFont(TTFont(name, str(directory / f"DejaVuSans{suffix}.ttf")))
     pdfmetrics.registerFontFamily("Doc", normal="Doc", bold="Doc-Bold", italic="Doc-Italic", boldItalic="Doc-Bold")
+    pdfmetrics.registerFont(TTFont("Doc-Mono", str(directory / "DejaVuSansMono.ttf")))
+    return directory
 
 
 class Diagram:
@@ -287,7 +293,10 @@ def inline(text):
 def render_document(ds):
     OUT.parent.mkdir(parents=True, exist_ok=True)
     chunks = (DOCS / "TECHNICAL-DOCUMENTATION-FR.md").read_text().split("<!-- page -->")
+    chunks += (DOCS / "GUIDE-DU-DEPOT.md").read_text().split("<!-- page -->")[1:]
     total = len(chunks)
+    if total > 50:
+        raise RuntimeError(f"Documentation exceeds the 50-page budget: {total}")
     c = canvas.Canvas(str(OUT), pagesize=A4, invariant=1, pageCompression=1)
     c.setTitle("LabelScan | Documentation technique")
     c.setAuthor("LabelScan")
@@ -298,7 +307,8 @@ def render_document(ds):
     small = ParagraphStyle("small",parent=body,fontSize=8.7,leading=12.5,textColor=colors.HexColor(MUTED))
     cell = ParagraphStyle("cell",parent=body,fontSize=8.8,leading=12.6,spaceAfter=0)
     head = ParagraphStyle("head",parent=body,fontName="Doc-Bold",fontSize=22,leading=28,textColor=colors.HexColor(NAVY),spaceAfter=20)
-    code = ParagraphStyle("code",fontName="Courier",fontSize=9,leading=12,textColor=colors.HexColor(INK),backColor=colors.HexColor(PALE),borderPadding=10,spaceAfter=14)
+    subhead = ParagraphStyle("subhead",parent=body,fontName="Doc-Bold",fontSize=12,leading=17,textColor=colors.HexColor(TEAL),spaceAfter=9)
+    code = ParagraphStyle("code",fontName="Doc-Mono",fontSize=9,leading=13,textColor=colors.HexColor(INK),spaceAfter=19)
     layouts=[]
     # Cover uses the same palette as the UML set.
     c.setFillColor(colors.HexColor(NAVY)); c.rect(0,0,w,h,fill=1,stroke=0)
@@ -317,7 +327,7 @@ def render_document(ds):
     for x,n,label in [(48,"3","métiers"),(221,"2","interfaces"),(394,"1","parcours partagé")]:
         c.setFillColor(colors.HexColor("#92D6C7"));c.setFont("Doc-Bold",28);c.drawString(x,177,n)
         c.setFillColor(colors.white);c.setFont("Doc",10);c.drawString(x,153,label)
-    c.setFillColor(colors.HexColor("#ADC3C9"));c.setFont("Doc",9);c.drawString(48,62,"Édition septembre 2026 · Architecture & expérience produit")
+    c.setFillColor(colors.HexColor("#ADC3C9"));c.setFont("Doc",9);c.drawString(48,62,"Édition septembre 2026 · Architecture, usages & guide du dépôt")
     c.showPage()
     for index,chunk in enumerate(chunks[1:],start=2):
         c.setFillColor(colors.HexColor(PAPER));c.rect(0,0,w,h,fill=1,stroke=0)
@@ -341,6 +351,8 @@ def render_document(ds):
                 anchor=f"section-{index}"
                 c.bookmarkPage(anchor);c.addOutlineEntry(title,anchor,0)
                 flow=Paragraph(inline(title),head);pos+=1
+            elif line.startswith('### '):
+                flow=Paragraph(inline(line[4:]),subhead);pos+=1
             elif line.startswith('```'):
                 block=[];pos+=1
                 while pos<len(lines) and not lines[pos].startswith('```'):block.append(lines[pos]);pos+=1
@@ -358,31 +370,64 @@ def render_document(ds):
                 flow=Table([[Paragraph(inline(v),cell) for v in row] for row in rows],colWidths=[content_width*r for r in ratios],hAlign='LEFT')
                 flow.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor(PALE)),('LINEBELOW',(0,0),(-1,0),1,colors.HexColor(TEAL)),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F4F7F8')]),('LINEBELOW',(0,1),(-1,-1),.3,colors.HexColor('#DEE8E9')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),9),('RIGHTPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)]))
                 flow.spaceAfter=16
+            elif re.match(r'^(?:- |\d+\. )', line):
+                label, text = re.match(r'^(-|\d+\.) (.*)', line).groups()
+                flow=Paragraph(inline(text),body,bulletText='•' if label=='-' else label)
+                flow.style=ParagraphStyle('list-item',parent=body,leftIndent=14,bulletIndent=0,spaceAfter=7)
+                pos+=1
             else:
                 paragraph=[line];pos+=1
-                while pos<len(lines) and lines[pos].strip() and not lines[pos].startswith(('|','##','```','![','<a ')):
+                while pos<len(lines) and lines[pos].strip() and not lines[pos].startswith(('|','##','```','![','<a ','- ')) and not re.match(r'^\d+\. ',lines[pos]):
                     paragraph.append(lines[pos].strip());pos+=1
                 text=' '.join(paragraph)
                 flow=Paragraph(inline(text),small if text.startswith('Références :') else body)
             fw,fh=flow.wrap(content_width,y-60)
             if y-fh<60:raise RuntimeError(f"Text overflow page {index}: {line[:80]} (y={y}, height={fh})")
-            flow.drawOn(c,left,y-fh);y-=fh+getattr(flow,'spaceAfter',10)
+            if isinstance(flow,Preformatted):
+                if any(pdfmetrics.stringWidth(t,'Doc-Mono',9)>content_width-20 for t in flow.lines):
+                    raise RuntimeError(f"Code line overflow page {index}")
+                c.setFillColor(colors.HexColor(PALE))
+                c.roundRect(left,y-fh-7,content_width,fh+14,5,fill=1,stroke=0)
+                flow.drawOn(c,left+10,y-fh)
+            else:
+                flow.drawOn(c,left,y-fh)
+            y-=fh+getattr(flow,'spaceAfter',10)
         layouts.append({"page":index,"remaining_pt":round(y-60,1)})
         c.showPage()
     c.save()
     return {"pdf":str(OUT.relative_to(ROOT)),"pages":total,"layout":layouts}
 
 
+def export_previews(ds, destination, font_dir):
+    """Rasterize our vector drawings, including embedded fonts, for GitHub."""
+    bundled = Path.home() / '.cache/codex-runtimes/codex-primary-runtime/dependencies/bin/override/pdftoppm'
+    executable = os.environ.get('LABELSCAN_DOC_PDFTOPPM') or shutil.which('pdftoppm')
+    executable = executable or (str(bundled) if bundled.is_file() else None)
+    if not executable:
+        raise RuntimeError('Install Poppler or set LABELSCAN_DOC_PDFTOPPM')
+    with tempfile.TemporaryDirectory(prefix='labelscan-diagrams-') as tmp:
+        folder = Path(tmp)
+        config = folder / 'fonts.conf'
+        config.write_text('<fontconfig><dir>' + html.escape(str(font_dir)) + '</dir><cachedir>' + html.escape(str(folder / 'font-cache')) + '</cachedir></fontconfig>')
+        env = dict(os.environ, FONTCONFIG_FILE=str(config))
+        for d in ds:
+            vector = folder / f'{d.slug}.pdf'
+            c = canvas.Canvas(str(vector), pagesize=(d.width,d.height), invariant=1)
+            c.setFillColor(colors.white);c.rect(0,0,d.width,d.height,fill=1,stroke=0)
+            d.pdf(c,0,d.height,d.width);c.showPage();c.save()
+            subprocess.run([executable,'-png','-singlefile','-r','144',str(vector),str(destination / d.slug)],check=True,env=env)
+
+
 def main():
-    register_fonts()
+    font_dir = register_fonts()
     ds=diagrams()
     destination=DOCS/'diagrams';destination.mkdir(parents=True,exist_ok=True)
     elements=[]
     for i,d in enumerate(ds):
-        (destination/f'{d.slug}.svg').write_text(d.svg(),encoding='utf-8')
         elements.extend(d.excalidraw((i%2)*1150,(i//2)*1030))
     board={"type":"excalidraw","version":2,"source":"https://excalidraw.com","elements":elements,"appState":{"gridSize":None,"viewBackgroundColor":"#ffffff"},"files":{}}
     (destination/'labelscan.excalidraw').write_text(json.dumps(board,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+    export_previews(ds,destination,font_dir)
     print(json.dumps(render_document(ds),ensure_ascii=False,indent=2))
 
 
