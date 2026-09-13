@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 770" role="img" aria-labelledby="title">
+<title id="title">UML - principaux états de l&#x27;ingestion</title>
+<rect width="100%" height="100%" fill="#ffffff"/>
+<circle cx="500" cy="20" r="7" fill="#223F4B"/>
+<polyline points="500,28 500,70" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="495.21537912477646,60.09508187412055 500,70 504.78462087522354,60.09508187412055" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="365" y="70" width="270" height="75" rx="10" fill="#EAF1FB" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="366.3" y="69.3" width="268.1" height="76.4" rx="10" fill="none" stroke="#223F4B" stroke-width="0.55" opacity="0.22"/>
+<text x="500.0" y="117.05" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="23" font-weight="700" fill="#223F4B">raw_stored</text>
+<polyline points="500,145 500,235" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="495.21537912477646,225.09508187412055 500,235 504.78462087522354,225.09508187412055" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="370" y="180.45" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400" fill="#647985">Étape OCR</text>
+<text x="370" y="202.54999999999998" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400" fill="#647985">enregistrée</text>
+<rect x="365" y="235" width="270" height="75" rx="10" fill="#EAF1FB" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="366.3" y="234.3" width="268.1" height="76.4" rx="10" fill="none" stroke="#223F4B" stroke-width="0.55" opacity="0.22"/>
+<text x="500.0" y="282.05" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="23" font-weight="700" fill="#223F4B">ocr_done</text>
+<rect x="20" y="410" width="310" height="85" rx="10" fill="#FFF4E4" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="21.3" y="409.3" width="308.1" height="86.4" rx="10" fill="none" stroke="#223F4B" stroke-width="0.55" opacity="0.22"/>
+<text x="175.0" y="462.05" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="23" font-weight="700" fill="#223F4B">ocr_skipped_garbage</text>
+<rect x="365" y="410" width="270" height="85" rx="10" fill="#EAF7F3" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="366.3" y="409.3" width="268.1" height="86.4" rx="10" fill="none" stroke="#223F4B" stroke-width="0.55" opacity="0.22"/>
+<text x="500.0" y="462.05" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="23" font-weight="700" fill="#223F4B">extracted</text>
+<rect x="705" y="410" width="270" height="85" rx="10" fill="#FFF4E4" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="706.3" y="409.3" width="268.1" height="86.4" rx="10" fill="none" stroke="#223F4B" stroke-width="0.55" opacity="0.22"/>
+<text x="840.0" y="462.05" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="23" font-weight="700" fill="#223F4B">needs_review</text>
+<polyline points="365,109 176,109 176,410" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="171.21537912477646,400.0950818741206 176,410 180.78462087522354,400.0950818741206" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="20" y="277.3" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="18" font-weight="400" fill="#647985">OCR inutilisable</text>
+<polyline points="500,310 500,410" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="495.21537912477646,400.0950818741206 500,410 504.78462087522354,400.0950818741206" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="515" y="346.45" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400" fill="#647985">Gate +</text>
+<text x="515" y="368.55" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400" fill="#647985">réconciliation</text>
+<polyline points="635,273 840,273 840,410" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="835.2153791247765,400.0950818741206 840,410 844.7846208752235,400.0950818741206" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="850" y="312.45" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400" fill="#647985">Gate +</text>
+<text x="850" y="334.55" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400" fill="#647985">réconciliation</text>
+<polyline points="635,109 955,109 955,205" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="950.2153791247765,195.09508187412055 955,205 959.7846208752235,195.09508187412055" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="777" y="139.3" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="18" font-weight="400" fill="#647985">Échec fournisseur</text>
+<rect x="695" y="205" width="280" height="60" rx="10" fill="#F7ECEC" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="696.3" y="204.3" width="278.1" height="61.4" rx="10" fill="none" stroke="#223F4B" stroke-width="0.55" opacity="0.22"/>
+<text x="835.0" y="244.55" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="23" font-weight="700" fill="#223F4B">extraction_failed</text>
+<polyline points="635,250 670,250 670,235 695,235" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="685.0950818741205,239.78462087522354 695,235 685.0950818741205,230.21537912477646" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<polyline points="750,205 750,166 620,166 620,145" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="624.7846208752235,154.90491812587945 620,145 615.2153791247765,154.90491812587945" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="648" y="191.3" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="18" font-weight="400" fill="#647985">/retry</text>
+<rect x="365" y="640" width="270" height="85" rx="10" fill="#EAF7F3" stroke="#223F4B" stroke-width="1.7"/>
+<rect x="366.3" y="639.3" width="268.1" height="86.4" rx="10" fill="none" stroke="#223F4B" stroke-width="0.55" opacity="0.22"/>
+<text x="500.0" y="692.05" text-anchor="middle" font-family="DejaVu Sans,Arial,sans-serif" font-size="23" font-weight="700" fill="#223F4B">confirmed</text>
+<polyline points="500,495 500,640" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="495.21537912477646,630.0950818741205 500,640 504.78462087522354,630.0950818741205" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="519" y="565.3" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="18" font-weight="400" fill="#647985">Revue complète</text>
+<polyline points="175,495 175,682 365,682" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="355.0950818741206,686.7846208752235 365,682 355.0950818741206,677.2153791247765" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<polyline points="840,495 840,682 635,682" fill="none" stroke="#223F4B" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<polyline points="644.9049181258795,677.2153791247765 635,682 644.9049181258795,686.7846208752235" fill="none" stroke="#223F4B" stroke-width="1.7"/>
+<text x="15" y="753.45" text-anchor="start" font-family="DejaVu Sans,Arial,sans-serif" font-size="17" font-weight="400" fill="#647985">Les états extracted / needs_review sont aussi accessibles sans étape ocr_done.</text>
+</svg>

@@ -376,7 +376,7 @@ def _validated_fields(data: object, profile: TradeProfile) -> list[dict]:
 
 
 # STATIC, cacheable system prefix (Work Item B). Authored faithfully to the
-# seafood-label-extraction contract (docs/extraction/PROMPT-CONTRACT.md sec.3) for
+# seafood-label-extraction contract (docs/TECHNICAL-DOCUMENTATION-FR.md#contrat-ia) for
 # the NON-FABRICATION rules + per-field guidance + few-shot examples. Per the
 # flat-shape decision it describes the CURRENT adapter output (value as a single
 # string, fields as an array of {name,...}, 16 names incl. gtin) — it deliberately

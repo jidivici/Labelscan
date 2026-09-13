@@ -7,7 +7,7 @@
  * is not a constant (fresh fish = days, frozen = months), so a computed expiry would
  * be a fabrication of a safety-critical value and drive a wrong HACCP alert. The
  * operator reads every value off the label; the mask only formats their keystrokes.
- * (Consistent with the no-fabrication gate — docs/extraction/PROMPT-CONTRACT.md.)
+ * (Consistent with the evidence gate — docs/TECHNICAL-DOCUMENTATION-FR.md#contrat-ia.)
  */
 
 /** Fields the operator types as a calendar date (number-pad + DD/MM/YYYY mask). */

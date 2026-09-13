@@ -28,6 +28,13 @@ test-results/
 playwright-report/
 .nyc_output/
 output/
+# Public documentation artifact only; all other build outputs remain local.
+!/output/
+/output/*
+!/output/pdf/
+/output/pdf/*
+!/output/pdf/LabelScan_Documentation_Technique.pdf
+/tmp/pdfs/
 *.log
 npm-debug.*
 yarn-debug.*
