@@ -57,7 +57,10 @@ https://label-scan.fr {
 	@oversized_upload {
 		method POST
 		path /v1/ingestions
-		expression `int({http.request.header.Content-Length}) > 11534336`
+		# Caddy may evaluate matcher modules before method/path matching. Guard
+		# the conversion inside CEL so requests without Content-Length (including
+		# every ordinary GET) cannot fail with a proxy-generated HTTP 500.
+		expression `{http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 11534336`
 	}
 	respond @oversized_upload 413
 
