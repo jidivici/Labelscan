@@ -54,6 +54,13 @@ https://label-scan.fr {
 	# The application accepts a 10 MiB label image. The extra MiB covers the
 	# multipart envelope while rejecting oversized unauthenticated uploads at
 	# the edge before they consume API resources.
+	@oversized_upload {
+		method POST
+		path /v1/ingestions
+		expression `int({http.request.header.Content-Length}) > 11534336`
+	}
+	respond @oversized_upload 413
+
 	request_body {
 		max_size 11MiB
 	}
