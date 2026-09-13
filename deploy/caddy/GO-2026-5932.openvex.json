@@ -1,9 +1,9 @@
 {
   "@context": "https://openvex.dev/ns/v0.2.0",
-  "@id": "https://label-scan.fr/security/vex/GO-2026-5932/caddy-2.11.4-labelscan.5",
+  "@id": "https://label-scan.fr/security/vex/GO-2026-5932/caddy-2.11.4-labelscan.6",
   "author": "LabelScan Security",
-  "timestamp": "2026-09-13T13:10:33Z",
-  "version": 4,
+  "timestamp": "2026-09-13T13:16:20Z",
+  "version": 5,
   "statements": [
     {
       "vulnerability": {
