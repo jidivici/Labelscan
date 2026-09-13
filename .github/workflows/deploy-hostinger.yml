@@ -11,6 +11,11 @@ on:
         required: false
         default: ""
         type: string
+      fresh_build:
+        description: "Force a clean Docker rebuild without using the VPS build cache"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -169,9 +174,17 @@ jobs:
         run: |
           set -Eeuo pipefail
           if [[ -z "$RESET_DEMO" ]]; then
-            sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA"
+            if [[ "${{ inputs.fresh_build }}" == "true" ]]; then
+              sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA" --fresh-build
+            else
+              sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA"
+            fi
           elif [[ "$RESET_DEMO" == "RESET_DEMO" ]]; then
-            sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA" --reset-demo
+            if [[ "${{ inputs.fresh_build }}" == "true" ]]; then
+              sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA" --reset-demo --fresh-build
+            else
+              sudo --non-interactive /usr/local/sbin/labelscan-deploy "$GITHUB_WORKSPACE" "$GITHUB_SHA" --reset-demo
+            fi
           else
             echo "reset_demo must be empty or exactly RESET_DEMO" >&2
             exit 1

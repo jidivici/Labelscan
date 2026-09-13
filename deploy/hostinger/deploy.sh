@@ -28,6 +28,7 @@ die() {
 }
 
 reset_demo=0
+fresh_build=0
 reset_started=0
 postgres_volume_migrated=0
 consistent_dump_file=""
@@ -37,10 +38,19 @@ restored_counts_file=""
 case $# in
   2) ;;
   3)
-    [[ "$3" == "--reset-demo" ]] || die "usage: $0 <checked-out-repository> <commit-sha> [--reset-demo]"
-    reset_demo=1
+    case "$3" in
+      --reset-demo) reset_demo=1 ;;
+      --fresh-build) fresh_build=1 ;;
+      *) die "usage: $0 <checked-out-repository> <commit-sha> [--reset-demo|--fresh-build]" ;;
+    esac
     ;;
-  *) die "usage: $0 <checked-out-repository> <commit-sha> [--reset-demo]" ;;
+  4)
+    [[ "$3" == "--reset-demo" && "$4" == "--fresh-build" ]] \
+      || die "usage: $0 <checked-out-repository> <commit-sha> [--reset-demo] [--fresh-build]"
+    reset_demo=1
+    fresh_build=1
+    ;;
+  *) die "usage: $0 <checked-out-repository> <commit-sha> [--reset-demo] [--fresh-build]" ;;
 esac
 
 checkout_root="$(realpath "$1")"
@@ -488,10 +498,17 @@ ensure_demo_credentials
 rotate_jwt_once
 
 printf '==> Building the private production images on the VPS\n'
+build_options=(--pull)
+if [[ "$fresh_build" -eq 1 ]]; then
+  printf '==> Forcing a clean Docker rebuild\n'
+  build_options+=(--no-cache)
+else
+  printf '==> Reusing cached Docker layers\n'
+fi
 docker compose \
   -f "${checkout_root}/${REPOSITORY_COMPOSE}" \
   -f "${checkout_root}/${REPOSITORY_BUILD_COMPOSE}" \
-  build --pull --no-cache migrate caddy db
+  build "${build_options[@]}" migrate caddy db
 for image_name in labelscan-local labelscan-caddy labelscan-postgres; do
   image_revision="$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
     "${image_name}:${commit_sha}")"
