@@ -59,11 +59,12 @@ import { submitFieldOverrides } from '../services/fieldOverrideSubmit';
 import { queryClient } from '../services/queryClient';
 import { PhotoViewerModal } from '../components/PhotoViewerModal';
 import { RotatedPhoto } from '../components/RotatedPhoto';
+import { PhotoLoadRetry } from '../components/PhotoLoadRetry';
 import { ProductionMethodSelector } from '../components/ProductionMethodSelector';
 import type { ArticlesStackParamList } from '../navigation/RootNavigator';
 import { colors, spacing, radius, typography, elevation } from '../theme';
 import { useAuth } from '../context/AuthContext';
-import { useAuthenticatedImageSource } from '../hooks/useAuthenticatedImageSource';
+import { useAuthenticatedImage } from '../hooks/useAuthenticatedImageSource';
 import { catalogQueryKey } from '../services/catalogApi';
 import { operatorContextKey } from '../services/authStorage';
 import { suggestAllergen } from '../services/allergenSuggestions';
@@ -386,7 +387,8 @@ export function ArticleDetailScreen() {
   const [loadedScopeKey, setLoadedScopeKey] = useState<string | null>(null);
   const article = loadedScopeKey === currentScopeKey ? loadedArticle : null;
   const scopeLoading = currentScopeKey != null && loadedScopeKey !== currentScopeKey;
-  const photoSource = useAuthenticatedImageSource(article?.photo_uri);
+  const photo = useAuthenticatedImage(article?.photo_uri);
+  const photoSource = photo.source;
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState(false);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -758,6 +760,7 @@ export function ArticleDetailScreen() {
         visible={viewerOpen && photoSource != null}
         photoUri={photoSource?.uri}
         headers={photoSource?.headers}
+        onImageError={photo.onError}
         halfTurn={article.photo_rotation_degrees === 180}
         baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
         onClose={() => setViewerOpen(false)}
@@ -831,6 +834,7 @@ export function ArticleDetailScreen() {
               >
                 <RotatedPhoto
                   source={photoSource}
+                  onError={photo.onError}
                   resizeMode="cover"
                   halfTurn={article.photo_rotation_degrees === 180}
                   baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
@@ -841,6 +845,10 @@ export function ArticleDetailScreen() {
                   <Text style={[typography.labelSmall, styles.photoHintText]}>Agrandir</Text>
                 </View>
               </Pressable>
+            ) : photo.failed ? (
+              <View style={[styles.photoCard, styles.photoPlaceholder]}>
+                <PhotoLoadRetry onRetry={photo.retry} />
+              </View>
             ) : (
               <View style={[styles.photoCard, styles.photoPlaceholder]}>
                 <View style={styles.placeholderIcon}>

@@ -1,4 +1,5 @@
 jest.mock('../services/api', () => ({
+  ApiError: jest.requireActual<typeof import('../services/api')>('../services/api').ApiError,
   apiRequest: jest.fn(),
 }));
 
@@ -10,8 +11,8 @@ jest.mock('../services/authStorage', () => ({
   setUsername: jest.fn(),
 }));
 
-import { apiRequest } from '../services/api';
-import { login, restoreAuthentication } from '../services/auth';
+import { ApiError, apiRequest } from '../services/api';
+import { isAuthenticationRestoreRetryable, login, restoreAuthentication } from '../services/auth';
 import {
   clearSessionCredentials,
   getRefreshToken,
@@ -48,9 +49,12 @@ function managerResponse(overrides: Record<string, unknown> = {}) {
 
 describe('mobile manager authentication', () => {
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     clearSessionCredentialsMock.mockResolvedValue(undefined);
     getRefreshTokenMock.mockResolvedValue('stored-refresh');
+    setTokensMock.mockResolvedValue(undefined);
+    setUsernameMock.mockResolvedValue(undefined);
+    setOperatorContextMock.mockResolvedValue(undefined);
   });
 
   it('uses the manager-only mobile endpoint and persists the session', async () => {
@@ -173,5 +177,210 @@ describe('mobile manager authentication', () => {
 
     await expect(restoreAuthentication()).resolves.toBeNull();
     expect(clearSessionCredentialsMock).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['NETWORK_ERROR', 0],
+    ['TIMEOUT', 0],
+    ['HTTP_408', 408],
+    ['HTTP_429', 429],
+    ['HTTP_500', 500],
+    ['HTTP_502', 502],
+    ['HTTP_503', 503],
+    ['HTTP_504', 504],
+  ])('preserves the persisted session and exposes a retryable %s failure', async (code, status) => {
+    const error = new ApiError({
+      code: code as string,
+      status: status as number,
+      message: 'temporary failure',
+      // The transport/status classification remains authoritative even if a
+      // server does not advertise that a temporary service error is retryable.
+      retriable: false,
+    });
+    requestMock.mockRejectedValue(error);
+
+    await expect(restoreAuthentication()).rejects.toBe(error);
+
+    expect(isAuthenticationRestoreRetryable(error)).toBe(true);
+    expect(clearSessionCredentialsMock).not.toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+    expect(setUsernameMock).not.toHaveBeenCalled();
+    expect(setOperatorContextMock).not.toHaveBeenCalled();
+  });
+
+  it.each([401, 403])('rejects HTTP %i permanently even if advertised as retryable', async (status) => {
+    const error = new ApiError({
+      code: status === 401 ? 'UNAUTHENTICATED' : 'FORBIDDEN',
+      status,
+      message: 'session no longer authorized',
+      retriable: true,
+    });
+    requestMock.mockRejectedValue(error);
+
+    await expect(restoreAuthentication()).resolves.toBeNull();
+
+    expect(isAuthenticationRestoreRetryable(error)).toBe(false);
+    expect(clearSessionCredentialsMock).toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+    expect(setUsernameMock).not.toHaveBeenCalled();
+    expect(setOperatorContextMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['CONFIG_ERROR', 0],
+    ['INVALID_RESPONSE', 200],
+    ['SESSION_CHANGED', 0],
+    ['HTTP_400', 400],
+  ])('does not mistake %s for a temporary network failure', async (code, status) => {
+    const error = new ApiError({
+      code: code as string,
+      status: status as number,
+      message: 'permanent failure',
+      retriable: true,
+    });
+    requestMock.mockRejectedValue(error);
+
+    await expect(restoreAuthentication()).resolves.toBeNull();
+
+    expect(isAuthenticationRestoreRetryable(error)).toBe(false);
+    expect(clearSessionCredentialsMock).toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+  });
+
+  it('stops an already canceled restoration before reading credentials or sending a request', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(restoreAuthentication({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(getRefreshTokenMock).not.toHaveBeenCalled();
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(clearSessionCredentialsMock).not.toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+  });
+
+  it('stops cancellation during credential loading before a request or any cleanup', async () => {
+    const controller = new AbortController();
+    getRefreshTokenMock.mockImplementationOnce(async () => {
+      controller.abort();
+      return 'stored-refresh';
+    });
+
+    await expect(restoreAuthentication({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(clearSessionCredentialsMock).not.toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+  });
+
+  it('ignores a successful response received after cancellation without storing or purging a session', async () => {
+    const controller = new AbortController();
+    requestMock.mockImplementationOnce(async () => {
+      controller.abort();
+      return managerResponse();
+    });
+
+    await expect(restoreAuthentication({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(requestMock).toHaveBeenCalledWith('/v1/mobile/auth/refresh', {
+      method: 'POST',
+      body: { refresh_token: 'stored-refresh' },
+      skipAuth: true,
+      signal: controller.signal,
+    });
+    expect(clearSessionCredentialsMock).not.toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+    expect(setUsernameMock).not.toHaveBeenCalled();
+    expect(setOperatorContextMock).not.toHaveBeenCalled();
+  });
+
+  it('treats a canceled transport timeout as cancellation without purging credentials', async () => {
+    const controller = new AbortController();
+    requestMock.mockImplementationOnce(async () => {
+      controller.abort();
+      throw new ApiError({ code: 'TIMEOUT', status: 0, message: 'aborted', retriable: true });
+    });
+
+    await expect(restoreAuthentication({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(clearSessionCredentialsMock).not.toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+    expect(setUsernameMock).not.toHaveBeenCalled();
+    expect(setOperatorContextMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { access_token: undefined },
+    { refresh_token: undefined },
+    { user: undefined },
+    { user: { ...managerResponse().user, business_portal_id: null } },
+    { user: { ...managerResponse().user, role: 'admin' } },
+  ])('purges an incomplete or unauthorized cold-start response: %j', async (overrides) => {
+    requestMock.mockResolvedValue(managerResponse(overrides));
+
+    await expect(restoreAuthentication()).resolves.toBeNull();
+
+    expect(clearSessionCredentialsMock).toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+    expect(setUsernameMock).not.toHaveBeenCalled();
+    expect(setOperatorContextMock).not.toHaveBeenCalled();
+  });
+
+  it('clears orphaned credentials without a request when no refresh token exists', async () => {
+    getRefreshTokenMock.mockResolvedValue(null);
+
+    await expect(restoreAuthentication()).resolves.toBeNull();
+
+    expect(requestMock).not.toHaveBeenCalled();
+    expect(clearSessionCredentialsMock).toHaveBeenCalled();
+    expect(setTokensMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed and rolls back credentials when cold-start persistence partially fails', async () => {
+    requestMock.mockResolvedValue(managerResponse());
+    setOperatorContextMock.mockRejectedValueOnce(new Error('keystore failure'));
+
+    await expect(restoreAuthentication()).resolves.toBeNull();
+
+    expect(clearSessionCredentialsMock).toHaveBeenCalled();
+  });
+
+  it('propagates a failed credential purge instead of reporting a restored session', async () => {
+    const purgeError = new Error('SECURE_SESSION_PURGE_FAILED');
+    requestMock.mockRejectedValue(new ApiError({
+      code: 'UNAUTHENTICATED',
+      status: 401,
+      message: 'expired',
+    }));
+    clearSessionCredentialsMock.mockRejectedValue(purgeError);
+
+    await expect(restoreAuthentication()).rejects.toBe(purgeError);
+
+    expect(setTokensMock).not.toHaveBeenCalled();
+    expect(setUsernameMock).not.toHaveBeenCalled();
+    expect(setOperatorContextMock).not.toHaveBeenCalled();
+  });
+
+  it('does not purge a newer session when canceled during a failed credential write', async () => {
+    const controller = new AbortController();
+    requestMock.mockResolvedValue(managerResponse());
+    setOperatorContextMock.mockImplementationOnce(async () => {
+      controller.abort();
+      throw new Error('MOBILE_SESSION_CHANGED');
+    });
+
+    await expect(restoreAuthentication({ signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+
+    expect(clearSessionCredentialsMock).not.toHaveBeenCalled();
   });
 });

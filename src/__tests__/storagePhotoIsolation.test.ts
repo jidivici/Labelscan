@@ -1,10 +1,15 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 
 import {
   deletePendingPhotoStrict,
   isCanonicalPendingPhotoUri,
   retainLocalArticlePhotosForScope,
+  cacheRemoteArticlePhoto,
+  getCachedRemoteArticlePhoto,
+  clearLocalArticlePhotos,
 } from '../services/storage';
+import { setOperatorContext, captureActiveSession, invalidateActiveSessionWork } from '../services/authStorage';
 
 const mockFs = FileSystem as typeof FileSystem & {
   __reset: () => void;
@@ -48,5 +53,32 @@ describe('photo cache path isolation', () => {
 
     expect(remove).toHaveBeenCalledWith(`${root}${foreign}`, { idempotent: true });
     expect(remove).not.toHaveBeenCalledWith(`${root}${keep}`, expect.anything());
+  });
+
+  it('writes binary downloads in the operator scope and purges them on logout', async () => {
+    await setOperatorContext({ organizationId: 'org', actorId: 'actor', businessPortalId: 'portal', tradeCode: 'poissonnerie' });
+    const fence = (await captureActiveSession())!;
+    const bytes = new Uint8Array([255, 216, 255, 217]);
+    const write = jest.spyOn(File.prototype, 'write');
+    const uri = await cacheRemoteArticlePhoto('batch-a', bytes, fence);
+    expect(uri).toBe(`${FileSystem.documentDirectory}photos/org%3Aactor%3Aportal%3Apoissonnerie/remote-batch-a.jpg`);
+    expect(write).toHaveBeenCalledWith(bytes);
+    await expect(getCachedRemoteArticlePhoto('batch-a', fence)).resolves.toBe(uri);
+    invalidateActiveSessionWork();
+    await clearLocalArticlePhotos();
+    await expect(FileSystem.getInfoAsync(uri)).resolves.toEqual({ exists: false });
+    await expect(cacheRemoteArticlePhoto('batch-a', bytes, fence)).rejects.toThrow('MOBILE_SESSION_CHANGED');
+    expect(write).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not write a late download if logout occurs while creating its directory', async () => {
+    await setOperatorContext({ organizationId: 'org', actorId: 'actor', businessPortalId: 'portal', tradeCode: 'poissonnerie' });
+    const fence = (await captureActiveSession())!;
+    jest.spyOn(FileSystem, 'makeDirectoryAsync').mockImplementationOnce(async () => {
+      invalidateActiveSessionWork();
+    });
+    const write = jest.spyOn(File.prototype, 'write');
+    await expect(cacheRemoteArticlePhoto('batch-a', new Uint8Array([1]), fence)).rejects.toThrow('MOBILE_SESSION_CHANGED');
+    expect(write).not.toHaveBeenCalled();
   });
 });

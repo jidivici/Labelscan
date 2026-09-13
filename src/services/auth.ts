@@ -7,7 +7,7 @@
  * centrally in services/api.ts.
  */
 
-import { apiRequest } from './api';
+import { ApiError, apiRequest } from './api';
 import {
   clearSessionCredentials,
   getRefreshToken,
@@ -69,7 +69,9 @@ function operatorSession(response: LoginResponse): OperatorSession {
 async function persistSession(
   response: LoginResponse,
   fallbackUsername?: string,
+  signal?: AbortSignal,
 ): Promise<OperatorSession> {
+  throwIfRestoreAborted(signal);
   if (!response?.access_token || !response.refresh_token) {
     throw new Error('Login response did not include session tokens');
   }
@@ -86,6 +88,9 @@ async function persistSession(
       }),
     ]);
   } catch (error) {
+    // A canceled bootstrap may have been superseded by logout or another login.
+    // Its queued writes are fenced by authStorage; never purge the newer session.
+    throwIfRestoreAborted(signal);
     // SecureStore writes are independent native calls: fail closed if only part of
     // the session landed, otherwise a token could survive without its portal context.
     await clearSessionCredentials();
@@ -128,8 +133,26 @@ export async function logout(): Promise<void> {
   }
 }
 
-export async function restoreAuthentication(): Promise<OperatorSession | null> {
+/** Only a temporary connection/service failure may retain a boot credential. */
+export function isAuthenticationRestoreRetryable(error: unknown): boolean {
+  if (!(error instanceof ApiError) || error.status === 401 || error.status === 403) return false;
+  return error.code === 'NETWORK_ERROR' || error.code === 'TIMEOUT'
+    || error.status === 408 || error.status === 429 || error.status >= 500;
+}
+
+function throwIfRestoreAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const error = new Error('Authentication restoration canceled');
+  error.name = 'AbortError';
+  throw error;
+}
+
+export async function restoreAuthentication(
+  { signal }: { signal?: AbortSignal } = {},
+): Promise<OperatorSession | null> {
+  throwIfRestoreAborted(signal);
   const refreshToken = await getRefreshToken();
+  throwIfRestoreAborted(signal);
   if (!refreshToken) {
     await clearSessionCredentials();
     return null;
@@ -139,13 +162,21 @@ export async function restoreAuthentication(): Promise<OperatorSession | null> {
       method: 'POST',
       body: { refresh_token: refreshToken },
       skipAuth: true,
+      ...(signal ? { signal } : {}),
     });
+    throwIfRestoreAborted(signal);
     if (!res.access_token || !res.refresh_token) {
       await clearSessionCredentials();
       return null;
     }
-    return await persistSession(res);
-  } catch {
+    return await persistSession(res, undefined, signal);
+  } catch (error) {
+    // apiRequest reports caller aborts as TIMEOUT. Cancellation must never
+    // clear credentials or schedule another attempt from this bootstrap.
+    throwIfRestoreAborted(signal);
+    // A late Wi-Fi connection is not evidence of an expired/revoked session.
+    // Keep the secure credential, but do not admit the user until refresh succeeds.
+    if (isAuthenticationRestoreRetryable(error)) throw error;
     await clearSessionCredentials();
     return null;
   }

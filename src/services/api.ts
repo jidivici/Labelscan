@@ -42,7 +42,7 @@ import type {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-type HttpResponse = Pick<Response, 'json' | 'ok' | 'status' | 'text'>;
+type HttpResponse = Pick<Response, 'json' | 'ok' | 'status' | 'text' | 'arrayBuffer'>;
 
 /**
  * Android JSON transport.
@@ -220,7 +220,7 @@ async function send<T>(
   opts: RequestOptions,
   baseHeaders: Record<string, string>,
   transport: (url: string, init: RequestInit) => Promise<HttpResponse>,
-  responseType: 'json' | 'text' = 'json',
+  responseType: 'json' | 'text' | 'bytes' = 'json',
   inheritedFence?: SessionFence,
 ): Promise<T> {
   const url = resolveUrl(path);
@@ -340,7 +340,9 @@ async function send<T>(
       throw apiError;
     }
     if (response.status === 204) return undefined as T;
-    const body = await response.text();
+    const body = responseType === 'bytes'
+      ? new Uint8Array(await response.arrayBuffer())
+      : await response.text();
     if (fence && !isSessionFenceCurrent(fence)) {
       throw new ApiError({
         code: 'SESSION_CHANGED',
@@ -350,10 +352,10 @@ async function send<T>(
         retriable: false,
       });
     }
-    if (responseType === 'text') return body as T;
+    if (responseType === 'text' || responseType === 'bytes') return body as T;
     try {
       if (!body) throw new SyntaxError('empty JSON response');
-      return JSON.parse(body) as T;
+      return JSON.parse(body as string) as T;
     } catch {
       throw new ApiError({
         code: 'INVALID_RESPONSE',
@@ -386,6 +388,14 @@ async function send<T>(
     clearTimeout(timer);
     for (const signal of abortSignals) signal.removeEventListener('abort', abortFromCaller);
   }
+}
+
+/** Protected photos share Android transport, token refresh and session cancellation. */
+export function apiBinaryRequest(
+  path: string,
+  options: RequestOptions = {},
+): Promise<Uint8Array> {
+  return send<Uint8Array>(path, { method: 'GET' }, options, {}, fetchJson, 'bytes');
 }
 
 /** Authenticated text download using the same refresh, timeout and header guards. */

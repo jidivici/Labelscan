@@ -29,7 +29,8 @@ import { displayFieldValue, displayFinalFieldValue } from '../services/fieldLabe
 import { businessProfileFor } from '../services/businessProfiles';
 import { colors, spacing, radius, typography } from '../theme';
 import { RotatedPhoto } from './RotatedPhoto';
-import { useAuthenticatedImageSource } from '../hooks/useAuthenticatedImageSource';
+import { useAuthenticatedImage } from '../hooks/useAuthenticatedImageSource';
+import { PhotoLoadRetry } from './PhotoLoadRetry';
 
 interface ArticleCardProps {
   article: Article;
@@ -52,7 +53,8 @@ export const ArticleCard = React.memo(function ArticleCard({
 }: ArticleCardProps) {
   const translateX = useSharedValue(0);
   const scale = useSharedValue(1);
-  const photoSource = useAuthenticatedImageSource(article.photo_uri);
+  const photo = useAuthenticatedImage(article.photo_uri);
+  const photoSource = photo.source;
   const showFao = businessProfileFor(article.trade_code).fields.includes('FAO_area');
 
   const fieldValue = (name: string) =>
@@ -152,6 +154,7 @@ export const ArticleCard = React.memo(function ArticleCard({
               {photoSource ? (
                 <RotatedPhoto
                   source={photoSource}
+                  onError={photo.onError}
                   style={[
                     styles.thumbnailImage,
                   ]}
@@ -159,6 +162,8 @@ export const ArticleCard = React.memo(function ArticleCard({
                   halfTurn={article.photo_rotation_degrees === 180}
                   baseRotationDegrees={article.photo_base_rotation_degrees ?? -90}
                 />
+              ) : photo.failed ? (
+                <PhotoLoadRetry compact onRetry={photo.retry} />
               ) : (
                 <MaterialCommunityIcons
                   name="food-variant"

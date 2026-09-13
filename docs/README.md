@@ -23,6 +23,7 @@ source when precision is important.
 | Area | Guide | Focus |
 |---|---|---|
 | Mobile app | [Mobile application](mobile/MOBILE-APP.md) | Capture, queueing, review, local storage, navigation, and recovery behavior |
+| Galaxy A17 4G | [Android tests and kiosk setup (French)](mobile/GALAXY-A17-4G.md) | Device variations, photo diagnostics, Expo Go, app pinning, and managed kiosk deployment |
 | React back office | [Back-office application](mobile/MOBILE-APP.md#react-back-office) | Browser sessions, arrival search, role-based navigation, and identity administration |
 | API | [API contracts](backend/API-CONTRACTS.md) | Authentication, endpoints, request rules, idempotency, errors, and ownership |
 | OpenAPI | [Generated specification](backend/openapi.v1.yaml) | Machine-readable HTTP inventory generated from the server |

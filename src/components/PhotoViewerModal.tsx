@@ -14,8 +14,8 @@
  * not cover it) — a known requirement, not a workaround.
  */
 
-import React, { useEffect } from 'react';
-import { Modal, Pressable, StyleSheet, View, useWindowDimensions } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Modal, Platform, Pressable, StatusBar, StyleSheet, View, useWindowDimensions, type ImageProps } from 'react-native';
 import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -33,6 +33,7 @@ export interface PhotoViewerModalProps {
   visible: boolean;
   photoUri: string | null | undefined;
   headers?: Record<string, string>;
+  onImageError?: ImageProps['onError'];
   allowHalfTurn?: boolean;
   halfTurn?: boolean;
   onHalfTurn?: () => void;
@@ -45,6 +46,7 @@ export function PhotoViewerModal({
   visible,
   photoUri,
   headers,
+  onImageError,
   allowHalfTurn = false,
   halfTurn = false,
   onHalfTurn,
@@ -53,6 +55,13 @@ export function PhotoViewerModal({
 }: PhotoViewerModalProps) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isAndroid = Platform.OS === 'android';
+  const [modalSize, setModalSize] = useState<{ width: number; height: number } | null>(null);
+  // An Android dialog can include the system bars while the activity's window
+  // dimensions exclude them. Measure that dialog instead of centering its image
+  // within the shorter screen underneath. Keep iOS's existing geometry intact.
+  const viewerWidth = isAndroid && modalSize ? modalSize.width : windowWidth;
+  const viewerHeight = isAndroid && modalSize ? modalSize.height : windowHeight;
   const quarterTurn = baseRotationDegrees === -90;
   const displayRotation = photoDisplayRotation(baseRotationDegrees, halfTurn);
   const scale = useSharedValue(INITIAL_SCALE);
@@ -76,7 +85,7 @@ export function PhotoViewerModal({
   useEffect(() => {
     if (visible) reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, photoUri]);
+  }, [visible, photoUri, isAndroid ? viewerWidth : undefined, isAndroid ? viewerHeight : undefined]);
 
   const pinch = Gesture.Pinch().onUpdate((e) => {
     scale.value = Math.min(Math.max(savedScale.value * e.scale, MIN_SCALE), MAX_SCALE);
@@ -132,18 +141,39 @@ export function PhotoViewerModal({
   if (!photoUri) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <GestureHandlerRootView style={styles.root}>
+    <Modal
+      visible={visible}
+      transparent={!isAndroid}
+      animationType="fade"
+      onRequestClose={onClose}
+      {...(isAndroid ? {
+        statusBarTranslucent: true,
+        navigationBarTranslucent: true,
+        backdropColor: '#000',
+      } : {})}
+    >
+      <GestureHandlerRootView
+        style={styles.root}
+        onLayout={isAndroid ? (event) => {
+          const { width, height } = event.nativeEvent.layout;
+          if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+          setModalSize((previous) => previous?.width === width && previous.height === height
+            ? previous
+            : { width, height });
+        } : undefined}
+      >
+        {isAndroid && visible && <StatusBar barStyle="light-content" />}
         <GestureDetector gesture={gesture}>
           <Animated.Image
             source={{ uri: photoUri, headers }}
+            onError={onImageError}
             style={[
               styles.image,
               {
-                left: quarterTurn ? (windowWidth - windowHeight) / 2 : 0,
-                top: quarterTurn ? (windowHeight - windowWidth) / 2 : 0,
-                width: quarterTurn ? windowHeight : windowWidth,
-                height: quarterTurn ? windowWidth : windowHeight,
+                left: quarterTurn ? (viewerWidth - viewerHeight) / 2 : 0,
+                top: quarterTurn ? (viewerHeight - viewerWidth) / 2 : 0,
+                width: quarterTurn ? viewerHeight : viewerWidth,
+                height: quarterTurn ? viewerWidth : viewerHeight,
               },
               imageStyle,
             ]}

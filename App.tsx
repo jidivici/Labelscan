@@ -7,7 +7,7 @@ import 'react-native-get-random-values';
 import 'react-native-gesture-handler';
 import React, { useEffect } from 'react';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StyleSheet } from 'react-native';
+import { Platform, StatusBar, StyleSheet } from 'react-native';
 
 import { registerOutboxDrainOnForeground } from './src/services/outboxDrain';
 import { initScanQueue, registerScanQueueLifecycle } from './src/services/scanQueue';
@@ -68,6 +68,7 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={styles.root}>
+      {Platform.OS === 'android' && <StatusBar barStyle="dark-content" />}
       <SafeAreaProvider>
         <QueryClientProvider client={queryClient}>
           <AuthProvider>

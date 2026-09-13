@@ -17,6 +17,7 @@ interface RotatedPhotoProps {
   style?: StyleProp<ViewStyle>;
   resizeMode?: ImageResizeMode;
   accessibilityLabel?: ImageProps['accessibilityLabel'];
+  onError?: ImageProps['onError'];
   halfTurn?: boolean;
   /** -90 for historical raw captures; 0 for crops already rotated upright. */
   baseRotationDegrees?: PhotoBaseRotationDegrees;
@@ -31,6 +32,7 @@ export function RotatedPhoto({
   style,
   resizeMode = 'cover',
   accessibilityLabel,
+  onError,
   halfTurn = false,
   baseRotationDegrees = -90,
 }: RotatedPhotoProps) {
@@ -51,6 +53,7 @@ export function RotatedPhoto({
           source={source}
           resizeMode={resizeMode}
           accessibilityLabel={accessibilityLabel}
+          onError={onError}
           style={{
             position: 'absolute',
             left: quarterTurn ? (frame.width - frame.height) / 2 : 0,

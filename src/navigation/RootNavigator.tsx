@@ -13,7 +13,7 @@
  */
 
 import React, { Suspense } from 'react';
-import { ActivityIndicator, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, View } from 'react-native';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
@@ -77,7 +77,10 @@ function AppNavigator() {
   return (
     <RootStack.Navigator
       initialRouteName="ArticleList"
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        ...(Platform.OS === 'android' ? { statusBarStyle: 'dark' } : {}),
+      }}
     >
       <RootStack.Screen name="ArticleList" component={ArticleListScreen} />
       <RootStack.Screen name="ArticleDetail" component={ArticleDetailLazy} />
@@ -103,17 +106,31 @@ export function RootNavigator() {
   const { status } = useAuth();
 
   // Restoring the persisted session on cold start.
-  if (status === 'loading') {
+  if (status === 'loading' || status === 'waitingForConnection') {
     return (
       <View style={styles.splash}>
+        {Platform.OS === 'android' && <StatusBar barStyle="dark-content" />}
         <ActivityIndicator size="large" color={colors.primary} />
+        {status === 'waitingForConnection' && (
+          <>
+            <Text style={styles.waitingTitle}>Connexion au serveur…</Text>
+            <Text style={styles.waitingMessage}>
+              LabelScan reprendra automatiquement dès que la connexion sera disponible.
+            </Text>
+          </>
+        )}
       </View>
     );
   }
 
   // Auth gate: the whole app sits behind a successful sign-in.
   if (status === 'signedOut') {
-    return <LoginScreen />;
+    return (
+      <>
+        {Platform.OS === 'android' && <StatusBar barStyle="dark-content" />}
+        <LoginScreen />
+      </>
+    );
   }
   return (
     <NavigationContainer>
@@ -128,5 +145,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  waitingTitle: {
+    marginTop: 20,
+    fontSize: 18,
+    fontWeight: '600',
+    color: colors.onBackground,
+    textAlign: 'center',
+  },
+  waitingMessage: {
+    marginTop: 8,
+    paddingHorizontal: 32,
+    maxWidth: 420,
+    fontSize: 15,
+    lineHeight: 22,
+    color: colors.onSurfaceVariant,
+    textAlign: 'center',
   },
 });

@@ -5,6 +5,9 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/labelscan-logo.png",
+    "androidStatusBar": {
+      "barStyle": "dark-content"
+    },
     "ios": {
       "supportsTablet": false,
       "infoPlist": {

@@ -12,11 +12,13 @@
  */
 
 import * as FileSystem from 'expo-file-system/legacy';
+import { File } from 'expo-file-system';
 
 import { Article } from '../types/Article';
 import type { ArticleStore } from './articleStore';
 import { AsyncStorageArticleStore } from './articleStoreAsyncStorage';
 import { queryClient } from './queryClient';
+import { isSessionFenceCurrent, type SessionFence } from './authStorage';
 
 const PHOTOS_DIR = `${FileSystem.documentDirectory}photos/`;
 // Workflow v1: photos of scans still in the queue (not yet validated). Durable — the
@@ -130,6 +132,59 @@ export function persistConfirmedPhoto(
   return serializePhotoMutation('confirmed', () =>
     persistPhotoInto(scopedDirectory, ingestionId, srcUri),
   );
+}
+
+function remoteArticlePhotoUri(batchId: string, fence: SessionFence): string {
+  const scope = encodedScopeDirectory(fence.scopeKey);
+  if (!scope || !SAFE_PHOTO_STEM.test(batchId)) throw new Error('INVALID_PHOTO_SCOPE');
+  return `${PHOTOS_DIR}${scope}/remote-${batchId}.jpg`;
+}
+
+/** Reuse only the current operator's immutable arrival image. */
+export async function getCachedRemoteArticlePhoto(
+  batchId: string,
+  fence: SessionFence,
+): Promise<string | null> {
+  if (!isSessionFenceCurrent(fence)) return null;
+  const uri = remoteArticlePhotoUri(batchId, fence);
+  const info = await FileSystem.getInfoAsync(uri);
+  return isSessionFenceCurrent(fence) && info.exists && !info.isDirectory ? uri : null;
+}
+
+/** Remove a failed native decode before the operator retries its download. */
+export function deleteCachedRemoteArticlePhoto(batchId: string, fence: SessionFence): Promise<void> {
+  const uri = remoteArticlePhotoUri(batchId, fence);
+  return serializePhotoMutation('confirmed', async () => {
+    if (!isSessionFenceCurrent(fence)) return;
+    await FileSystem.deleteAsync(uri, { idempotent: true });
+  });
+}
+
+/**
+ * Store downloaded image bytes without base64 copies or credentials. Serialized
+ * with logout cleanup so a late download cannot recreate a departed user's cache.
+ */
+export function cacheRemoteArticlePhoto(
+  batchId: string,
+  bytes: Uint8Array,
+  fence: SessionFence,
+): Promise<string> {
+  const uri = remoteArticlePhotoUri(batchId, fence);
+  return serializePhotoMutation('confirmed', async () => {
+    if (!isSessionFenceCurrent(fence)) throw new Error('MOBILE_SESSION_CHANGED');
+    await ensureDirExists(uri.slice(0, uri.lastIndexOf('/') + 1));
+    if (!isSessionFenceCurrent(fence)) throw new Error('MOBILE_SESSION_CHANGED');
+    try {
+      new File(uri).write(bytes);
+      const info = await FileSystem.getInfoAsync(uri);
+      if (!isSessionFenceCurrent(fence)) throw new Error('MOBILE_SESSION_CHANGED');
+      if (!info.exists || info.isDirectory) throw new Error('PHOTO_CACHE_WRITE_FAILED');
+      return uri;
+    } catch (error) {
+      await FileSystem.deleteAsync(uri, { idempotent: true });
+      throw error;
+    }
+  });
 }
 
 /** Delete one scoped copy completed after its owner session was superseded. */

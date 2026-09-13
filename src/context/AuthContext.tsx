@@ -18,8 +18,8 @@ import React, {
 import {
   login as apiLogin,
   logout as apiLogout,
-  restoreAuthentication,
 } from '../services/auth';
+import { startSessionRestore } from '../services/sessionRestore';
 import {
   captureActiveSession,
   clearSessionCredentials,
@@ -33,7 +33,7 @@ import { queryClient } from '../services/queryClient';
 import { clearLocalSessionData, purgeLegacyLocalData } from '../services/sessionData';
 import type { OperatorContext } from '../services/authStorage';
 
-export type AuthStatus = 'loading' | 'signedOut' | 'signedIn';
+export type AuthStatus = 'loading' | 'waitingForConnection' | 'signedOut' | 'signedIn';
 
 interface AuthValue {
   status: AuthStatus;
@@ -65,6 +65,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const statusRef = useRef<AuthStatus>('loading');
   const transitionSequenceRef = useRef(0);
   const transitionTailRef = useRef<Promise<void>>(Promise.resolve());
+  const restoreRef = useRef<ReturnType<typeof startSessionRestore> | null>(null);
 
   const commitOperatorContext = useCallback((context: OperatorContext | null) => {
     scopeRef.current = context ? operatorContextKey(context) : null;
@@ -134,32 +135,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let mounted = true;
 
-    // Validate the persisted refresh credential on every cold start. A stored
-    // access token may already be expired or revoked, so it is never enough on
-    // its own to enter the signed-in state.
-    restoreAuthentication()
-      .then((restored) => {
-        if (!mounted) return;
-        setUser(restored?.username ?? null);
-        void transitionOperatorContext(
-          restored,
-          restored ? 'signedIn' : 'signedOut',
-          restored ? 'preserve-owned' : 'clear',
-        ).catch(() => undefined);
-      })
-      .catch(() => {
-        if (!mounted) return;
-        // SecureStore refused at least one deletion. Keep all authenticated UI
-        // closed; the next explicit sign-in retries the purge before any network call.
-        invalidateActiveSessionWork();
-        setUser(null);
-        commitOperatorContext(null);
-        setCurrentStatus('signedOut');
-      });
-
     // Session expired / token rejected mid-use → back to login.
     const unsubscribe = onUnauthenticated(() => {
       if (!mounted) return;
+      restoreRef.current?.cancel();
       setUser(null);
       queryClient.clear();
       void transitionOperatorContext(null, 'signedOut').catch(() => undefined);
@@ -175,14 +154,44 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     });
 
+    // A saved credential must be validated before admitting the operator. If Wi-Fi
+    // is still starting, keep the gate closed and retry without deleting it.
+    const restore = startSessionRestore({
+      onRestored: (restored) => {
+        if (!mounted) return;
+        setUser(restored?.username ?? null);
+        void transitionOperatorContext(
+          restored,
+          restored ? 'signedIn' : 'signedOut',
+          restored ? 'preserve-owned' : 'clear',
+        ).catch(() => undefined);
+      },
+      onWaiting: () => {
+        if (mounted) setCurrentStatus('waitingForConnection');
+      },
+      onError: () => {
+        if (!mounted) return;
+        // A failed secure-storage cleanup must keep authenticated UI closed.
+        // Explicit sign-in retries the purge before making any network request.
+        invalidateActiveSessionWork();
+        setUser(null);
+        commitOperatorContext(null);
+        setCurrentStatus('signedOut');
+      },
+    });
+    restoreRef.current = restore;
+
     return () => {
       mounted = false;
+      restore.cancel();
+      if (restoreRef.current === restore) restoreRef.current = null;
       unsubscribe();
       unsubscribeContext();
     };
-  }, [transitionOperatorContext]);
+  }, [commitOperatorContext, setCurrentStatus, transitionOperatorContext]);
 
   const signIn = useCallback(async (username: string, password: string) => {
+    restoreRef.current?.cancel();
     // Fail closed over a previous logout/revocation cleanup: all native deletes
     // must complete before credentials for another identity can be requested.
     await clearSessionCredentials();
@@ -195,6 +204,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [transitionOperatorContext]);
 
   const signOut = useCallback(async () => {
+    restoreRef.current?.cancel();
     setCurrentStatus('loading');
     invalidateActiveSessionWork();
     queryClient.clear();

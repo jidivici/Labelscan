@@ -132,9 +132,16 @@ are rejected instead of being guessed.
 The access token, refresh credential, username, portal identifier, and trade code
 are stored with Expo SecureStore using
 <code>WHEN_UNLOCKED_THIS_DEVICE_ONLY</code>. On a cold start, the refresh
-credential is validated before the app enters the signed-in state. An authenticated
-request that receives a 401 gets one refresh attempt; if that fails, local session
-state is cleared and the login screen is shown.
+credential is validated before the app enters the signed-in state. Temporary
+network failures, timeouts, HTTP 408/429 and server errors keep the credential and
+show a connection waiting screen. Startup validation retries serially after 2, 5,
+10, then at most every 30 seconds; authenticated screens and queue processing stay
+closed until validation succeeds. Sign-in, sign-out, revocation and unmount cancel
+this bootstrap, including pending requests and timers. Rejected credentials (401/403)
+or an invalid identity still clear the session and require login. A lost response
+after the server has consumed a rotating refresh token can also require login.
+An authenticated request that receives a 401 gets one refresh attempt; if that
+fails, local session state is cleared and the login screen is shown.
 
 The API derives tenant access from the authenticated identity. Portal identifiers
 stored locally are used to isolate presentation and queued work; they are not sent
@@ -159,7 +166,19 @@ for saved server arrivals. Pending scans can be discarded with confirmation.
 
 ### Capture behavior
 
-The camera is mounted only while its screen is focused. The visible guide frame is
+For the Galaxy A17 4G validation matrix and kiosk instructions, see
+[the Android device guide (French)](GALAXY-A17-4G.md).
+
+The camera is mounted only while its screen is focused, and on Android only while
+the app is active. Capture waits for the native ready event and uses a synchronous
+lock against double taps. Barcode scanning stays enabled during capture because
+toggling it rebuilds the Android camera session and can cancel the photo.
+Android measures the scene and sizes the native preview from the shared crop
+geometry. The guide extends upward to 12 points below the top controls while its
+lower edge stays in place. The preview ends earlier behind the shutter to keep
+the guide centered on both preview axes, so either physical landscape orientation
+selects the same crop even without a native orientation callback.
+The iOS layout remains unchanged. The visible guide frame is
 the required capture area:
 
 1. The app takes the photo and normalizes its orientation.
@@ -257,6 +276,17 @@ startup. A legacy local article store remains as a fallback for older data. Open
 a record requests the full server detail and can fall back to the cached summary if
 the detail request is unavailable.
 
+On Android, protected arrival photos use the API client's binary transport and
+single token-refresh retry, then render from a local file scoped to the active
+operator. Card and detail requests share downloads, with two concurrent downloads
+at most. Network and image-decoding failures expose a retry action; retry discards
+the affected cached download. Session changes cancel/discard old downloads and
+purge the previous operator's copies. iOS retains its authenticated image source.
+
+The Android full-screen photo viewer uses an opaque modal covering both system-bar
+areas and measures that modal's own bounds to center the complete photo. The iOS
+modal sizing and presentation are unchanged.
+
 Export acts on the catalogue currently loaded by the client:
 
 - JSON writes the complete in-memory article objects;
@@ -277,7 +307,7 @@ retention and the current JSON credential leak are documented below.
 | Outbox operations | AsyncStorage | Survive transient failures until success, dead-letter cleanup, or explicit discard |
 | Interim and final extraction snapshots | Memory | Refetched during queue reconciliation after a restart |
 | Pending capture JPEGs | Expo document directory | Removed after successful finalization/discard; orphan files are swept during queue initialization |
-| Confirmed-photo copies | Expo document directory | Support the optimistic saved card; no explicit lifecycle cleanup is currently implemented |
+| Confirmed-photo copies and Android image downloads | Expo document directory | Scoped to the operator; support saved cards and repeat photo access; cleared at session boundaries |
 | JSON and CSV export files | Expo document directory | Fixed filenames are overwritten by the next export of the same format, but are not deleted after sharing or sign-out |
 
 AsyncStorage and the Expo document directory are application-private storage, not a
