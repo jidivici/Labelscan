@@ -1,3 +1,6 @@
+import http from 'node:http';
+import https from 'node:https';
+
 const baseUrl = (process.argv[2] ?? process.env.LABELSCAN_PUBLIC_URL ?? 'https://label-scan.fr')
   .replace(/\/$/, '');
 
@@ -21,6 +24,42 @@ async function request(path, options = {}) {
 
 function check(label, condition, detail) {
   results.push({ label, passed: Boolean(condition), detail });
+}
+
+function requestOversizedUpload() {
+  const target = new URL('/v1/ingestions', baseUrl);
+  const transport = target.protocol === 'https:' ? https : http;
+  const contentLength = 12 * 1024 * 1024;
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const settle = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      callback(value);
+    };
+
+    const request = transport.request(target, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(contentLength),
+        Expect: '100-continue',
+      },
+    }, (response) => {
+      response.resume();
+      settle(resolve, response.statusCode ?? 0);
+    });
+
+    request.setTimeout(10_000, () => {
+      request.destroy(new Error('Délai dépassé pour la sonde de téléversement'));
+    });
+    request.on('continue', () => {
+      request.end(Buffer.alloc(contentLength));
+    });
+    request.on('error', (error) => settle(reject, error));
+    request.flushHeaders();
+  });
 }
 
 try {
@@ -78,20 +117,11 @@ try {
     `${backofficeRedirect.response.status} ${backofficeLocation ?? 'Location absent'}`,
   );
 
-  const oversizedForm = new FormData();
-  oversizedForm.set(
-    'file',
-    new Blob([new Uint8Array(12 * 1024 * 1024)], { type: 'image/jpeg' }),
-    'oversized.jpg',
-  );
-  const oversizedUpload = await request('/v1/ingestions', {
-    method: 'POST',
-    body: oversizedForm,
-  });
+  const oversizedUploadStatus = await requestOversizedUpload();
   check(
     'Upload anonyme surdimensionné bloqué au proxy',
-    oversizedUpload.response.status === 413,
-    `HTTP ${oversizedUpload.response.status}`,
+    oversizedUploadStatus === 413,
+    `HTTP ${oversizedUploadStatus}`,
   );
 } catch (error) {
   check('Connexion au serveur', false, error instanceof Error ? error.message : String(error));
