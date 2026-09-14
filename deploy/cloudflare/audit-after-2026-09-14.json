@@ -1,0 +1,131 @@
+{
+  "captured_at": "2026-09-14T17:25:11.964Z",
+  "zone_id": "98aa643525c74886f81afce23c530405",
+  "settings": [
+    {
+      "id": "always_use_https",
+      "value": "on",
+      "modified_on": "2026-09-14T17:17:13.133382Z",
+      "editable": true
+    },
+    {
+      "id": "browser_check",
+      "value": "on",
+      "modified_on": null,
+      "editable": true
+    },
+    {
+      "id": "min_tls_version",
+      "value": "1.2",
+      "modified_on": null,
+      "editable": true
+    },
+    {
+      "id": "security_level",
+      "value": "medium",
+      "modified_on": null,
+      "editable": true
+    },
+    {
+      "id": "ssl",
+      "value": "strict",
+      "modified_on": "2026-09-14T17:16:55.364880Z",
+      "certificate_status": "active",
+      "validation_errors": [],
+      "editable": true
+    },
+    {
+      "id": "tls_1_3",
+      "value": "on",
+      "modified_on": null,
+      "editable": true
+    }
+  ],
+  "rulesets/phases/http_request_firewall_custom/entrypoint": {
+    "description": "",
+    "id": "e3e8de1f17ee4664910b8adb08dae55f",
+    "kind": "zone",
+    "last_updated": "2026-09-14T17:24:49.031362Z",
+    "name": "default",
+    "phase": "http_request_firewall_custom",
+    "rules": [
+      {
+        "action": "skip",
+        "action_parameters": {
+          "products": [
+            "bic",
+            "securityLevel"
+          ]
+        },
+        "description": "LabelScan API - sans challenge navigateur",
+        "enabled": true,
+        "expression": "(http.host in {\"label-scan.fr\" \"www.label-scan.fr\"}) and (http.request.uri.path eq \"/v1\" or starts_with(http.request.uri.path, \"/v1/\"))",
+        "id": "64d3ff4f0d30436cb6c424c9bda6bf06",
+        "last_updated": "2026-09-14T17:23:08.638809Z",
+        "logging": {
+          "enabled": true
+        },
+        "ref": "64d3ff4f0d30436cb6c424c9bda6bf06",
+        "version": "1"
+      },
+      {
+        "action": "block",
+        "description": "LabelScan API - HTTP methods",
+        "enabled": true,
+        "expression": "(http.host in {\"label-scan.fr\" \"www.label-scan.fr\"}) and (http.request.uri.path eq \"/v1\" or starts_with(http.request.uri.path, \"/v1/\")) and not (http.request.method in {\"GET\" \"HEAD\" \"POST\" \"PUT\" \"PATCH\" \"DELETE\" \"OPTIONS\"})",
+        "id": "b2ecdf28bfc54e6cb7a52bb5c2abb585",
+        "last_updated": "2026-09-14T17:24:49.031362Z",
+        "ref": "b2ecdf28bfc54e6cb7a52bb5c2abb585",
+        "version": "1"
+      }
+    ],
+    "source": "firewall_custom",
+    "version": "2"
+  },
+  "rulesets/phases/http_ratelimit/entrypoint": {
+    "description": "",
+    "id": "79ee22ba55544ef6bd6fabe441c4b123",
+    "kind": "zone",
+    "last_updated": "2026-09-14T17:19:25.553494Z",
+    "name": "default",
+    "phase": "http_ratelimit",
+    "rules": [
+      {
+        "action": "block",
+        "description": "LabelScan - connexions web organisation mobile",
+        "enabled": true,
+        "expression": "(http.request.uri.path in {\"/v1/auth/login\" \"/v1/mobile/auth/login\"} or (starts_with(http.request.uri.path, \"/v1/o/\") and ends_with(http.request.uri.path, \"/auth/login\")))",
+        "id": "a8621b80aee24e0686ef6f72bd1e2298",
+        "last_updated": "2026-09-14T17:19:25.553494Z",
+        "ratelimit": {
+          "characteristics": [
+            "ip.src",
+            "cf.colo.id"
+          ],
+          "mitigation_timeout": 10,
+          "period": 10,
+          "requests_per_period": 10
+        },
+        "ref": "a8621b80aee24e0686ef6f72bd1e2298",
+        "version": "1"
+      }
+    ],
+    "source": "rate_limit",
+    "version": "1"
+  },
+  "bot_management": {
+    "enable_js": false,
+    "fight_mode": false,
+    "ai_bots_protection": "only_on_ad_pages",
+    "content_bots_protection": "disabled",
+    "crawler_protection": "disabled",
+    "ai_training": "disabled",
+    "ai_search": "disabled",
+    "ai_user": "disabled",
+    "is_robots_txt_managed": false,
+    "bot_preference_sync_enabled": false,
+    "cf_robots_variant": "policy_only",
+    "ai_bots_migration_opt_out": false,
+    "using_latest_model": true
+  }
+}

@@ -21,7 +21,9 @@ let refreshPromise: Promise<AuthPayload | null> | null = null;
 
 export async function refreshBrowserSessionPayload(): Promise<AuthPayload | null> {
   if (refreshPromise) return refreshPromise;
-  refreshPromise = fetch('/v1/auth/refresh', { method: 'POST', credentials: 'same-origin' })
+  refreshPromise = fetch('/v1/auth/refresh', {
+    method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' },
+  })
     .then(async (response) => response.ok ? response.json() as Promise<AuthPayload> : null)
     .catch(() => null);
   try {
@@ -44,7 +46,9 @@ export async function browserLogin(
 }
 
 export async function browserLogout(): Promise<void> {
-  await fetch('/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
+  await fetch('/v1/auth/logout', {
+    method: 'POST', credentials: 'same-origin', headers: { Accept: 'application/json' },
+  });
 }
 
 export async function getAccessOverview(session: Session): Promise<AccessOverviewPayload> {
@@ -59,7 +63,11 @@ export async function request<T>(
   const response = await authorizedFetch(path, session, init);
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
-    throw new ApiProblem(body.error_code ?? `HTTP_${response.status}`, body.detail ?? 'Erreur serveur');
+    // Cloudflare uses numeric error codes (for example 1015). Keep the stable
+    // string contract expected by the application, including RATE_LIMITED.
+    const code = typeof body.error_code === 'string' ? body.error_code
+      : response.status === 429 ? 'RATE_LIMITED' : `HTTP_${response.status}`;
+    throw new ApiProblem(code, body.detail ?? 'Erreur serveur');
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;

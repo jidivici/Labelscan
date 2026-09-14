@@ -126,7 +126,7 @@ async function refreshAccessToken(fence: SessionFence): Promise<string | null> {
     try {
       const response = await fetchJson(resolveUrl('/v1/mobile/auth/refresh'), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({ refresh_token: refreshToken }),
         signal: controller.signal,
       });
@@ -195,7 +195,7 @@ function resolveUrl(path: string): string {
 async function parseError(response: HttpResponse, fallbackCorrelationId: string): Promise<ApiError> {
   // Read only the safe, stable RFC 9457 fields — never echo a raw body that could
   // contain unexpected content.
-  let code = `HTTP_${response.status}`;
+  let code = response.status === 429 ? 'RATE_LIMITED' : `HTTP_${response.status}`;
   let message = `request failed with status ${response.status}`;
   let retriable = response.status >= 500 || response.status === 429;
   let correlationId = fallbackCorrelationId;
@@ -260,6 +260,7 @@ async function send<T>(
     'x-correlation-id',
     'idempotency-key',
     'content-type',
+    ...(responseType === 'json' ? ['accept'] : []),
   ]);
   const safeExtraHeaders = Object.fromEntries(
     Object.entries(opts.headers ?? {}).filter(([name]) => !protectedNames.has(name.toLowerCase())),
@@ -267,6 +268,9 @@ async function send<T>(
   const headers: Record<string, string> = {
     ...safeExtraHeaders,
     ...baseHeaders,
+    // Cloudflare negotiates structured edge errors using Accept. Native clients
+    // must request JSON explicitly; the default */* can produce an HTML page.
+    ...(responseType === 'json' ? { Accept: 'application/json' } : {}),
     'X-Correlation-Id': correlationId,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(opts.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : {}),

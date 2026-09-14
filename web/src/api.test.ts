@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { authorizedFetch } from './api';
+import { authorizedFetch, request } from './api';
 import { managerFixtureSession } from './fixtures/portalFixtures';
 
 describe('authorizedFetch protected headers', () => {
@@ -30,5 +30,13 @@ describe('authorizedFetch protected headers', () => {
     expect(headers.get('accept')).toBe('application/json');
     expect(headers.get('content-type')).toBe('application/json');
     expect(headers.get('x-client-feature')).toBe('safe');
+  });
+
+  it('normalizes Cloudflare numeric rate-limit errors to the application contract', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({
+      error_code: 1015, cloudflare_error: true, detail: 'Too many requests',
+    }), { status: 429, headers: { 'Content-Type': 'application/json' } }));
+    await expect(request('/v1/o/labelscan/auth/login', null, { method: 'POST' }))
+      .rejects.toMatchObject({ code: 'RATE_LIMITED', message: 'Too many requests' });
   });
 });

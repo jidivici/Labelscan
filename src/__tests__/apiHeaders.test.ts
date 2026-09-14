@@ -43,6 +43,7 @@ describe('API protected headers', () => {
         'X-Correlation-Id': 'attacker-correlation',
         'Idempotency-Key': 'attacker-idempotency',
         'Content-Type': 'text/plain',
+        aCcEpT: 'text/html',
         'X-Client-Feature': 'safe',
       },
     });
@@ -53,7 +54,22 @@ describe('API protected headers', () => {
     expect(headers.get('x-correlation-id')).toBe('trusted-correlation');
     expect(headers.get('idempotency-key')).toBe('trusted-idempotency');
     expect(headers.get('content-type')).toBe('application/json');
+    expect(headers.get('accept')).toBe('application/json');
     expect(headers.get('x-client-feature')).toBe('safe');
+  });
+
+  it('normalizes a Cloudflare rate limit without requiring a browser challenge', async () => {
+    global.fetch = jest.fn().mockResolvedValue(new Response(JSON.stringify({
+      error_code: 1015,
+      cloudflare_error: true,
+      detail: 'You are being rate-limited by the website owner\'s configuration.',
+    }), { status: 429, headers: { 'Content-Type': 'application/json', 'Retry-After': '10' } }));
+    const { apiRequest } = await import('../services/api');
+    await expect(apiRequest('/v1/mobile/auth/login', { skipAuth: true })).rejects.toMatchObject({
+      code: 'RATE_LIMITED', status: 429, retriable: true,
+    });
+    expect(new Headers(jest.mocked(global.fetch).mock.calls[0][1]?.headers).get('accept'))
+      .toBe('application/json');
   });
 
   it('classifies malformed 2xx JSON as a permanent invalid response', async () => {
