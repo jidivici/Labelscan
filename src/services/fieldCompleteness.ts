@@ -95,18 +95,30 @@ export function filledCountFromRun(
 ): number {
   const byName = new Map<string, ExtractionField>();
   for (const f of fields ?? []) byName.set(f.field_name, f);
-  let count = 0;
+  const effectiveValues: Record<string, string> = {};
   for (const name of fieldOrderForTrade(tradeCode)) {
     if (edits && name in edits) {
-      if (isFilledValue(edits[name], name)) count += 1;
+      effectiveValues[name] = edits[name];
       continue;
     }
     const f = byName.get(name);
     if (!f) continue;
     if (requiresExplicitHumanConfirmation(f.validation_status, f.source)) continue;
-    if (isFilledValue(f.value, name)) count += 1;
+    effectiveValues[name] = normalizeFinalReviewValue(f.value);
   }
-  return count;
+  // The Review screen projects FAO=NC for farmed seafood because a catch area does
+  // not apply. Mirror that projection on the home card so a saveable 16/16 review
+  // never falls back to 15/16 after the operator returns to the list.
+  if (
+    (tradeCode == null || tradeCode === 'poissonnerie') &&
+    ['farmed', 'élevage'].includes(
+      effectiveValues.production_method?.trim().toLocaleLowerCase('fr-FR') ?? '',
+    ) &&
+    !effectiveValues.FAO_area?.trim()
+  ) {
+    effectiveValues.FAO_area = NOT_COMMUNICATED_VALUE;
+  }
+  return filledCountFromValues(effectiveValues, tradeCode);
 }
 
 /**

@@ -144,6 +144,7 @@ let hydrated = false;
 const controllers = new Map<string, AbortController>();
 const pollStartedAt = new Map<string, number>(); // per-scan total-budget anchor
 const waitList: string[] = [];
+const retryingScanIds = new Set<string>();
 let pollsPaused = false; // true while the app is backgrounded
 let queueGeneration = 0;
 
@@ -585,63 +586,71 @@ export async function enqueueScan(input: EnqueueScanInput): Promise<PendingScan>
 
 /** Retry an errored scan: replay its upload or queue a fresh server analysis. */
 export async function retryScan(id: string): Promise<void> {
-  const generation = queueGeneration;
-  const fence = await captureActiveSession();
-  const scan = findScan(id);
-  if (!scan || !fence || !workflowIsCurrent(generation, fence) || !scanMatchesFence(scan, fence)) {
-    return;
-  }
-  if (scan.status === 'submit_error') {
+  // A fast double tap used to launch the same retry twice before the first awaited
+  // session/storage read could update the card. Keep one retry per scan in flight.
+  if (retryingScanIds.has(id)) return;
+  retryingScanIds.add(id);
+  try {
+    const generation = queueGeneration;
+    const fence = await captureActiveSession();
+    const scan = findScan(id);
+    if (!scan || !fence || !workflowIsCurrent(generation, fence) || !scanMatchesFence(scan, fence)) {
+      return;
+    }
+    if (scan.status === 'submit_error') {
     // A transient failure leaves the original operation pending. Reuse its exact
     // idempotency key on an explicit retry instead of creating another outbox row.
-    const existing = await getOperation(scan.submitOpId);
-    if (!workflowIsCurrent(generation, fence)) return;
-    if (existing?.status === 'pending') {
-      updateScan(id, { status: 'submitting', errorCode: undefined });
-      void executeCreateIngestionOp(existing.id).then(
+      const existing = await getOperation(scan.submitOpId);
+      if (!workflowIsCurrent(generation, fence)) return;
+      if (existing?.status === 'pending') {
+        updateScan(id, { status: 'submitting', errorCode: undefined });
+        void executeCreateIngestionOp(existing.id).then(
+          (outcome) => handleSubmitOutcome(id, outcome, generation, fence),
+          () => undefined,
+        );
+        return;
+      }
+    // A terminal or missing operation needs a fresh outbox row. Server-side content
+    // deduplication still protects against a response lost after successful storage.
+      const op = await enqueueCapture({
+        fileUri: scan.photoUri,
+        barcodeRaw: scan.barcodeRaw,
+        capturedAt: scan.capturedAt,
+      });
+      if (!workflowIsCurrent(generation, fence)) return;
+      updateScan(id, { submitOpId: op.id, status: 'submitting', errorCode: undefined });
+      void executeCreateIngestionOp(op.id).then(
         (outcome) => handleSubmitOutcome(id, outcome, generation, fence),
         () => undefined,
       );
       return;
     }
-    // A terminal or missing operation needs a fresh outbox row. Server-side content
-    // deduplication still protects against a response lost after successful storage.
-    const op = await enqueueCapture({
-      fileUri: scan.photoUri,
-      barcodeRaw: scan.barcodeRaw,
-      capturedAt: scan.capturedAt,
-    });
-    if (!workflowIsCurrent(generation, fence)) return;
-    updateScan(id, { submitOpId: op.id, status: 'submitting', errorCode: undefined });
-    void executeCreateIngestionOp(op.id).then(
-      (outcome) => handleSubmitOutcome(id, outcome, generation, fence),
-      () => undefined,
-    );
-    return;
-  }
-  if (scan.status === 'extract_error') {
-    pollStartedAt.delete(id);
-    delete results[id];
-    delete interim[id];
-    updateScan(id, { status: 'extracting', errorCode: undefined });
+    if (scan.status === 'extract_error') {
+      pollStartedAt.delete(id);
+      delete results[id];
+      delete interim[id];
+      updateScan(id, { status: 'extracting', errorCode: undefined });
     // A terminal provider failure needs a NEW server-side extraction event. Merely
     // polling the old terminal status would immediately show the same error again.
-    if (scan.errorCode === 'extraction_failed' && scan.ingestionId) {
-      try {
-        await retryIngestionAnalysis(scan.ingestionId, { signal: fence.signal });
-      } catch (error) {
-        if (!workflowIsCurrent(generation, fence) || !findScan(id)) return;
-        updateScan(id, {
-          status: 'extract_error',
-          // Keep the terminal cause so another tap calls the retry endpoint again;
-          // this is essential when the first 202 response was lost in transit.
-          errorCode: scan.errorCode ?? (error instanceof ApiError ? error.code : 'RETRY_FAILED'),
-        });
-        return;
+      if (scan.errorCode === 'extraction_failed' && scan.ingestionId) {
+        try {
+          await retryIngestionAnalysis(scan.ingestionId, { signal: fence.signal });
+        } catch (error) {
+          if (!workflowIsCurrent(generation, fence) || !findScan(id)) return;
+          updateScan(id, {
+            status: 'extract_error',
+            // Keep the terminal cause so another tap calls the retry endpoint again;
+            // this is essential when the first 202 response was lost in transit.
+            errorCode: scan.errorCode ?? (error instanceof ApiError ? error.code : 'RETRY_FAILED'),
+          });
+          return;
+        }
       }
+      if (!workflowIsCurrent(generation, fence) || !findScan(id)) return;
+      schedulePoll(id);
     }
-    if (!workflowIsCurrent(generation, fence) || !findScan(id)) return;
-    schedulePoll(id);
+  } finally {
+    retryingScanIds.delete(id);
   }
 }
 

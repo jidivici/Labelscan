@@ -198,6 +198,11 @@ function WeightInput({
       <TextInput
         value={amount}
         onChangeText={(t) => {
+          if (t.trim().toUpperCase() === NOT_COMMUNICATED_VALUE) {
+            setAmount(NOT_COMMUNICATED_VALUE);
+            onChange(NOT_COMMUNICATED_VALUE);
+            return;
+          }
           if (notCommunicatedSuggestion(t)) {
             setAmount(t);
             onChange(t);
@@ -295,6 +300,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   suggestion,
   history,
   edited,
+  skipExplicitConfirmation = false,
 }: {
   field: ExtractionField;
   draft: string;
@@ -305,6 +311,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   /** Per-field autocomplete history (workflow v2.1) — STABLE reference, built once. */
   history?: FieldHistory | null;
   edited: boolean;
+  skipExplicitConfirmation?: boolean;
 }) {
   // The review cue is REACTIVE to the live draft (not the server value): an empty
   // machine result remains unconfirmed until the operator enters a value or selects NC.
@@ -312,7 +319,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // A questionable extraction is deliberately styled like an empty field: same calm
   // green cue, never an alarming error colour. We do not expose raw provider text;
   // the usual field suggestions remain the only assistance under the input.
-  const highlighted = shouldHighlightReviewField(
+  const highlighted = !skipExplicitConfirmation && shouldHighlightReviewField(
     draft,
     field.validation_status,
     edited,
@@ -321,6 +328,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   const needsExplicitConfirmation =
     !empty &&
     !edited &&
+    !skipExplicitConfirmation &&
     requiresExplicitHumanConfirmation(field.validation_status, field.source);
   // A suggestion is offered only while the field is still empty; it never overrides a
   // typed/extracted value and is applied only on tap (→ a human edit on save).
@@ -336,7 +344,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // every keystroke is force-cased — never a stripped/computed character.
   const isHealthMark = isHealthMarkField(field.field_name);
   const attentionLabel =
-    !edited && requiresExplicitHumanConfirmation(field.validation_status, field.source)
+    !edited && !skipExplicitConfirmation && requiresExplicitHumanConfirmation(field.validation_status, field.source)
       ? 'À vérifier'
       : 'À compléter';
   const handleChange = (text: string) => {
@@ -460,7 +468,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           ) : null}
         </View>
       ) : null}
-      {empty && allowsNC ? (
+      {!needsExplicitConfirmation && !isNotCommunicated && allowsNC &&
+      (empty || field.field_name === 'weight') ? (
         <Pressable
           onPress={() => emit(NOT_COMMUNICATED_VALUE)}
           style={styles.notCommunicatedChip}
@@ -471,7 +480,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         >
           <MaterialCommunityIcons name="eye-check-outline" size={14} color={colors.primary} />
           <Text style={[typography.labelSmall, styles.notCommunicatedChipText]}>
-            Information absente · Marquer NC
+            {empty ? 'Information absente · Marquer NC' : 'Marquer NC'}
           </Text>
         </Pressable>
       ) : null}
@@ -1137,6 +1146,14 @@ export function ReviewScreen() {
                             suggestion={name === 'allergens' ? allergenSuggestion : undefined}
                             history={fieldHistory}
                             edited={Object.prototype.hasOwnProperty.call(edits, name)}
+                            skipExplicitConfirmation={
+                              name === 'FAO_area' &&
+                              effectiveValues.FAO_area === NOT_COMMUNICATED_VALUE &&
+                              canonicalizeFinalReviewValue(
+                                'production_method',
+                                effectiveValues.production_method,
+                              ) === 'farmed'
+                            }
                           />
                         );
                       }

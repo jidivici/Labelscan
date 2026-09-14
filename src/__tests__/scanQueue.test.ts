@@ -524,10 +524,11 @@ describe('scanQueue', () => {
     expect(getSnapshot().interim[scan.id]).toBeUndefined();
 
     const pollCalls = mockedWait.mock.calls.length;
-    await retryScan(scan.id);
+    await Promise.all([retryScan(scan.id), retryScan(scan.id)]);
     await flush();
     expect(getSnapshot().scans[0].status).toBe('extracting');
     expect(mockedRetryAnalysis).toHaveBeenCalledWith('ing-1', expect.anything());
+    expect(mockedRetryAnalysis).toHaveBeenCalledTimes(1);
     expect(mockedWait).toHaveBeenCalledTimes(pollCalls + 1);
   });
 

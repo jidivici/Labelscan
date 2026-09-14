@@ -219,6 +219,13 @@ describe('fieldCompleteness', () => {
     })).toBe(1);
   });
 
+  it('mirrors the farmed FAO projection on a final run without a saved FAO edit', () => {
+    expect(filledCountFromRun([
+      field('production_method', { value: 'farmed' }),
+      field('FAO_area', { value: null, validation_status: 'missing' }),
+    ])).toBe(2);
+  });
+
   it('a run can reach the full /16 when every canonical field is present', () => {
     // Build all 16 canonical fields as present — the score caps at 16.
     const fields = [

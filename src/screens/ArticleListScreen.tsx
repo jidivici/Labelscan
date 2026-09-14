@@ -41,7 +41,7 @@ import { useCatalogArticles } from '../services/catalogApi';
 import { exportAsJSON, exportAsCSV } from '../services/export';
 import { useArticleSearch } from '../hooks/useArticleSearch';
 import { useScanQueue } from '../hooks/useScanQueue';
-import { sortPendingScansNewestFirst } from '../services/pendingScanOrder';
+import { sortPendingScansByAttention } from '../services/pendingScanOrder';
 import { discardScan, retryScan, type PendingScan } from '../services/scanQueue';
 import {
   filledCountFromInterim,
@@ -107,7 +107,7 @@ export function ArticleListScreen() {
   const { scans: pendingScans, results: scanResults, interim: scanInterim } = useScanQueue();
   const visiblePendingScans = useMemo(
     () =>
-      sortPendingScansNewestFirst(
+      sortPendingScansByAttention(
         pendingScans.filter(
           (scan) =>
             scan.organizationId === organizationId &&
