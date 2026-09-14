@@ -142,7 +142,6 @@ def _fields() -> dict[str, str | None]:
             "scientific_name": "Gadus morhua",
             "batch_number": f"LOT-{uuid.uuid4().hex[:12].upper()}",
             "FAO_area": "27.8.b.1",
-            "weight": "1 kg",
         }
     )
     return fields

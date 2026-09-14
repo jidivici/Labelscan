@@ -21,6 +21,10 @@ def _as_dict(text: str) -> dict[str, str]:
     return {f.name: f.value for f in extract_interim_fields(text)}
 
 
+def _high_precision_dict(text: str) -> dict[str, str]:
+    return {f.name: f.value for f in extract_high_precision_ocr_fields(text)}
+
+
 # ── dates ─────────────────────────────────────────────────────────────────────
 
 
@@ -126,11 +130,11 @@ def test_batch_number_two_distinct_lots_emit_nothing():
     ],
 )
 def test_net_weight_lexicon(label, expected):
-    assert _as_dict(label)["weight"] == expected
+    assert _high_precision_dict(label)["weight"] == expected
 
 
 def test_calibre_and_pack_count_are_never_net_weight():
-    assert "weight" not in _as_dict("Calibre 180/300 g - 8 colis de 1.4 kg")
+    assert "weight" not in _high_precision_dict("Calibre 180/300 g - 8 colis de 1.4 kg")
 
 
 # ── sanitary mark + production method ────────────────────────────────────────

@@ -302,4 +302,12 @@ def extract_interim_fields(full_text: str) -> tuple[InterimField, ...]:
         for name, values in candidates.items()
         if len(values) == 1
     )
-    return preview + extract_high_precision_ocr_fields(full_text)
+    # The persisted interim schema intentionally stays small. Net weight complements
+    # the final run, while the established deterministic preview fields remain the
+    # only values written to ingestion.interim_field.
+    deterministic_preview = tuple(
+        field
+        for field in extract_high_precision_ocr_fields(full_text)
+        if field.name != "weight"
+    )
+    return preview + deterministic_preview
