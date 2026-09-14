@@ -532,6 +532,29 @@ describe('scanQueue', () => {
     expect(mockedWait).toHaveBeenCalledTimes(pollCalls + 1);
   });
 
+  it('requeues an OCR provider failure instead of polling its old terminal state', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-ocr', replayed: false });
+    mockedWait.mockResolvedValueOnce({
+      kind: 'failed',
+      status: 'ocr_failed',
+      ingestion: { recapture_required: false } as never,
+    });
+
+    const scan = await enqueueScan({
+      tempUri: 'file:///cache/julienne.jpg',
+      capturedAt: '2026-07-05T10:00:00Z',
+    });
+    await flush(6);
+    expect(getSnapshot().scans[0].status).toBe('extract_error');
+
+    await retryScan(scan.id);
+    await flush();
+
+    expect(mockedRetryAnalysis).toHaveBeenCalledWith('ing-ocr', expect.anything());
+    expect(getSnapshot().scans[0].status).toBe('extracting');
+  });
+
   it('requires a new photo only when the server explicitly marks it for recapture', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-blurry', replayed: false });

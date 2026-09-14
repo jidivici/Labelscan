@@ -145,6 +145,7 @@ const controllers = new Map<string, AbortController>();
 const pollStartedAt = new Map<string, number>(); // per-scan total-budget anchor
 const waitList: string[] = [];
 const retryingScanIds = new Set<string>();
+const SERVER_RETRYABLE_ANALYSIS_FAILURES = new Set(['extraction_failed', 'ocr_failed']);
 let pollsPaused = false; // true while the app is backgrounded
 let queueGeneration = 0;
 
@@ -632,7 +633,11 @@ export async function retryScan(id: string): Promise<void> {
       updateScan(id, { status: 'extracting', errorCode: undefined });
     // A terminal provider failure needs a NEW server-side extraction event. Merely
     // polling the old terminal status would immediately show the same error again.
-      if (scan.errorCode === 'extraction_failed' && scan.ingestionId) {
+      if (
+        scan.errorCode &&
+        SERVER_RETRYABLE_ANALYSIS_FAILURES.has(scan.errorCode) &&
+        scan.ingestionId
+      ) {
         try {
           await retryIngestionAnalysis(scan.ingestionId, { signal: fence.signal });
         } catch (error) {

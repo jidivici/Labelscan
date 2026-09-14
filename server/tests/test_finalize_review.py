@@ -147,8 +147,9 @@ def _fields() -> dict[str, str | None]:
     return fields
 
 
+@pytest.mark.parametrize("failure_status", ["ocr_failed", "extraction_failed"])
 def test_failed_analysis_can_be_requeued_with_the_existing_photo(
-    atomic_client, engine, raw_store
+    atomic_client, engine, raw_store, failure_status
 ):
     ingestion_id = _seed_review_ready(atomic_client, engine, raw_store)
     with engine.begin() as conn:
@@ -162,10 +163,10 @@ def test_failed_analysis_can_be_requeued_with_the_existing_photo(
         )
         conn.execute(
             text(
-                "UPDATE ingestion.ingestion SET status = 'extraction_failed' "
+                "UPDATE ingestion.ingestion SET status = :failure_status "
                 "WHERE id = :id"
             ),
-            {"id": ingestion_id},
+            {"id": ingestion_id, "failure_status": failure_status},
         )
 
     first = atomic_client.post(

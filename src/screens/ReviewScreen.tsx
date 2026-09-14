@@ -127,6 +127,10 @@ const FIELD_GROUP_ICON: Record<string, IconName> = {
 // Landscape photo height at the top of the review — wide and low so the whole label
 // reads landscape, leaving maximum room for the field list below (coherence request).
 const PHOTO_HEIGHT_LANDSCAPE = 200;
+type ScrollViewHandle = React.ElementRef<typeof ScrollView>;
+type KeyboardFocusTarget = Parameters<
+  ScrollViewHandle['scrollResponderScrollNativeHandleToKeyboard']
+>[0];
 
 // ── Server extraction — single homogeneous editable list ──────────────────────────
 
@@ -186,7 +190,7 @@ function WeightInput({
   draft: string;
   onChange: (text: string) => void;
   highlighted: boolean;
-  onFocus: () => void;
+  onFocus: (target: KeyboardFocusTarget) => void;
   onBlur: () => void;
 }) {
   const seed = parseWeight(draft);
@@ -212,7 +216,7 @@ function WeightInput({
           setAmount(v);
           onChange(formatWeight(v, unit));
         }}
-        onFocus={onFocus}
+        onFocus={(event) => onFocus(event.target)}
         onBlur={onBlur}
         keyboardType="default"
         placeholder="0"
@@ -250,7 +254,7 @@ function TempRangeInput({
   draft: string;
   onChange: (text: string) => void;
   highlighted: boolean;
-  onFocus: () => void;
+  onFocus: (target: KeyboardFocusTarget) => void;
   onBlur: () => void;
 }) {
   const seed = parseTemp(draft);
@@ -265,7 +269,7 @@ function TempRangeInput({
           setMin(t);
           onChange(formatTemp(t, max));
         }}
-        onFocus={onFocus}
+        onFocus={(event) => onFocus(event.target)}
         onBlur={onBlur}
         keyboardType="numeric"
         placeholder="min"
@@ -280,7 +284,7 @@ function TempRangeInput({
           setMax(t);
           onChange(formatTemp(min, t));
         }}
-        onFocus={onFocus}
+        onFocus={(event) => onFocus(event.target)}
         onBlur={onBlur}
         keyboardType="numeric"
         placeholder="max"
@@ -300,6 +304,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   suggestion,
   history,
   edited,
+  onFocusField,
   skipExplicitConfirmation = false,
 }: {
   field: ExtractionField;
@@ -311,6 +316,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   /** Per-field autocomplete history (workflow v2.1) — STABLE reference, built once. */
   history?: FieldHistory | null;
   edited: boolean;
+  onFocusField: (target: KeyboardFocusTarget) => void;
   skipExplicitConfirmation?: boolean;
 }) {
   // The review cue is REACTIVE to the live draft (not the server value): an empty
@@ -360,6 +366,10 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // wiring needed here. Applying a chip goes through emit → a HUMAN edit, exactly like
   // typing it (no-fabrication gate untouched).
   const [focused, setFocused] = useState(false);
+  const handleFocus = (target: KeyboardFocusTarget) => {
+    setFocused(true);
+    onFocusField(target);
+  };
   const historySuggestions = useMemo(() => {
     if (!focused) return [];
     const nc = allowsNC ? notCommunicatedSuggestion(draft) : null;
@@ -392,7 +402,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         <TextInput
           value={draft}
           onChangeText={emit}
-          onFocus={() => setFocused(true)}
+          onFocus={(event) => handleFocus(event.target)}
           onBlur={() => setFocused(false)}
           selectTextOnFocus
           style={[typography.bodyMedium, styles.input]}
@@ -405,7 +415,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           draft={draft}
           onChange={emit}
           highlighted={highlighted}
-          onFocus={() => setFocused(true)}
+          onFocus={handleFocus}
           onBlur={() => setFocused(false)}
         />
       ) : field.field_name === 'storage_temperature' ? (
@@ -413,7 +423,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           draft={draft}
           onChange={emit}
           highlighted={highlighted}
-          onFocus={() => setFocused(true)}
+          onFocus={handleFocus}
           onBlur={() => setFocused(false)}
         />
       ) : field.field_name === 'production_method' ? (
@@ -422,7 +432,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         <TextInput
           value={draft}
           onChangeText={handleChange}
-          onFocus={() => setFocused(true)}
+          onFocus={(event) => handleFocus(event.target)}
           onBlur={() => setFocused(false)}
           keyboardType={isDate ? 'number-pad' : 'default'}
           maxLength={isDate ? 10 : undefined}
@@ -555,6 +565,8 @@ export function ReviewScreen() {
   const [saving, setSaving] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
   const saveInFlightRef = useRef(false);
+  const contentScrollRef = useRef<ScrollViewHandle>(null);
+  const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
@@ -570,6 +582,7 @@ export function ReviewScreen() {
   useEffect(() => {
     return () => {
       saveScanEdits(pendingScanId, editsRef.current);
+      if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
   }, [pendingScanId]);
   // Start the staged-progress clock at mount so the 3-step box advances Lecture →
@@ -644,6 +657,17 @@ export function ReviewScreen() {
   // re-renders only the row whose draft changed, not all 16.
   const handleFieldChange = useCallback((name: string, text: string) => {
     setEdits((prev) => ({ ...prev, [name]: text }));
+  }, []);
+  const handleFieldFocus = useCallback((target: KeyboardFocusTarget) => {
+    if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
+    keyboardScrollTimerRef.current = setTimeout(() => {
+      contentScrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
+        target,
+        140,
+        true,
+      );
+      keyboardScrollTimerRef.current = null;
+    }, 250);
   }, []);
 
   // GS1-decoded values keyed by field name — shown IN the field list at T+0 (before the
@@ -1031,6 +1055,7 @@ export function ReviewScreen() {
       />
 
       <ScrollView
+        ref={contentScrollRef}
         style={styles.contentCard}
         contentContainerStyle={styles.contentInner}
         showsVerticalScrollIndicator={false}
@@ -1146,6 +1171,7 @@ export function ReviewScreen() {
                             suggestion={name === 'allergens' ? allergenSuggestion : undefined}
                             history={fieldHistory}
                             edited={Object.prototype.hasOwnProperty.call(edits, name)}
+                            onFocusField={handleFieldFocus}
                             skipExplicitConfirmation={
                               name === 'FAO_area' &&
                               effectiveValues.FAO_area === NOT_COMMUNICATED_VALUE &&

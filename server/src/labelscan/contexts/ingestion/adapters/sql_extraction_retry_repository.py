@@ -21,6 +21,7 @@ from labelscan.platform.http.access import AccessContext, postgres_scope
 _ALREADY_RETRYING = frozenset(
     {"raw_stored", "ocr_running", "ocr_done", "extraction_running"}
 )
+_RETRYABLE_FAILURES = frozenset({"ocr_failed", "extraction_failed"})
 
 
 class SqlExtractionRetryRepository:
@@ -68,7 +69,7 @@ class SqlExtractionRetryRepository:
             current_status = str(ingestion["status"])
             if current_status in _ALREADY_RETRYING:
                 return RetriedExtraction(ingestion_id, current_status, True)
-            if current_status != "extraction_failed":
+            if current_status not in _RETRYABLE_FAILURES:
                 raise ExtractionRetryNotAllowed(current_status)
 
             set_audit_context(
