@@ -99,11 +99,13 @@ describe('validateFinalReviewValues', () => {
     ]);
   });
 
-  it('accepts NC only for non-critical fields and never accepts blanks', () => {
+  it('rejects NC for weight, accepts it for non-critical fields and never accepts blanks', () => {
     expect(validateFinalReviewValues({
       gtin: 'NC',
-      weight: 'NC',
     })).toEqual([]);
+    expect(validateFinalReviewValues({ weight: 'NC' })).toEqual([
+      expect.objectContaining({ fieldName: 'weight' }),
+    ]);
     expect(validateFinalReviewValues({ weight: '  ' })).toEqual([
       expect.objectContaining({ fieldName: 'weight' }),
     ]);

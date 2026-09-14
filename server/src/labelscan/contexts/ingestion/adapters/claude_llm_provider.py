@@ -94,7 +94,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v3.3.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.4.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -557,9 +557,14 @@ component is the day, which fixes the order ("16.06.26" -> 2026-06-16, "17/06/20
 2026-06-17, "22.06.26" -> 2026-06-22). Order is ambiguous ONLY when BOTH leading components \
 are <=12 (e.g. "04/05/2026" could be 4 May or 5 April): then "value" is null, \
 "validation_status" is "ambiguous", and a warning names both readings - DO NOT pick one. \
-Map FR vocabulary: "emballage" / "conditionnement" -> packaging_date (if both appear, use the \
-conditioning date and record the other in a warning); a "capture" / "abattage" / "production" \
-date maps to NO field (do not force it into packaging_date). For a month+year-only date, \
+Route dates by their EXPLICIT nearby label, never by visual position: "DLC", "date limite de \
+consommation", "à consommer jusqu'au/avant le", "use by", "expiry date" and "best before" -> \
+expiry_date; "emballé le", "conditionné le", "mis en emballage le", "date d'emballage", "date \
+de conditionnement", "packed on" and "pack date" -> packaging_date. A bare word such as \
+"emballage" or "conditionnement" without a date cue is NOT a date. Never copy one printed date \
+into both fields. If each label has its own date, preserve each mapping even when the lines are \
+adjacent. A "capture" / "abattage" / "production" date maps to NO field (do not force it into \
+packaging_date). For a month+year-only date, \
 the day is unknown: return value null, confidence 0, evidence [], validation_status \
 "ambiguous", and explain the reduced precision in a warning.
 - storage_temperature: "value" is a short Celsius string, e.g. "0-4 C", "<=4 C", \
@@ -568,7 +573,9 @@ the day is unknown: return value null, confidence 0, evidence [], validation_sta
 the conversion. If relevant temperature wording is present but cannot be interpreted, \
 keep that wording verbatim in "value" and "evidence", set "validation_status" to \
 "unnormalizable", and explain the limitation in a warning.
-- weight: "value" is a string with an explicit unit, e.g. "320 g", "1.5 kg". Keep the \
+- weight: "value" is a string with an explicit unit, e.g. "320 g", "1.5 kg". Recognize \
+"poids net", "pds net", "p. net", "P/N", "PN", "contenu net", "quantité nette", "net \
+weight", "net wt." and "net content" as net-weight labels. Keep the \
 magnitude the label shows (do not rescale 320 g to 0.32 kg). A comma decimal is normalized \
 to a point ("4,82 Kg" -> "4.82 kg"). Extract weight ONLY from an explicit net-weight \
 statement ("Poids net …"); a calibre / grading or pack count ("180/300 g", "2-3 Kg", "8 \
@@ -790,14 +797,19 @@ GROUNDING AND COMMON FIELD ROUTING:
 - batch_number comes only from an explicit lot/batch cue. origin_country comes only from
   explicit origin wording. A postal address and a health/approval-mark country prefix do
   not prove origin.
-- expiry_date is only a use-by/best-before date. packaging_date is only a date explicitly
-  tied to packing/conditioning. Dates use YYYY-MM-DD only when their order is
+- expiry_date is only a date explicitly tied to DLC / use-by / best-before wording.
+  packaging_date is only a date explicitly tied to packing/conditioning wording. Never
+  assign a packaging date to expiry_date or an expiry date to packaging_date, and never
+  emit the same printed date in both fields unless two distinct explicit labels prove it.
+  Dates use YYYY-MM-DD only when their order is
   unambiguous; otherwise return null/ambiguous with the raw date in warnings.
 - storage_temperature is the complete explicit Celsius value/range/instruction.
   allergens contains explicitly declared allergens; precautionary "may contain traces"
   wording belongs in warnings and is not a declared allergen.
 - health_mark is the complete explicit sanitary/identification approval mark and never
-  supplies origin. weight comes from an explicit net-weight statement; do not use a
+  supplies origin. weight comes only from an explicit "poids net" / "pds net" / "P/N" /
+  "PN" / "contenu net" / "quantité nette" / "net weight" / "net wt." / "net content"
+  statement; do not use a
   calibre, unit price, gross weight or pack count as net weight.
 - gtin comes only from a complete human-readable GTIN or GS1 AI (01), never from an
   unrelated number. Fields identified reliably from GS1 may be excluded in the user

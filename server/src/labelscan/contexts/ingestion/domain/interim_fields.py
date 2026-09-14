@@ -57,6 +57,7 @@ _DATE_ALT = f"(?:{_ISO_DATE}|{_NUM_DATE})"
 # the label is NOT attributed to the key.
 _EXPIRY_KEYS = (
     r"dlc",
+    r"date limite de consommation",
     r"a consommer jusqu'?\s?au",
     r"a consommer avant le",
     r"a consommer avant",
@@ -66,9 +67,11 @@ _EXPIRY_KEYS = (
 _PACKAGING_KEYS = (
     r"emballe le",
     r"conditionne le",
+    r"mis en emballage le",
     r"date d'emballage",
     r"date de conditionnement",
     r"packed on",
+    r"pack(?:ed|ing)? date",
 )
 
 
@@ -149,6 +152,41 @@ def _batches(original_text: str) -> set[str]:
         if any(ch.isdigit() for ch in token):
             found.add(token)
     return found
+
+
+# ── net weight ────────────────────────────────────────────────────────────────
+
+# Supplier/criée labels vary heavily around the same explicit concept. Keep the
+# key mandatory so calibre ranges, unit prices, gross weights and pack counts are
+# never promoted to net weight.
+_NET_WEIGHT_RX = re.compile(
+    r"(?<![A-Za-z0-9])(?P<evidence>"
+    r"(?:poids\s+net(?:\s+(?:total|a\s+l['’]emballage))?|"
+    r"p(?:ds|oids)?\.?\s*net|p\s*/\s*n(?:et)?|pn|"
+    r"contenu\s+net|quantite\s+nette|"
+    r"net\s+(?:weight|wt\.?|content))"
+    r"\s*[:=]?\s*"
+    r"(?P<amount>\d{1,6}(?:[.,]\d{1,3})?)\s*(?P<unit>kg|g)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _net_weight(original_text: str) -> InterimField | None:
+    candidates: dict[str, str] = {}
+    for match in _NET_WEIGHT_RX.finditer(original_text):
+        amount = match.group("amount").replace(",", ".")
+        value = f"{amount} {match.group('unit').lower()}"
+        candidates.setdefault(value, match.group("evidence"))
+    if len(candidates) != 1:
+        return None
+    value, evidence = next(iter(candidates.items()))
+    return InterimField(
+        name="weight",
+        value=value,
+        evidence=evidence,
+        validation_status="normalized" if value not in evidence else "present",
+    )
 
 
 # ── high-precision regulatory fields ─────────────────────────────────────────
@@ -235,7 +273,7 @@ def extract_high_precision_ocr_fields(full_text: str) -> tuple[InterimField, ...
         return ()
     return tuple(
         field
-        for field in (_health_mark(full_text), _farmed_method(full_text))
+        for field in (_health_mark(full_text), _farmed_method(full_text), _net_weight(full_text))
         if field is not None
     )
 

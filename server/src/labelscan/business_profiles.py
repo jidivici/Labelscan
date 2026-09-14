@@ -55,7 +55,11 @@ FIELD_SPECS: dict[str, FieldSpec] = {
     "packaging_date": FieldSpec(kind="date", format="YYYY-MM-DD", max_length=10),
     "preparation_date": FieldSpec(kind="date", format="YYYY-MM-DD", max_length=10),
     "weight": FieldSpec(
-        kind="decimal_unit", format="decimal unit", max_length=32, units=("g", "kg")
+        kind="decimal_unit",
+        format="decimal unit",
+        max_length=32,
+        units=("g", "kg"),
+        nullable=False,
     ),
     "storage_temperature": FieldSpec(
         kind="temperature_range", format="celsius", max_length=40, units=("°C",)

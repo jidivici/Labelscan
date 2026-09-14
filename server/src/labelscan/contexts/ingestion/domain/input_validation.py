@@ -153,11 +153,13 @@ def validate_human_field_value(field_name: str, value: str | None) -> str | None
         max_chars=min(MAX_FIELD_VALUE_CHARS, field_spec(field_name).max_length),
         allow_newlines=True,
     )
-    # NC is the explicit, audited "non communiqué" value accepted by the final
-    # review workflow.  It is never confused with a machine-extracted value.
-    if normalized.upper() == "NC":
-        return "NC"
     spec = field_spec(field_name)
+    # NC is the explicit, audited "non communiqué" value accepted by nullable fields.
+    # Weight is operationally required and must always remain a positive g/kg value.
+    if normalized.upper() == "NC":
+        if not spec.nullable:
+            raise ValueError(f"field '{field_name}' does not accept NC")
+        return "NC"
     if spec.kind == "date" and not _valid_iso_date(normalized):
         raise ValueError(f"field '{field_name}' must be a complete YYYY-MM-DD date")
     if spec.kind == "enum" and normalized not in spec.enum:

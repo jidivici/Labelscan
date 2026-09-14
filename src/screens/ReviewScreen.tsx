@@ -202,23 +202,13 @@ function WeightInput({
       <TextInput
         value={amount}
         onChangeText={(t) => {
-          if (t.trim().toUpperCase() === NOT_COMMUNICATED_VALUE) {
-            setAmount(NOT_COMMUNICATED_VALUE);
-            onChange(NOT_COMMUNICATED_VALUE);
-            return;
-          }
-          if (notCommunicatedSuggestion(t)) {
-            setAmount(t);
-            onChange(t);
-            return;
-          }
           const v = t.replace(/[^0-9.,]/g, '');
           setAmount(v);
           onChange(formatWeight(v, unit));
         }}
         onFocus={(event) => onFocus(event.target)}
         onBlur={onBlur}
-        keyboardType="default"
+        keyboardType="decimal-pad"
         placeholder="0"
         placeholderTextColor={colors.onSurfaceVariant}
         style={[typography.bodyMedium, styles.affixInput, highlighted ? styles.affixInputHighlighted : null]}
@@ -398,7 +388,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           <Text style={[typography.labelSmall, styles.attentionTag]}>{attentionLabel}</Text>
         ) : null}
       </View>
-      {isNotCommunicated && allowsNC && ['weight', 'storage_temperature'].includes(field.field_name) ? (
+      {isNotCommunicated && allowsNC && field.field_name === 'storage_temperature' ? (
         <TextInput
           value={draft}
           onChangeText={emit}
@@ -479,7 +469,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         </View>
       ) : null}
       {!needsExplicitConfirmation && !isNotCommunicated && allowsNC &&
-      (empty || field.field_name === 'weight') ? (
+      empty ? (
         <Pressable
           onPress={() => emit(NOT_COMMUNICATED_VALUE)}
           style={styles.notCommunicatedChip}

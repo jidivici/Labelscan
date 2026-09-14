@@ -46,6 +46,7 @@ const VALUE_REQUIRED_FIELDS = new Set([
   'batch_number',
   'production_method',
   'storage_temperature',
+  'weight',
 ]);
 const WEIGHT = /^(\d+(?:[.,]\d{1,3})?)\s*(g|kg)$/i;
 const TEMPERATURE = /^(?:(<=|>=|≤|≥)\s*)?(-?\d+(?:[.,]\d+)?)(?:\s*(?:-|–|à)\s*(-?\d+(?:[.,]\d+)?))?\s*°?C$/i;

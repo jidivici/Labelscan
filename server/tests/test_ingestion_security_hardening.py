@@ -87,6 +87,8 @@ def test_human_review_accepts_canonical_safety_values_and_nc() -> None:
     # does not follow the standard GTIN modulo rule.
     assert validate_human_field_value("gtin", "93000502900206") == "93000502900206"
     assert validate_human_field_value("gtin", "nc") == "NC"
+    with pytest.raises(ValueError, match="does not accept NC"):
+        validate_human_field_value("weight", "NC")
 
 
 def test_notes_allow_newlines_but_not_direction_spoofing() -> None:

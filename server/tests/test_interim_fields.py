@@ -9,6 +9,8 @@ No DB, no providers. The invariants under test:
 
 from __future__ import annotations
 
+import pytest
+
 from labelscan.contexts.ingestion.domain.interim_fields import (
     extract_high_precision_ocr_fields,
     extract_interim_fields,
@@ -46,6 +48,13 @@ def test_packaging_date_fr_label():
     got = _as_dict("Emballé le 14/06/2026 — À consommer jusqu'au 20/06/2026")
     assert got["packaging_date"] == "2026-06-14"
     assert got["expiry_date"] == "2026-06-20"
+
+
+def test_date_labels_never_cross_populate_packaging_and_expiry():
+    packaging = _as_dict("Date d'emballage : 22.06.26")
+    expiry = _as_dict("Date limite de consommation : 30.06.26")
+    assert packaging == {"packaging_date": "2026-06-22"}
+    assert expiry == {"expiry_date": "2026-06-30"}
 
 
 def test_use_by_english_label():
@@ -100,6 +109,28 @@ def test_batch_number_no_digit_rejected():
 
 def test_batch_number_two_distinct_lots_emit_nothing():
     assert "batch_number" not in _as_dict("LOT A123 ... LOT B456")
+
+
+# ── net weight ────────────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("label", "expected"),
+    [
+        ("Poids net 320 g", "320 g"),
+        ("PDS NET : 4,82 KG", "4.82 kg"),
+        ("P/N=750g", "750 g"),
+        ("PN 1.5 kg", "1.5 kg"),
+        ("Contenu net 500 g", "500 g"),
+        ("Net wt. 2 kg", "2 kg"),
+    ],
+)
+def test_net_weight_lexicon(label, expected):
+    assert _as_dict(label)["weight"] == expected
+
+
+def test_calibre_and_pack_count_are_never_net_weight():
+    assert "weight" not in _as_dict("Calibre 180/300 g - 8 colis de 1.4 kg")
 
 
 # ── sanitary mark + production method ────────────────────────────────────────
