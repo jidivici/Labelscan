@@ -9,6 +9,7 @@ guarantees correlation_id/trace_id are present end-to-end.
 from __future__ import annotations
 
 import re
+import time
 import uuid
 
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -17,6 +18,7 @@ from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from labelscan.platform.config import is_production
 from labelscan.platform.http import jwt as jwt_codec
+from labelscan.platform.http.client_context import client_ip, request_context
 from labelscan.platform.http.errors import problem_response
 from labelscan.platform.http.rate_limit import LimitExceeded, rate_limits
 from labelscan.platform.observability import get_logger
@@ -198,9 +200,45 @@ class CorrelationMiddleware(BaseHTTPMiddleware):
         trace_id = _trace_id_from(request.headers.get("traceparent"))
         request.state.correlation_id = correlation_id
         request.state.trace_id = trace_id
-        response = await call_next(request)
+        started = time.monotonic()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        finally:
+            # Include rejected/unknown paths, not just successful API operations.
+            # These records are also emitted when an exception escapes the app.
+            if request.url.path not in {"/v1/health/live", "/v1/health/ready"} or status >= 400:
+                _log.log(
+                    30 if status >= 400 else 20,
+                    "http_request",
+                    extra={
+                        **request_context(request),
+                        "event_type": "http_request",
+                        "status": status,
+                        "latency_ms": round((time.monotonic() - started) * 1000, 2),
+                    },
+                )
         response.headers.setdefault("X-Correlation-Id", correlation_id)
         return response
+
+
+class RequestRateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if is_production():
+            try:
+                rate_limits.check_request(client_ip(request))
+            except LimitExceeded as exc:
+                _log.warning("rate_limited", extra={
+                    **request_context(request),
+                    "rate_limit_scope": exc.scope,
+                    "retry_after": exc.retry_after,
+                })
+                return problem_response(
+                    request, "RATE_LIMITED",
+                    extra_headers={"Retry-After": str(exc.retry_after)},
+                )
+        return await call_next(request)
 
 
 class MutationRateLimitMiddleware(BaseHTTPMiddleware):
@@ -234,6 +272,7 @@ class MutationRateLimitMiddleware(BaseHTTPMiddleware):
             _log.warning(
                 "rate_limited",
                 extra={
+                    **request_context(request),
                     "actor_id": actor_id,
                     "rate_limit_scope": exc.scope,
                     "retry_after": exc.retry_after,

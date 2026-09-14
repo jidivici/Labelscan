@@ -69,6 +69,12 @@ _EXTRA_FIELDS = (
     "interim_field_count",
     "next_retry_at",
     "actor_id",
+    "client_ip",
+    "peer_ip",
+    "method",
+    "account_key",
+    "session_family_id",
+    "client_type",
     "rate_limit_scope",
     "retry_after",
     # Provider-capacity measurements: identifiers and scalar counters only.
@@ -118,6 +124,8 @@ def configure_logging() -> None:
     root = logging.getLogger(_ROOT)
     root.handlers[:] = [handler]
     root.setLevel(os.environ.get("LABELSCAN_LOG_LEVEL", "INFO").upper())
+    # Security evidence must not disappear when operational logs are set to WARN.
+    logging.getLogger(f"{_ROOT}.http.security").setLevel(logging.INFO)
     root.propagate = False  # don't double-log through the python root logger
     _CONFIGURED = True
 

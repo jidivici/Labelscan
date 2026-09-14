@@ -182,11 +182,13 @@ def resolve_principal(request: Request) -> Principal:
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() == "bearer" and token.strip():
             principal = _principal_from_bearer(token.strip())
+            request.state.actor_id = principal.actor_id
             request.state.organization_id = principal.organization_id
             return principal
         raise ApiError("UNAUTHENTICATED", "unsupported Authorization scheme")
     if _header_auth_enabled():
         principal = _principal_from_headers(request)
+        request.state.actor_id = principal.actor_id
         request.state.organization_id = principal.organization_id
         return principal
     raise ApiError("UNAUTHENTICATED", "No authenticated principal")

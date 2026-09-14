@@ -29,6 +29,7 @@ die() {
 
 reset_demo=0
 fresh_build=0
+verify_security=0
 reset_started=0
 postgres_volume_migrated=0
 consistent_dump_file=""
@@ -41,6 +42,7 @@ case $# in
     case "$3" in
       --reset-demo) reset_demo=1 ;;
       --fresh-build) fresh_build=1 ;;
+      --verify-security) verify_security=1 ;;
       *) die "usage: $0 <checked-out-repository> <commit-sha> [--reset-demo|--fresh-build]" ;;
     esac
     ;;
@@ -73,6 +75,11 @@ checkout_head="$(git -c safe.directory="$checkout_root" -C "$checkout_root" rev-
 [[ -f "${checkout_root}/${REPOSITORY_BUILD_COMPOSE}" ]] || die "single-VPS build Compose file is missing"
 [[ -f "${checkout_root}/${REPOSITORY_CADDY}" ]] || die "Caddyfile is missing"
 [[ -f "$COMPOSE_FILE" ]] || die "VPS Compose file is missing"
+
+if [[ "$verify_security" -eq 1 ]]; then
+  export LABELSCAN_VERSION="$commit_sha"
+  exec python3 "${checkout_root}/deploy/hostinger/verify-security.py" "$COMPOSE_FILE" "$commit_sha"
+fi
 
 previous_version=""
 if [[ -s "${APP_ROOT}/DEPLOYED_VERSION" ]]; then

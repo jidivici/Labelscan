@@ -31,7 +31,9 @@ def _positive_int(name: str, default: int) -> int:
 class RateLimits:
     def __init__(self) -> None:
         self._events: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+        self._expires: dict[tuple[str, str], float] = {}
         self._login_failures: dict[str, int] = defaultdict(int)
+        self._account_expires: dict[str, float] = {}
         self._blocked_until: dict[str, float] = {}
         self._holds_by_actor: dict[str, int] = defaultdict(int)
         self._holds_total = 0
@@ -41,7 +43,9 @@ class RateLimits:
         """Clear process-local counters when a new application instance is composed."""
         with self._lock:
             self._events.clear()
+            self._expires.clear()
             self._login_failures.clear()
+            self._account_expires.clear()
             self._blocked_until.clear()
             self._holds_by_actor.clear()
             self._holds_total = 0
@@ -49,6 +53,15 @@ class RateLimits:
     def _window(self, scope: str, key: str, *, limit: int, window_seconds: int) -> None:
         now = time.monotonic()
         with self._lock:
+            bucket = (scope, key)
+            capacity = _positive_int("LABELSCAN_RATE_MAX_BUCKETS", 10000)
+            if bucket not in self._events and len(self._events) >= capacity:
+                for expired in [k for k, expiry in self._expires.items() if expiry <= now]:
+                    self._events.pop(expired, None)
+                    self._expires.pop(expired, None)
+                if len(self._events) >= capacity:
+                    # Do not evict a live counter: key churn must not reset limits.
+                    raise LimitExceeded(60, "rate_limit_capacity")
             events = self._events[(scope, key)]
             cutoff = now - window_seconds
             while events and events[0] <= cutoff:
@@ -57,19 +70,7 @@ class RateLimits:
                 retry = max(1, int(events[0] + window_seconds - now) + 1)
                 raise LimitExceeded(retry, scope)
             events.append(now)
-
-    def _check_window(
-        self, scope: str, key: str, *, limit: int, window_seconds: int
-    ) -> None:
-        now = time.monotonic()
-        with self._lock:
-            events = self._events[(scope, key)]
-            cutoff = now - window_seconds
-            while events and events[0] <= cutoff:
-                events.popleft()
-            if len(events) >= limit:
-                retry = max(1, int(events[0] + window_seconds - now) + 1)
-                raise LimitExceeded(retry, scope)
+            self._expires[bucket] = now + window_seconds
 
     def check_login(self, client_ip: str, account_key: str) -> None:
         now = time.monotonic()
@@ -79,18 +80,40 @@ class RateLimits:
                 raise LimitExceeded(
                     max(1, int(blocked_until - now) + 1), "login_account"
                 )
-        self._check_window(
+        # Reserve before password verification, under the window's lock.
+        # Counting failures afterwards allowed concurrent requests through.
+        self._window(
             "login_ip",
             client_ip,
             limit=_positive_int("LABELSCAN_LOGIN_RATE_LIMIT", 5),
             window_seconds=_positive_int("LABELSCAN_LOGIN_RATE_WINDOW_SECONDS", 60),
         )
+        self._window(
+            "login_account_attempt",
+            account_key,
+            limit=_positive_int("LABELSCAN_LOGIN_ACCOUNT_ATTEMPTS", 20),
+            window_seconds=60,
+        )
+        self._window(
+            "login_global",
+            "all",
+            limit=_positive_int("LABELSCAN_LOGIN_GLOBAL_LIMIT", 120),
+            window_seconds=60,
+        )
 
     def login_failed(self, client_ip: str, account_key: str) -> None:
         threshold = _positive_int("LABELSCAN_LOGIN_ACCOUNT_FAILURES", 5)
         cooldown = _positive_int("LABELSCAN_LOGIN_ACCOUNT_COOLDOWN_SECONDS", 60)
+        now = time.monotonic()
         with self._lock:
-            self._events[("login_ip", client_ip)].append(time.monotonic())
+            for expired in [k for k, expiry in self._account_expires.items() if expiry <= now]:
+                self._login_failures.pop(expired, None)
+                self._blocked_until.pop(expired, None)
+                self._account_expires.pop(expired, None)
+            capacity = _positive_int("LABELSCAN_RATE_MAX_BUCKETS", 10000)
+            if account_key not in self._account_expires and len(self._account_expires) >= capacity:
+                raise LimitExceeded(60, "rate_limit_capacity")
+            self._account_expires[account_key] = now + max(cooldown, 3600)
             self._login_failures[account_key] += 1
             if self._login_failures[account_key] >= threshold:
                 self._blocked_until[account_key] = time.monotonic() + cooldown
@@ -100,6 +123,7 @@ class RateLimits:
         with self._lock:
             self._login_failures.pop(account_key, None)
             self._blocked_until.pop(account_key, None)
+            self._account_expires.pop(account_key, None)
 
     def check_ingestion(self, actor_id: str) -> None:
         self._window(
@@ -138,6 +162,15 @@ class RateLimits:
             client_ip,
             limit=_positive_int("LABELSCAN_REFRESH_RATE_LIMIT", 30),
             window_seconds=_positive_int("LABELSCAN_REFRESH_RATE_WINDOW_SECONDS", 60),
+        )
+
+    def check_request(self, client_ip: str) -> None:
+        """Bound public reads, invalid tokens and path scanning before DB work."""
+        self._window(
+            "http_ip",
+            client_ip,
+            limit=_positive_int("LABELSCAN_HTTP_RATE_LIMIT", 600),
+            window_seconds=_positive_int("LABELSCAN_HTTP_RATE_WINDOW_SECONDS", 60),
         )
 
     def acquire_hold(self, actor_id: str) -> None:

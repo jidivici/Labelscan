@@ -43,6 +43,7 @@ from labelscan.platform.http.middleware import (
     CorrelationMiddleware,
     IngestionRequestSizeLimitMiddleware,
     MutationRateLimitMiddleware,
+    RequestRateLimitMiddleware,
     SecurityHeadersMiddleware,
 )
 from labelscan.platform.http.rate_limit import rate_limits
@@ -90,9 +91,11 @@ def create_app() -> FastAPI:
     if production:
         app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts())
     app.add_middleware(IngestionRequestSizeLimitMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(MutationRateLimitMiddleware)
+    app.add_middleware(RequestRateLimitMiddleware)
     app.add_middleware(CorrelationMiddleware)
+    # Even early rate-limit rejections get the same browser/cache protections.
+    app.add_middleware(SecurityHeadersMiddleware)
     install_error_handlers(app)
     app.include_router(auth_router)  # auth: POST /v1/auth/login (unauthenticated)
     app.include_router(identity_access_router)  # role-specific IAM

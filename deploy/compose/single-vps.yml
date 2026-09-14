@@ -1,5 +1,11 @@
 name: labelscan-single-vps
 
+x-log-options: &log-options
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "10"
+
 x-production-environment: &production-environment
   LABELSCAN_ENV: production
   LABELSCAN_DEPLOYMENT_TOPOLOGY: single-vps
@@ -15,6 +21,7 @@ x-production-environment: &production-environment
   LABELSCAN_OCR_PROVIDER: google
 
 x-app: &app
+  logging: *log-options
   # A commit-addressed tag prevents a mutable local tag from silently serving
   # an image other than the revision recorded by /v1/version.
   image: labelscan-local:${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
@@ -31,6 +38,7 @@ x-app: &app
 
 services:
   db:
+    logging: *log-options
     image: labelscan-postgres:${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
     user: "70:70"
     restart: unless-stopped
@@ -154,6 +162,7 @@ services:
     cpus: 1.5
 
   caddy:
+    logging: *log-options
     image: labelscan-caddy:${LABELSCAN_VERSION:?LABELSCAN_VERSION is required}
     user: "10002:10002"
     restart: unless-stopped

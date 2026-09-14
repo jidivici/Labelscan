@@ -39,6 +39,8 @@ La configuration relie quatre ensembles : **version d'image**, **origine publiqu
 
 ## Contrôles d'exploitation
 
+Le [guide d'observation de sécurité](hostinger/SECURITY-OPERATIONS.md) décrit les journaux d'authentification/IP, les limites de trafic, l'inventaire des sessions et les contrôles à effectuer avant un pentest.
+
 | Endpoint | Information exposée |
 |---|---|
 | `/v1/health/live` | Présence du processus API |

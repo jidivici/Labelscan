@@ -11,7 +11,6 @@ downstream router changes.
 from __future__ import annotations
 
 import hashlib
-import ipaddress
 import threading
 
 from fastapi import APIRouter, Cookie, Depends, Path, Request, Response, status
@@ -30,8 +29,10 @@ from labelscan.contexts.identity.domain.user import (
     AuthenticatedUser,
     normalize_identity_text,
 )
-from labelscan.platform.config import is_production, is_trusted_proxy, public_origin
+from labelscan.platform.config import is_production, public_origin
 from labelscan.platform.http import jwt as jwt_codec
+from labelscan.platform.http.client_context import client_ip as _client_ip
+from labelscan.platform.http.client_context import request_context
 from labelscan.platform.http.errors import ApiError
 from labelscan.platform.http.rate_limit import LimitExceeded, rate_limits
 from labelscan.platform.observability import get_logger
@@ -132,26 +133,17 @@ def _account_key(organization_slug: str, username: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
-def _client_ip(request: Request) -> str:
-    peer = request.client.host if request.client else "unknown"
-    if not is_trusted_proxy(peer):
-        return peer
-    forwarded_chain = [
-        item.strip()
-        for value in request.headers.getlist("X-Forwarded-For")
-        for item in value.split(",")
-        if item.strip()
-    ]
-    # Walk from the nearest hop backwards.  This prevents a client-controlled
-    # left-most X-Forwarded-For value from selecting its own rate-limit bucket.
-    for forwarded in reversed(forwarded_chain):
-        try:
-            normalized = str(ipaddress.ip_address(forwarded))
-        except ValueError:
-            continue
-        if not is_trusted_proxy(normalized):
-            return normalized
-    return peer
+def _auth_event(request: Request, event: str, *, session: RefreshSession | None = None, **fields) -> None:
+    context = request_context(request)
+    if session:
+        context.update(
+            actor_id=session.user.actor_id,
+            organization_id=session.user.organization_id,
+            session_family_id=session.family_id,
+            client_type=session.client_type,
+            account_key=_account_key(session.user.organization_slug, session.user.username),
+        )
+    _log.info(event, extra={**context, "event_type": event, **fields})
 
 
 def _rate_limit_error(exc: LimitExceeded) -> ApiError:
@@ -169,6 +161,7 @@ def _check_refresh_rate(request: Request) -> None:
         _log.warning(
             "rate_limited",
             extra={
+                **request_context(request),
                 "rate_limit_scope": exc.scope,
                 "retry_after": exc.retry_after,
                 "path": request.url.path,
@@ -199,6 +192,7 @@ def _authenticated_user(
         _log.warning(
             "rate_limited",
             extra={
+                **request_context(request),
                 "rate_limit_scope": exc.scope,
                 "retry_after": exc.retry_after,
                 "path": request.url.path,
@@ -208,9 +202,16 @@ def _authenticated_user(
     try:
         user = login_uc(body.username, body.password, organization_slug)
     except InvalidCredentials:
-        rate_limits.login_failed(_client_ip(request), account_key)
+        _auth_event(request, "auth_login_failed", account_key=account_key, outcome="failure")
+        try:
+            rate_limits.login_failed(_client_ip(request), account_key)
+        except LimitExceeded as exc:
+            _auth_event(request, "rate_limited", rate_limit_scope=exc.scope, retry_after=exc.retry_after)
+            raise _rate_limit_error(exc)
         # Single generic outcome — no username enumeration.
         raise ApiError("UNAUTHENTICATED", "invalid username or password")
+    request.state.actor_id = user.actor_id
+    request.state.organization_id = user.organization_id
     rate_limits.login_succeeded(account_key)
     return user
 
@@ -335,6 +336,7 @@ def _browser_login(
         raise ApiError("FORBIDDEN", "this account cannot access the web portal")
     session = sessions.create(user, "browser")
     _set_refresh_cookie(response, session)
+    _auth_event(request, "auth_login_succeeded", session=session, outcome="success")
     return _login_response(session)
 
 
@@ -392,7 +394,9 @@ def mobile_login(
             "FORBIDDEN",
             "the mobile application requires one active assigned portal",
         )
-    return _mobile_response(sessions.create(user, "mobile"))
+    session = sessions.create(user, "mobile")
+    _auth_event(request, "auth_login_succeeded", session=session, outcome="success")
+    return _mobile_response(session)
 
 
 @router.post("/v1/mobile/auth/refresh", response_model=MobileLoginResponse)
@@ -405,10 +409,12 @@ def mobile_refresh(
     try:
         session = sessions.rotate(body.refresh_token, "mobile")
     except InvalidRefreshToken:
+        _auth_event(request, "auth_refresh_failed", outcome="failure")
         raise ApiError("UNAUTHENTICATED", "invalid or expired refresh token")
     if not _is_authorized_mobile_user(session.user):
         sessions.revoke(session.refresh_token)
         raise ApiError("FORBIDDEN", "this account has no active mobile portal")
+    _auth_event(request, "auth_refresh_succeeded", session=session, outcome="success")
     return _mobile_response(session)
 
 
@@ -420,6 +426,7 @@ def mobile_logout(
 ) -> Response:
     _check_refresh_rate(request)
     sessions.revoke(body.refresh_token)
+    _auth_event(request, "auth_logout_requested", client_type="mobile")
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -435,6 +442,7 @@ def browser_refresh(
     try:
         session = sessions.rotate(refresh_token or "", "browser")
     except InvalidRefreshToken:
+        _auth_event(request, "auth_refresh_failed", outcome="failure")
         _clear_refresh_cookie(response)
         raise ApiError("UNAUTHENTICATED", "invalid or expired refresh token")
     if session.user.role not in _BROWSER_ROLES:
@@ -442,6 +450,7 @@ def browser_refresh(
         _clear_refresh_cookie(response)
         raise ApiError("FORBIDDEN", "this account cannot access the web portal")
     _set_refresh_cookie(response, session)
+    _auth_event(request, "auth_refresh_succeeded", session=session, outcome="success")
     return _login_response(session)
 
 
@@ -455,6 +464,7 @@ def browser_logout(
     _require_browser_origin(request)
     _check_refresh_rate(request)
     sessions.revoke(refresh_token or "")
+    _auth_event(request, "auth_logout_requested", client_type="browser")
     _clear_refresh_cookie(response)
     response.status_code = status.HTTP_204_NO_CONTENT
     return response
