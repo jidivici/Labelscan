@@ -65,9 +65,12 @@ def verify(compose_file, revision):
     probe = "security_" + uuid.uuid4().hex
     path = "/v1/" + probe
     sentinel = uuid.uuid4().hex
-    headers = {"X-Correlation-Id": probe, "X-Forwarded-For": "198.51.100.77", "CF-Connecting-IP": "198.51.100.78"}
+    # Cloudflare rejects client-supplied CF-Connecting-IP with error 1000 before
+    # forwarding. Exercise X-Forwarded-For spoofing while letting the edge set
+    # its own trusted identity header, so application telemetry can be verified.
+    headers = {"X-Correlation-Id": probe, "X-Forwarded-For": "198.51.100.77"}
     status, _, _ = request(path + "?token=" + sentinel, headers=headers)
-    require(status == 404, "unknown API path rejected")
+    require(status == 404, f"unknown API path rejected (HTTP {status})")
 
     statuses = []
     for _ in range(6):
