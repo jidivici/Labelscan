@@ -213,6 +213,7 @@ describe('pending review updates', () => {
   it('makes a backed-off review immediately due after an explicit retry', async () => {
     const firstAttemptAt = Date.parse('2026-08-21T10:00:00.000Z');
     const retryAt = firstAttemptAt + 1_000;
+    const beforeScheduledRetry = retryAt - 1;
     const operation = await enqueueFinalizeReview(
       {
         ingestion_id: 'ing-1',
@@ -226,7 +227,9 @@ describe('pending review updates', () => {
       { code: 'NETWORK_ERROR', status: 0, retriable: true },
       firstAttemptAt,
     );
-    expect(await listPendingDue(retryAt)).toHaveLength(0);
+    // `next_attempt_at` is inclusive: at retryAt the normal backoff has already
+    // elapsed. Test the explicit retry just before that natural deadline instead.
+    expect(await listPendingDue(beforeScheduledRetry)).toHaveLength(0);
 
     await updatePendingFinalizeReview(
       operation.id,
@@ -234,9 +237,9 @@ describe('pending review updates', () => {
         ingestion_id: 'ing-1',
         fields: { commercial_designation: 'Saumon' },
       },
-      retryAt,
+      beforeScheduledRetry,
     );
 
-    expect((await listPendingDue(retryAt)).map((op) => op.id)).toEqual([operation.id]);
+    expect((await listPendingDue(beforeScheduledRetry)).map((op) => op.id)).toEqual([operation.id]);
   });
 });
