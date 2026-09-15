@@ -661,9 +661,11 @@ export function ReviewScreen() {
     focusedFieldNameRef.current = fieldName;
     // The trailing weight row is the only one that needs extra scrollable space.
     setKeyboardInset(fieldName === 'weight' ? keyboardHeightRef.current : 0);
-    // If another field receives focus while the keyboard is already visible, there
-    // is no second keyboard event. Position it directly in that case.
-    if (keyboardHeightRef.current > 0) scrollFocusedFieldAboveKeyboard(target, 0);
+    // Android already pans ordinary inputs to the keyboard edge. The manual scroll
+    // is reserved for the final weight row, which has no content following it.
+    if (fieldName === 'weight' && keyboardHeightRef.current > 0) {
+      scrollFocusedFieldAboveKeyboard(target, 0);
+    }
   }, [scrollFocusedFieldAboveKeyboard]);
   useEffect(() => {
     const shown = Keyboard.addListener('keyboardDidShow', (event) => {
@@ -674,7 +676,9 @@ export function ReviewScreen() {
       // On Android, a focus event happens before the keyboard's final geometry is
       // known. Position once it has settled, rather than applying a premature jump.
       const target = focusedFieldTargetRef.current;
-      if (target) scrollFocusedFieldAboveKeyboard(target, 40);
+      if (focusedFieldNameRef.current === 'weight' && target) {
+        scrollFocusedFieldAboveKeyboard(target, 40);
+      }
     });
     const hidden = Keyboard.addListener('keyboardDidHide', () => {
       keyboardHeightRef.current = 0;
