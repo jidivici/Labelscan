@@ -10,7 +10,9 @@ from labelscan.contexts.ingestion.adapters.extraction_consumer import (
     ExtractionConsumer,
     _ProviderExhausted,
 )
-from labelscan.contexts.ingestion.adapters.google_vision_ocr import GoogleVisionHttpError
+from labelscan.contexts.ingestion.adapters.google_vision_ocr import (
+    GoogleVisionHttpError,
+)
 from labelscan.contexts.ingestion.application.extraction_ports import (
     PermanentProviderError,
     RetryableProviderOutputError,
