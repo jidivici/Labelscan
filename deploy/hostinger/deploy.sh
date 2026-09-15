@@ -644,7 +644,8 @@ oversized_probe="$(mktemp /tmp/labelscan-oversized-probe.XXXXXX)"
 chmod 600 "$oversized_probe"
 truncate -s 12582912 "$oversized_probe"
 status_code="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' \
-  --max-time 30 -X POST -F "file=@${oversized_probe};filename=oversized.jpg;type=image/jpeg" \
+  --noproxy '*' --resolve 'label-scan.fr:443:127.0.0.1' --max-time 30 \
+  -X POST -F "file=@${oversized_probe};filename=oversized.jpg;type=image/jpeg" \
   "https://label-scan.fr/v1/ingestions")"
 rm -f "$oversized_probe"
 oversized_probe=""
