@@ -16,7 +16,7 @@ describe('sortPendingScansByAttention', () => {
     expect(scans.map((scan) => scan.id)).toEqual(['old', 'new', 'middle']);
   });
 
-  it('puts reviews before errors, then active retries, with newest first in each group', () => {
+  it('puts errors first, then 16/16 reviews, then scans still to complete', () => {
     const scans = [
       { id: 'extracting', status: 'extracting' as const, createdAt: '2026-08-19T12:00:00.000Z' },
       { id: 'ready-old', status: 'ready' as const, createdAt: '2026-08-19T08:00:00.000Z' },
@@ -25,8 +25,9 @@ describe('sortPendingScansByAttention', () => {
       { id: 'recapture', status: 'recapture_required' as const, createdAt: '2026-08-19T10:00:00.000Z' },
       { id: 'submitting', status: 'submitting' as const, createdAt: '2026-08-19T09:00:00.000Z' },
     ];
-    expect(sortPendingScansByAttention(scans).map((scan) => scan.id)).toEqual([
-      'ready-new', 'ready-old', 'recapture', 'error-old', 'extracting', 'submitting',
+    expect(sortPendingScansByAttention(scans, (scan) => scan.id === 'ready-new')
+      .map((scan) => scan.id)).toEqual([
+      'recapture', 'error-old', 'ready-new', 'extracting', 'submitting', 'ready-old',
     ]);
   });
 });

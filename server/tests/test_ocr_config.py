@@ -14,6 +14,7 @@ from labelscan.app.ocr_wiring import build_ocr_provider
 from labelscan.contexts.ingestion.adapters.google_vision_ocr import (
     _FEATURE,
     _LANGUAGE_HINTS,
+    GoogleVisionHttpError,
     GoogleVisionOcr,
     _parse_annotate_response,
 )
@@ -114,9 +115,27 @@ def test_parse_falls_back_to_text_annotations():
 
 
 def test_parse_provider_error_raises():
-    data = {"responses": [{"error": {"message": "API key not valid"}}]}
-    with pytest.raises(RuntimeError):
+    data = {"responses": [{"error": {"code": 429, "message": "quota exceeded"}}]}
+    with pytest.raises(GoogleVisionHttpError) as raised:
         _parse_annotate_response(data)
+    assert raised.value.status_code == 429
+
+
+def test_http_throttle_keeps_its_retry_metadata():
+    """A burst must be retried by ExtractionConsumer, never mislabeled as bad photo."""
+    import httpx
+
+    adapter = GoogleVisionOcr(api_key="secret-key")
+    adapter._client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(429, headers={"Retry-After": "2"})
+        )
+    )
+
+    with pytest.raises(GoogleVisionHttpError) as raised:
+        adapter.run(b"jpeg")
+    assert raised.value.status_code == 429
+    assert raised.value.retry_after == "2"
 
 
 def test_run_request_sends_language_hints_and_full_image():

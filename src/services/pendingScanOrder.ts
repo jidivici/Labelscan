@@ -1,22 +1,45 @@
 import type { PendingScan } from './scanQueue';
 
-const STATUS_PRIORITY: Readonly<Record<PendingScan['status'], number>> = {
-  ready: 0,
-  recapture_required: 1,
-  submit_error: 1,
-  extract_error: 1,
-  submitting: 2,
-  extracting: 2,
-};
+/**
+ * Home-screen priority, in the order the operator can act on it:
+ *
+ *  1. a failure or a photo to recapture;
+ *  2. a review that is genuinely ready to validate (all profile fields filled);
+ *  3. work still in progress or a review that still needs completing.
+ *
+ * `ready` alone cannot mean "ready to validate": its machine extraction may only
+ * contain part of the profile. The caller supplies that last bit of presentation
+ * state from the fields and any saved human edits.
+ */
+function attentionPriority<T extends Pick<PendingScan, 'status'>>(
+  scan: T,
+  isReadyToValidate: (scan: T) => boolean,
+): number {
+  switch (scan.status) {
+    case 'submit_error':
+    case 'extract_error':
+    case 'recapture_required':
+      return 0;
+    case 'ready':
+      return isReadyToValidate(scan) ? 1 : 2;
+    case 'submitting':
+    case 'extracting':
+      return 2;
+  }
+}
 
-/** Reviews to validate first, errors next, then active/retrying scans; newest first per group. */
+/**
+ * Errors first, then fully completed reviews, then scans still to complete; newest
+ * first inside each group. The input queue is never mutated.
+ */
 export function sortPendingScansByAttention<
   T extends Pick<PendingScan, 'createdAt' | 'status'>,
 >(
   scans: readonly T[],
+  isReadyToValidate: (scan: T) => boolean = (scan) => scan.status === 'ready',
 ): T[] {
   return [...scans].sort(
-    (a, b) => STATUS_PRIORITY[a.status] - STATUS_PRIORITY[b.status]
+    (a, b) => attentionPriority(a, isReadyToValidate) - attentionPriority(b, isReadyToValidate)
       || b.createdAt.localeCompare(a.createdAt),
   );
 }

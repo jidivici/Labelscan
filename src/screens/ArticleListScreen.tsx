@@ -115,8 +115,17 @@ export function ArticleListScreen() {
             scan.businessPortalId === businessPortalId &&
             scan.tradeCode === tradeCode,
         ),
+        (scan) => {
+          if (scan.status !== 'ready') return false;
+          const scanProfile = businessProfileFor(scan.tradeCode ?? tradeCode);
+          const run = scanResults[scan.id]?.run;
+          const filledCount = run
+            ? filledCountFromRun(run.fields, scan.edits, scanProfile.code)
+            : filledCountFromInterim(scanInterim[scan.id], scan.edits, scanProfile.code);
+          return filledCount === scanProfile.fields.length;
+        },
       ),
-    [actorId, businessPortalId, organizationId, pendingScans, tradeCode],
+    [actorId, businessPortalId, organizationId, pendingScans, scanInterim, scanResults, tradeCode],
   );
   const [listHeaderHeight, setListHeaderHeight] = useState(0);
   const [pendingSectionCollapsed, setPendingSectionCollapsed] = useState(false);

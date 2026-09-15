@@ -10,6 +10,7 @@ from labelscan.contexts.ingestion.adapters.extraction_consumer import (
     ExtractionConsumer,
     _ProviderExhausted,
 )
+from labelscan.contexts.ingestion.adapters.google_vision_ocr import GoogleVisionHttpError
 from labelscan.contexts.ingestion.application.extraction_ports import (
     PermanentProviderError,
     RetryableProviderOutputError,
@@ -118,6 +119,26 @@ def test_retry_after_is_respected(monkeypatch):
             lambda: (_ for _ in ()).throw(_HttpError(429, "3"))
         )
     assert sleeps == [3.0]
+
+
+def test_google_vision_throttle_is_retried_instead_of_becoming_terminal(monkeypatch):
+    """Regression: Vision used to turn a transient 429 into one failed analysis."""
+    calls = {"n": 0}
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        "labelscan.contexts.ingestion.adapters.extraction_consumer.time.sleep",
+        sleeps.append,
+    )
+
+    def vision():
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise GoogleVisionHttpError(429, "2")
+        return "ocr-result"
+
+    assert _consumer(max_attempts=3)._with_provider_retry(vision) == "ocr-result"
+    assert calls["n"] == 2
+    assert sleeps == [2.0]
 
 
 def test_invalid_local_json_is_not_retried():

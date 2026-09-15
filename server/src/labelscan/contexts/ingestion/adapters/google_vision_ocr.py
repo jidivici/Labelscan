@@ -38,6 +38,21 @@ _REQUEST_TIMEOUT_S = 30.0
 _LANGUAGE_HINTS = ["fr", "en"]
 
 
+class GoogleVisionHttpError(RuntimeError):
+    """Sanitized Vision failure that retains retry metadata for the worker.
+
+    The extraction consumer deliberately retries only known transient provider
+    failures. Raising a plain ``RuntimeError`` here discarded a 429/5xx status, so
+    a temporary Vision throttle was incorrectly recorded as a terminal
+    ``extraction_failed`` on its first occurrence.
+    """
+
+    def __init__(self, status_code: int, retry_after: str | None = None) -> None:
+        self.status_code = status_code
+        self.retry_after = retry_after
+        super().__init__(f"google-vision returned HTTP {status_code}")
+
+
 class GoogleVisionOcr:
     """OcrProvider backed by Google Cloud Vision REST (images:annotate)."""
 
@@ -102,14 +117,17 @@ class GoogleVisionOcr:
                     json=payload,
                 )
                 if resp.status_code != 200:
-                    # Status only — never the key or response body.
-                    raise RuntimeError(
-                        f"google-vision returned HTTP {resp.status_code}"
+                    # Retain only safe retry metadata; never expose the URL (which
+                    # contains the API key) or the provider response body.
+                    raise GoogleVisionHttpError(
+                        resp.status_code,
+                        resp.headers.get("Retry-After"),
                     )
         except httpx.HTTPError as exc:
             # Sanitized: the exception text could otherwise echo the URL (which
-            # carries ?key=...). Surface only the failure class.
-            raise RuntimeError(
+            # carries ?key=...). ConnectionError is intentionally recognized by
+            # ExtractionConsumer as a transient provider failure.
+            raise ConnectionError(
                 f"google-vision request failed: {type(exc).__name__}"
             ) from None
         raw = resp.content
@@ -132,9 +150,10 @@ def _parse_annotate_response(data: dict) -> tuple[str, float]:
 
     error = first.get("error")
     if error:
-        raise RuntimeError(
-            f"google-vision annotate error: {error.get('message', 'unknown')}"
-        )
+        # Vision may return a per-image error envelope (rather than an HTTP error).
+        # Preserve its code for the same bounded retry policy as a non-200 response.
+        status_code = error.get("code") if isinstance(error, dict) else None
+        raise GoogleVisionHttpError(status_code if isinstance(status_code, int) else 500)
 
     fta = first.get("fullTextAnnotation") or {}
     full_text = fta.get("text") or ""
