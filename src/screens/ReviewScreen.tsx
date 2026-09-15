@@ -296,6 +296,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   suggestion,
   history,
   edited,
+  onWeightFocus,
+  onWeightBlur,
   skipExplicitConfirmation = false,
 }: {
   field: ExtractionField;
@@ -307,6 +309,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   /** Per-field autocomplete history (workflow v2.1) — STABLE reference, built once. */
   history?: FieldHistory | null;
   edited: boolean;
+  onWeightFocus: () => void;
+  onWeightBlur: () => void;
   skipExplicitConfirmation?: boolean;
 }) {
   // The review cue is REACTIVE to the live draft (not the server value): an empty
@@ -405,8 +409,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           draft={draft}
           onChange={emit}
           highlighted={highlighted}
-          onFocus={handleFocus}
-          onBlur={() => setFocused(false)}
+          onFocus={(target) => { handleFocus(target); onWeightFocus(); }}
+          onBlur={() => { setFocused(false); onWeightBlur(); }}
         />
       ) : field.field_name === 'storage_temperature' ? (
         <TempRangeInput
@@ -546,6 +550,8 @@ export function ReviewScreen() {
   const saveInFlightRef = useRef(false);
   const contentScrollRef = useRef<ScrollViewHandle>(null);
   const keyboardHeightRef = useRef(0);
+  const weightFocusedRef = useRef(false);
+  const weightLiftTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
@@ -636,9 +642,29 @@ export function ReviewScreen() {
   const handleFieldChange = useCallback((name: string, text: string) => {
     setEdits((prev) => ({ ...prev, [name]: text }));
   }, []);
+  // Focus on weight scrolls to the existing bottom of the form. Other fields
+  // retain Android's native positioning.
+  const liftWeight = useCallback(() => {
+    if (!weightFocusedRef.current || keyboardHeightRef.current <= 0) return;
+    if (weightLiftTimerRef.current) clearTimeout(weightLiftTimerRef.current);
+    weightLiftTimerRef.current = setTimeout(() => {
+      if (!weightFocusedRef.current || keyboardHeightRef.current <= 0) return;
+      // Use the existing scroll range only: no extra padding or top alignment.
+      contentScrollRef.current?.scrollToEnd({ animated: true });
+    }, 80);
+  }, []);
+  const handleWeightFocus = useCallback(() => {
+    weightFocusedRef.current = true;
+    liftWeight();
+  }, [liftWeight]);
+  const handleWeightBlur = useCallback(() => {
+    weightFocusedRef.current = false;
+    if (weightLiftTimerRef.current) clearTimeout(weightLiftTimerRef.current);
+  }, []);
   useEffect(() => {
     const shown = Keyboard.addListener('keyboardDidShow', (event) => {
       keyboardHeightRef.current = event.endCoordinates.height;
+      liftWeight();
       contentScrollRef.current?.getNativeScrollRef()?.measureInWindow((_x, y, _width, height) => {
         if (keyboardHeightRef.current > 0) {
           setKeyboardInset(Math.max(0, y + height - event.endCoordinates.screenY));
@@ -648,12 +674,14 @@ export function ReviewScreen() {
     const hidden = Keyboard.addListener('keyboardDidHide', () => {
       keyboardHeightRef.current = 0;
       setKeyboardInset(0);
+      if (weightLiftTimerRef.current) clearTimeout(weightLiftTimerRef.current);
     });
     return () => {
       shown.remove();
       hidden.remove();
+      if (weightLiftTimerRef.current) clearTimeout(weightLiftTimerRef.current);
     };
-  }, []);
+  }, [liftWeight]);
 
   // GS1-decoded values keyed by field name — shown IN the field list at T+0 (before the
   // LLM run lands) so those rows are filled immediately rather than skeletoned (§2.1).
@@ -1039,6 +1067,7 @@ export function ReviewScreen() {
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        onContentSizeChange={liftWeight}
       >
         {/* Épuré au maximum : au plus l'admin + la date d'enregistrement, un point. */}
         {user || capturedAt ? (
@@ -1146,6 +1175,8 @@ export function ReviewScreen() {
                             field={editableField}
                             draft={effectiveValues[name]}
                             onChange={handleFieldChange}
+                            onWeightFocus={handleWeightFocus}
+                            onWeightBlur={handleWeightBlur}
                             suggestion={name === 'allergens' ? allergenSuggestion : undefined}
                             history={fieldHistory}
                             edited={Object.prototype.hasOwnProperty.call(edits, name)}
