@@ -110,6 +110,16 @@ def test_charcuterie_prompt_reads_wrapped_ingredients_and_explicit_preservatives
     assert "never identify an additive using outside knowledge" in prompt
 
 
+def test_seafood_prompt_preserves_compound_lots_and_marks_origin_fallback_for_review() -> None:
+    prompt = _system_text_for(trade_profile("poissonnerie"))
+    assert '"107083 - 21526"' in prompt
+    assert "Initiales de l'estampille sanitaire — à vérifier" in prompt
+    assert "Audit BOTH fields independently" in prompt
+    assert "date limite d'utilisation optimale" in prompt
+    assert '"MEDI-PECHE SET B.P. 94 ... Tél ..."' in prompt
+    assert "Never copy that producer into reseller_brand" in prompt
+
+
 def test_boucherie_prompt_keeps_each_origin_stage_and_approval_separate() -> None:
     prompt = _system_text_for(trade_profile("boucherie"))
     assert '"né", "élevé", "abattu"' in prompt

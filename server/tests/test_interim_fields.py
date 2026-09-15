@@ -61,6 +61,19 @@ def test_date_labels_never_cross_populate_packaging_and_expiry():
     assert expiry == {"expiry_date": "2026-06-30"}
 
 
+@pytest.mark.parametrize(
+    ("label", "field", "expected"),
+    [
+        ("Conditionnement le 13/08/2026", "packaging_date", "2026-08-13"),
+        ("Mis sous vide le 13/08/2026", "packaging_date", "2026-08-13"),
+        ("DLC : 22/08/2026", "expiry_date", "2026-08-22"),
+        ("Date limite d'utilisation optimale : 22/08/2026", "expiry_date", "2026-08-22"),
+    ],
+)
+def test_extended_date_lexicon(label, field, expected):
+    assert _as_dict(label)[field] == expected
+
+
 def test_use_by_english_label():
     assert _as_dict("Use by 2026-06-20")["expiry_date"] == "2026-06-20"
 
@@ -105,6 +118,10 @@ def test_temperature_negative_range():
 
 def test_batch_number_keeps_original_casing():
     assert _as_dict("Lot: L24-0917 poids net 320 g")["batch_number"] == "L24-0917"
+
+
+def test_batch_number_keeps_a_spaced_numeric_pair():
+    assert _as_dict("Lot : 107083 - 21526")["batch_number"] == "107083 - 21526"
 
 
 def test_batch_number_no_digit_rejected():

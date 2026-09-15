@@ -57,20 +57,33 @@ _DATE_ALT = f"(?:{_ISO_DATE}|{_NUM_DATE})"
 # the label is NOT attributed to the key.
 _EXPIRY_KEYS = (
     r"dlc",
+    r"d\.?\s*l\.?\s*c\.?",
+    r"date limite d[' ]utilisation optimale",
+    r"ddm",
     r"date limite de consommation",
     r"a consommer jusqu'?\s?au",
     r"a consommer avant le",
     r"a consommer avant",
     r"use by",
+    r"use[- ]?by date",
+    r"best before(?: date)?",
     r"exp\.?",
 )
 _PACKAGING_KEYS = (
     r"emballe le",
+    r"emballage le",
+    r"date d[' ]emballage",
     r"conditionne le",
+    r"conditionnement le",
     r"mis en emballage le",
+    r"mis sous vide le",
+    r"mis en barquette le",
+    r"date de mise en emballage",
     r"date d'emballage",
     r"date de conditionnement",
+    r"date de conditionnage",
     r"packed on",
+    r"packed(?:\s+|-)date",
     r"pack(?:ed|ing)? date",
 )
 
@@ -140,7 +153,8 @@ def _temperatures(norm_text: str) -> set[str]:
 # Explicit lot key, then the identifier (must contain a digit, length >= 3). Runs
 # on the ORIGINAL text so the emitted value keeps the label's exact casing.
 _BATCH_RX = re.compile(
-    r"(?:lot|n[°o]\s*de\s*lot|batch)\s*(?:n[°o])?\s*[:.]?\s*([A-Za-z0-9][A-Za-z0-9./-]{2,})",
+    r"(?:lot|n[°o]\s*de\s*lot|batch)\s*(?:n[°o])?\s*[:.]?\s*"
+    r"([A-Za-z0-9][A-Za-z0-9./-]{2,}(?:\s+-\s+[A-Za-z0-9][A-Za-z0-9./-]{0,})?)",
     re.IGNORECASE,
 )
 

@@ -326,9 +326,10 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
     !edited &&
     !skipExplicitConfirmation &&
     requiresExplicitHumanConfirmation(field.validation_status, field.source);
-  // A suggestion is offered only while the field is still empty; it never overrides a
-  // typed/extracted value and is applied only on tap (→ a human edit on save).
-  const showSuggestion = !!suggestion && empty;
+  // Allergens are shown prefilled when the label itself is silent, but that proposed
+  // value remains a human decision: it cannot be saved until explicitly confirmed.
+  const allergenSuggestionPending = field.field_name === 'allergens' && !!suggestion && empty;
+  const displayedDraft = allergenSuggestionPending ? (suggestion as string) : draft;
   // Bind this row's field name once; the affix inputs and the suggestion chip emit through it.
   const emit = (text: string) => onChange(field.field_name, text);
   // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
@@ -340,7 +341,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // every keystroke is force-cased — never a stripped/computed character.
   const isHealthMark = isHealthMarkField(field.field_name);
   const attentionLabel =
-    !edited && !skipExplicitConfirmation && requiresExplicitHumanConfirmation(field.validation_status, field.source)
+    !edited && !skipExplicitConfirmation && (requiresExplicitHumanConfirmation(field.validation_status, field.source) || allergenSuggestionPending)
       ? 'À vérifier'
       : 'À compléter';
   const handleChange = (text: string) => {
@@ -384,13 +385,13 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
     <View style={styles.fieldRow}>
       <View style={styles.fieldHeader}>
         <Text style={[typography.labelSmall, styles.fieldName]}>{fieldLabelFr(field.field_name)}</Text>
-        {empty || needsExplicitConfirmation ? (
+        {empty || needsExplicitConfirmation || allergenSuggestionPending ? (
           <Text style={[typography.labelSmall, styles.attentionTag]}>{attentionLabel}</Text>
         ) : null}
       </View>
       {isNotCommunicated && allowsNC && field.field_name === 'storage_temperature' ? (
         <TextInput
-          value={draft}
+          value={displayedDraft}
           onChangeText={emit}
           onFocus={(event) => handleFocus(event.target)}
           onBlur={() => setFocused(false)}
@@ -420,7 +421,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         <ProductionMethodSelector value={draft} onChange={emit} />
       ) : (
         <TextInput
-          value={draft}
+          value={displayedDraft}
           onChangeText={handleChange}
           onFocus={(event) => handleFocus(event.target)}
           onBlur={() => setFocused(false)}
@@ -440,10 +441,10 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
         />
       )}
       {hint ? <Text style={[typography.labelSmall, styles.inputHint]}>{hint}</Text> : null}
-      {needsExplicitConfirmation ? (
+      {needsExplicitConfirmation || allergenSuggestionPending ? (
         <View style={styles.reviewDecisionRow}>
           <Pressable
-            onPress={() => emit(draft)}
+            onPress={() => emit(allergenSuggestionPending ? (suggestion as string) : draft)}
             style={styles.confirmSuggestionChip}
             android_ripple={{ color: colors.primaryContainer }}
             accessibilityRole="button"
@@ -468,7 +469,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           ) : null}
         </View>
       ) : null}
-      {!needsExplicitConfirmation && !isNotCommunicated && allowsNC &&
+      {!needsExplicitConfirmation && !allergenSuggestionPending && !isNotCommunicated && allowsNC &&
       empty ? (
         <Pressable
           onPress={() => emit(NOT_COMMUNICATED_VALUE)}
@@ -502,20 +503,6 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
             </Pressable>
           ))}
         </View>
-      ) : null}
-      {showSuggestion ? (
-        <Pressable
-          onPress={() => emit(suggestion as string)}
-          style={styles.suggestionChip}
-          android_ripple={{ color: colors.primaryContainer }}
-          accessibilityRole="button"
-          accessibilityLabel={`Utiliser la suggestion ${suggestion}`}
-        >
-          <MaterialCommunityIcons name="lightbulb-outline" size={13} color={colors.primary} />
-          <Text style={[typography.labelSmall, styles.suggestionChipText]}>
-            Suggestion : {suggestion}
-          </Text>
-        </Pressable>
       ) : null}
     </View>
   );

@@ -55,6 +55,14 @@ anthropic_model(_MODEL)
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v3.6.0 — a prominent company header with address/contact details is captured as
+# the producer when no explicit reseller role is printed. This supports standard
+# fishmonger labels such as "MEDI-PECHE SET B.P. 94 ... Tél ..." without copying
+# that company into reseller_brand.
+# v3.5.0 — expanded French/English DLC and packaging lexicon; preserves compound
+# lots such as "107083 - 21526"; checks producer and reseller independently. When
+# no origin is printed, the health-mark initials are a provisional, explicitly
+# ambiguous review cue — never a claimed origin.
 # v3.3.0 — sparse output: Claude still audits all 16 fields but emits only fields
 # with explicit content or a real ambiguity/anomaly. Missing and deterministically
 # resolved fields are omitted; validation_status/warnings are omitted at their defaults.
@@ -94,7 +102,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v3.4.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.6.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -485,15 +493,21 @@ from the OCR text. (Numeric / controlled-vocabulary fields - dates, temperature,
 FAO_area, production_method - have no language; this rule is about text fields.)
 8. HEALTH MARK ≠ ORIGIN. The oval health / identification mark (estampille sanitaire, e.g. \
 "FR 34.108.504 CE", "ES 12.932470 UE", "GB BB004") identifies the APPROVED ESTABLISHMENT, \
-not the origin. It goes ONLY in health_mark. NEVER copy its country prefix into \
-origin_country (a FR mark appears on Spanish mussels; an ES mark on Atlantic hake) and never \
-into producer_name / reseller_brand.
+not the origin. It goes in health_mark and NEVER proves origin (a FR mark appears on Spanish \
+mussels; an ES mark on Atlantic hake), producer_name or reseller_brand. ONLY when no explicit \
+origin candidate exists anywhere on the label, also emit its two-letter prefix in origin_country \
+as a provisional review cue: validation_status MUST be "ambiguous" and warnings MUST say \
+"Initiales de l'estampille sanitaire — à vérifier". Never call that cue a country of origin.
 9. PRODUCER vs RESELLER. producer_name is the PROVENANCE (a "Pisciculture …", a vessel, an \
 "Elevé/Pêché par", or the establishment whose country matches the origin / health mark); \
 reseller_brand is the MARQUE DE REVENTE / FBO (introduced by "Produit pour", "Distribué par", \
-a retail enseigne, or a company in a different country than the origin). Fill each ONLY on its \
-own evidence; never infer one from the other; if a company's role is undetermined, put it in \
-producer_name with a warning and leave reseller_brand null.
+a retail enseigne, or a company in a different country than the origin). Audit BOTH fields \
+independently across the full label before leaving either null. A prominent company header paired \
+with a postal address, phone number, email or establishment details is producer_name when no \
+explicit reseller/retailer cue exists (for example "MEDI-PECHE SET B.P. 94 ... Tél ..."). Keep \
+only the company name, not its address/contact details. Never copy that producer into \
+reseller_brand. If a company's role is otherwise undetermined, put it in producer_name with a \
+warning and leave reseller_brand null.
 
 SEAFOOD / HACCP DOMAIN CONTEXT (recognition aid ONLY — it tells you what these labels \
 usually contain so you RECOGNISE a printed field; it NEVER licenses inferring a value \
@@ -540,16 +554,20 @@ PER-FIELD NORMALIZATION (render every value as a STRING):
 reseller_brand, fishing_gear_or_farming_method): "value" is the trimmed text as read. Do \
 NOT spell-correct OCR garble - keep it verbatim and add a warning if it is visibly \
 garbled. For batch_number extract the identifier, not the key (from "Lot: L24-0917" the \
-value is "L24-0917"). commercial_designation is THE product designation (there is no \
+value is "L24-0917"). Preserve a compound lot exactly when printed, including a spaced numeric \
+pair such as "107083 - 21526". commercial_designation is THE product designation (there is no \
 separate product_name field).
 - producer_name / reseller_brand: see ABSOLUTE RULE 9. producer_name = the provenance \
 operator (a production cue, or a company whose country matches the origin / health-mark \
 country); reseller_brand = the marque de revente / FBO ("Produit pour", "Distribué par", a \
 retail enseigne, or a company in a different country than the origin). Each is null when its \
-role is not evidenced on the label - never split one company across both.
+role is not evidenced on the label - never split one company across both. A named company in a \
+prominent header with address/contact details is sufficient producer evidence when no reseller \
+cue is printed; extract its name only.
 - health_mark: the oval sanitary mark, verbatim, e.g. "FR 34.108.504 CE", "ES 12.932470 UE", \
 "GB BB004". You MAY join contiguous OCR tokens that form ONE mark (country + digits + CE/UE), \
-quoting each piece in "evidence". NEVER use its country as origin_country (ABSOLUTE RULE 8).
+quoting each piece in "evidence". It never proves origin; use its initials in origin_country only \
+as the explicit ambiguous "à vérifier" fallback in ABSOLUTE RULE 8.
 - expiry_date, packaging_date: "value" is an ISO-8601 date string "YYYY-MM-DD" ONLY when \
 day, month and year are all unambiguous (textual months like "20 Jun 2026", or \
 already-ISO "2026-06-20"). A numeric date with a component >12 is NOT ambiguous - that \
@@ -557,10 +575,12 @@ component is the day, which fixes the order ("16.06.26" -> 2026-06-16, "17/06/20
 2026-06-17, "22.06.26" -> 2026-06-22). Order is ambiguous ONLY when BOTH leading components \
 are <=12 (e.g. "04/05/2026" could be 4 May or 5 April): then "value" is null, \
 "validation_status" is "ambiguous", and a warning names both readings - DO NOT pick one. \
-Route dates by their EXPLICIT nearby label, never by visual position: "DLC", "date limite de \
-consommation", "à consommer jusqu'au/avant le", "use by", "expiry date" and "best before" -> \
-expiry_date; "emballé le", "conditionné le", "mis en emballage le", "date d'emballage", "date \
-de conditionnement", "packed on" and "pack date" -> packaging_date. A bare word such as \
+Route dates by their EXPLICIT nearby label, never by visual position: "DLC", "D.D.M.", "date \
+limite de consommation", "date limite d'utilisation optimale", "à consommer jusqu'au/avant le", \
+"use by", "expiry date" and "best before" -> expiry_date; "emballé le", "emballage le", \
+"conditionné le", "conditionnement le", "mis en emballage", "mis sous vide", "mis en \
+barquette", "date d'emballage", "date de conditionnement", "date de conditionnage", "packed on" \
+and "pack date" -> packaging_date. A bare word such as \
 "emballage" or "conditionnement" without a date cue is NOT a date. Never copy one printed date \
 into both fields. If each label has its own date, preserve each mapping even when the lines are \
 adjacent. A "capture" / "abattage" / "production" date maps to NO field (do not force it into \
