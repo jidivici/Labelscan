@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 
 import pytest
+from alembic.script import ScriptDirectory
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
@@ -165,9 +167,8 @@ def _group_grants(rows):
 
 
 def test_consolidated_baseline_preserves_the_complete_catalog(conn) -> None:
-    assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-        "0037_interim_preview_fields"
-    )
+    migrations = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "migrations"))
+    assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == migrations.get_current_head()
 
     logical_tables = set(
         conn.execute(
