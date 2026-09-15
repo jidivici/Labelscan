@@ -32,7 +32,7 @@ const developmentAndroidBuild = developmentConfig.plugins.find(
 const blockedPermissions = config.android?.blockedPermissions ?? [];
 const checks = [
   ['Expo SDK 57', /^[~^]?57\./.test(packageJson.dependencies.expo)],
-  ['Android minimum API 33 (Android 13)', androidBuild?.minSdkVersion === 33],
+  ['Android minimum API 36 (Android 16)', androidBuild?.minSdkVersion === 36],
   ['HTTP clair interdit en production', androidBuild?.usesCleartextTraffic === false],
   ['Repli sans profil interdit le HTTP clair', fallbackAndroidBuild?.usesCleartextTraffic === false],
   ['HTTP LAN réservé au profil development', developmentAndroidBuild?.usesCleartextTraffic === true],
@@ -83,8 +83,8 @@ const checks = [
 for (const [label, passed] of checks) console.log(`${passed ? 'PASS' : 'FAIL'}  ${label}`);
 const failed = checks.filter(([, passed]) => !passed);
 if (failed.length) {
-  console.error(`\nContrat Android 13 refusé : ${failed.length} contrôle(s) en échec.`);
+  console.error(`\nContrat Android 16 refusé : ${failed.length} contrôle(s) en échec.`);
   process.exitCode = 1;
 } else {
-  console.log('\nContrat Android 13 prêt pour un build natif de validation.');
+  console.log('\nContrat Android 16 prêt pour un build natif de validation.');
 }

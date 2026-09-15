@@ -14,7 +14,7 @@ module.exports = ({ config }) => {
         {
           android: {
             // Product contract: only maintained Android generations are supported.
-            minSdkVersion: 33,
+            minSdkVersion: 36,
             // Fail closed: only an explicit development profile may use LAN HTTP.
             usesCleartextTraffic: developmentBuild,
             enableMinifyInReleaseBuilds: true,

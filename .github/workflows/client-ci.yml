@@ -16,7 +16,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run check:android13
+      - run: npm run check:android16
       - run: npm run typecheck
       - run: npm test -- --runInBand
       - run: node scripts/check-npm-audit.mjs

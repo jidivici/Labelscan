@@ -62,7 +62,7 @@ jobs:
       - name: Mobile quality and zero-vulnerability gate
         run: |
           npm ci
-          npm run check:android13
+          npm run check:android16
           npm run typecheck
           npm test -- --runInBand
           node scripts/check-npm-audit.mjs

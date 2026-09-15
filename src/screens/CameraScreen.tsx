@@ -516,7 +516,7 @@ export function CameraScreen() {
 
   return (
     <View style={styles.root} onLayout={handleSceneLayout}>
-      {/* Android 13/14 still need the original translucent window for the measured
+      {/* Android devices still need the original translucent window for the measured
           preview bounds. Android 15+ uses enforced edge-to-edge and native route styles. */}
       {isFocused && (Platform.OS === 'ios' || (Platform.OS === 'android' && Number(Platform.Version) < 35)) && (
         <StatusBar barStyle="light-content" translucent backgroundColor="transparent" />
