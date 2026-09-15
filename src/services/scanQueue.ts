@@ -101,6 +101,8 @@ export interface PendingScan {
   status: PendingScanStatus;
   ocrDone?: boolean; // Tier 3 wave 2 reached (drives the banner/stepper detail)
   errorCode?: string;
+  /** One automatic recovery of a provider failure, persisted across app restarts. */
+  automaticAnalysisRetries?: number;
   /**
    * Persisted review draft (workflow v2 — "session"): the operator's per-field edits,
    * keyed by field_name. Saved when leaving the Review screen so a partially-filled
@@ -274,6 +276,7 @@ function startPoll(id: string): void {
         controllers.delete(id);
         // Release the slot before re-arming. Re-arming from inside runPoll used to
         // see its own controller and silently stop polling after the first timeout.
+        startNextWaiting();
         if (shouldRearm) {
           const fence = await captureActiveSession();
           const current = findScan(id);
@@ -367,6 +370,27 @@ async function runPoll(
       });
       return false;
     case 'failed':
+      if (
+        !result.ingestion.recapture_required &&
+        SERVER_RETRYABLE_ANALYSIS_FAILURES.has(result.status) &&
+        !findScan(id)?.automaticAnalysisRetries
+      ) {
+        updateScan(id, { automaticAnalysisRetries: 1 });
+        await writeQueue;
+        if (!workflowIsCurrent(generation, fence) || !findScan(id)) return false;
+        try {
+          await retryIngestionAnalysis(ingestionId, { signal: controller.signal });
+          if (!workflowIsCurrent(generation, fence) || !findScan(id)) return false;
+          pollStartedAt.delete(id);
+          delete results[id];
+          delete interim[id];
+          updateScan(id, { ocrDone: false, errorCode: undefined });
+          return true;
+        } catch {
+          if (!workflowIsCurrent(generation, fence) || !findScan(id)) return false;
+          // Preserve the terminal cause so an explicit retry remains available.
+        }
+      }
       pollStartedAt.delete(id);
       // A failed analysis has no reviewable payload. Drop the non-authoritative OCR
       // preview so the error screen and a later retry cannot expose stale values.
@@ -458,7 +482,7 @@ function scanMatchesOperatorContext(
   const allowedKeys = new Set([
     'schemaVersion', 'id', 'createdAt', 'photoUri', 'barcodeRaw', 'capturedAt',
     'tradeCode', 'organizationId', 'actorId', 'businessPortalId', 'submitOpId',
-    'ingestionId', 'status', 'ocrDone', 'errorCode', 'edits', 'photoRotationDegrees',
+    'ingestionId', 'status', 'ocrDone', 'errorCode', 'automaticAnalysisRetries', 'edits', 'photoRotationDegrees',
     'photoBaseRotationDegrees', 'finalizeOpId', 'reviewSyncStatus',
   ]);
   if (Object.keys(record).some((key) => !allowedKeys.has(key))) return false;
@@ -503,6 +527,7 @@ function scanMatchesOperatorContext(
     validStatuses.includes(scan.status as PendingScanStatus) &&
     (scan.ocrDone === undefined || typeof scan.ocrDone === 'boolean') &&
     safeOptionalText(scan.errorCode, 128) &&
+    (scan.automaticAnalysisRetries === undefined || scan.automaticAnalysisRetries === 1) &&
     editsAreSafe &&
     (scan.photoRotationDegrees === undefined ||
       scan.photoRotationDegrees === 0 || scan.photoRotationDegrees === 180) &&

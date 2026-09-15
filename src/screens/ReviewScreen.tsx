@@ -36,7 +36,6 @@ import {
 import { queryClient } from '../services/queryClient';
 import { businessProfileFor } from '../services/businessProfiles';
 import { catalogQueryKey } from '../services/catalogApi';
-import { suggestAllergen } from '../services/allergenSuggestions';
 import { ProductionMethodSelector } from '../components/ProductionMethodSelector';
 import { buildFieldHistory, suggestForField, type FieldHistory } from '../services/fieldHistory';
 import {
@@ -75,6 +74,8 @@ import {
 } from '../services/scanQueue';
 import {
   filledCountFromValues,
+  displayedFieldCount,
+  reviewAllergenSuggestion,
   initialHumanReviewValue,
   normalizeFinalReviewValue,
   NOT_COMMUNICATED_VALUE,
@@ -295,7 +296,6 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   suggestion,
   history,
   edited,
-  onFocusField,
   skipExplicitConfirmation = false,
 }: {
   field: ExtractionField;
@@ -307,7 +307,6 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   /** Per-field autocomplete history (workflow v2.1) — STABLE reference, built once. */
   history?: FieldHistory | null;
   edited: boolean;
-  onFocusField: (fieldName: string, target: KeyboardFocusTarget) => void;
   skipExplicitConfirmation?: boolean;
 }) {
   // The review cue is REACTIVE to the live draft (not the server value): an empty
@@ -358,9 +357,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   // wiring needed here. Applying a chip goes through emit → a HUMAN edit, exactly like
   // typing it (no-fabrication gate untouched).
   const [focused, setFocused] = useState(false);
-  const handleFocus = (target: KeyboardFocusTarget) => {
+  const handleFocus = (_target: KeyboardFocusTarget) => {
     setFocused(true);
-    onFocusField(field.field_name, target);
   };
   const historySuggestions = useMemo(() => {
     if (!focused) return [];
@@ -542,14 +540,11 @@ export function ReviewScreen() {
 
   const [saving, setSaving] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
-  // Keep the form compact at rest. Only the final weight field needs temporary
-  // scroll room when the keyboard is open; earlier rows already have content below.
+  // Reserve only the part of the scroll viewport actually covered by the keyboard.
+  // Android resize must not receive a second full keyboard-height inset.
   const [keyboardInset, setKeyboardInset] = useState(0);
   const saveInFlightRef = useRef(false);
   const contentScrollRef = useRef<ScrollViewHandle>(null);
-  const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const focusedFieldTargetRef = useRef<KeyboardFocusTarget | null>(null);
-  const focusedFieldNameRef = useRef<string | null>(null);
   const keyboardHeightRef = useRef(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
@@ -566,7 +561,6 @@ export function ReviewScreen() {
   useEffect(() => {
     return () => {
       saveScanEdits(pendingScanId, editsRef.current);
-      if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
   }, [pendingScanId]);
   // Start the staged-progress clock at mount so the 3-step box advances Lecture →
@@ -642,43 +636,14 @@ export function ReviewScreen() {
   const handleFieldChange = useCallback((name: string, text: string) => {
     setEdits((prev) => ({ ...prev, [name]: text }));
   }, []);
-  const scrollFocusedFieldAboveKeyboard = useCallback((target: KeyboardFocusTarget, delay: number) => {
-    if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
-    keyboardScrollTimerRef.current = setTimeout(() => {
-      contentScrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
-        target,
-        // Keep the input immediately above the keyboard: this makes the keyboard
-        // start at the divider below the active row instead of pushing the row high
-        // into the form.
-        8,
-        true,
-      );
-      keyboardScrollTimerRef.current = null;
-    }, delay);
-  }, []);
-  const handleFieldFocus = useCallback((fieldName: string, target: KeyboardFocusTarget) => {
-    focusedFieldTargetRef.current = target;
-    focusedFieldNameRef.current = fieldName;
-    // The trailing weight row is the only one that needs extra scrollable space.
-    setKeyboardInset(fieldName === 'weight' ? keyboardHeightRef.current : 0);
-    // Android already pans ordinary inputs to the keyboard edge. The manual scroll
-    // is reserved for the final weight row, which has no content following it.
-    if (fieldName === 'weight' && keyboardHeightRef.current > 0) {
-      scrollFocusedFieldAboveKeyboard(target, 0);
-    }
-  }, [scrollFocusedFieldAboveKeyboard]);
   useEffect(() => {
     const shown = Keyboard.addListener('keyboardDidShow', (event) => {
       keyboardHeightRef.current = event.endCoordinates.height;
-      setKeyboardInset(
-        focusedFieldNameRef.current === 'weight' ? event.endCoordinates.height : 0,
-      );
-      // On Android, a focus event happens before the keyboard's final geometry is
-      // known. Position once it has settled, rather than applying a premature jump.
-      const target = focusedFieldTargetRef.current;
-      if (focusedFieldNameRef.current === 'weight' && target) {
-        scrollFocusedFieldAboveKeyboard(target, 40);
-      }
+      contentScrollRef.current?.getNativeScrollRef()?.measureInWindow((_x, y, _width, height) => {
+        if (keyboardHeightRef.current > 0) {
+          setKeyboardInset(Math.max(0, y + height - event.endCoordinates.screenY));
+        }
+      });
     });
     const hidden = Keyboard.addListener('keyboardDidHide', () => {
       keyboardHeightRef.current = 0;
@@ -688,7 +653,7 @@ export function ReviewScreen() {
       shown.remove();
       hidden.remove();
     };
-  }, [scrollFocusedFieldAboveKeyboard]);
+  }, []);
 
   // GS1-decoded values keyed by field name — shown IN the field list at T+0 (before the
   // LLM run lands) so those rows are filled immediately rather than skeletoned (§2.1).
@@ -736,22 +701,11 @@ export function ReviewScreen() {
   // Recompute from the live denomination/species drafts, not only the original OCR.
   // The proposal remains explicit: it is applied only if the operator taps it.
   const allergenSuggestion = useMemo(
-    () => suggestAllergen([
-      {
-        field_name: 'commercial_designation',
-        value: effectiveValues.commercial_designation ?? null,
-      },
-      {
-        field_name: 'scientific_name',
-        value: effectiveValues.scientific_name ?? null,
-      },
-      ...fields.filter((field) => field.field_name === 'product_name'),
-    ]),
-    [effectiveValues, fields],
+    () => reviewAllergenSuggestion(effectiveValues, reviewProfile.code),
+    [effectiveValues, reviewProfile.code],
   );
-  // "Enregistrer l'arrivage" unlocks only when every active profile field is non-blank.
   const filledCount = useMemo(
-    () => filledCountFromValues(effectiveValues, reviewProfile.code),
+    () => displayedFieldCount(effectiveValues, reviewProfile.code),
     [effectiveValues, reviewProfile.code],
   );
 
@@ -1017,7 +971,7 @@ export function ReviewScreen() {
   // Save is gated on full profile completion: the arrivage is only recorded — and counted —
   // once every field is filled. Below that the button stays disabled and reads "Compléter
   // (n/total)"; the modifications made so far are still persisted on leave.
-  const complete = filledCount === fieldOrder.length;
+  const complete = filledCountFromValues(effectiveValues, reviewProfile.code) === fieldOrder.length;
   const waitingForSync = scan?.reviewSyncStatus === 'pending';
   const canSave =
     !requiresRecapture &&
@@ -1195,7 +1149,6 @@ export function ReviewScreen() {
                             suggestion={name === 'allergens' ? allergenSuggestion : undefined}
                             history={fieldHistory}
                             edited={Object.prototype.hasOwnProperty.call(edits, name)}
-                            onFocusField={handleFieldFocus}
                             skipExplicitConfirmation={
                               name === 'FAO_area' &&
                               effectiveValues.FAO_area === NOT_COMMUNICATED_VALUE &&
@@ -1269,7 +1222,7 @@ export function ReviewScreen() {
                         : !ready
                           ? 'Analyse en cours…'
                           : !complete
-                            ? `Compléter (${filledCount}/${fieldOrder.length})`
+                            ? `${filledCount === fieldOrder.length ? 'Vérifier' : 'Compléter'} (${filledCount}/${fieldOrder.length})`
                             : 'Enregistrer l’arrivage'}
               </Text>
             </Pressable>

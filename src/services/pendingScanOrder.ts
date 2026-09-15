@@ -3,9 +3,10 @@ import type { PendingScan } from './scanQueue';
 /**
  * Home-screen priority, in the order the operator can act on it:
  *
- *  1. a failure or a photo to recapture;
- *  2. a review that is genuinely ready to validate (all profile fields filled);
- *  3. work still in progress or a review that still needs completing.
+ *  1. an impossible analysis;
+ *  2. another failure or a photo to recapture;
+ *  3. a review with all profile fields visibly filled;
+ *  4. work still in progress or a review that still needs completing.
  *
  * `ready` alone cannot mean "ready to validate": its machine extraction may only
  * contain part of the profile. The caller supplies that last bit of presentation
@@ -16,8 +17,9 @@ function attentionPriority<T extends Pick<PendingScan, 'status'>>(
   isReadyToValidate: (scan: T) => boolean,
 ): number {
   switch (scan.status) {
-    case 'submit_error':
     case 'extract_error':
+      return -1;
+    case 'submit_error':
     case 'recapture_required':
       return 0;
     case 'ready':
@@ -29,7 +31,7 @@ function attentionPriority<T extends Pick<PendingScan, 'status'>>(
 }
 
 /**
- * Errors first, then fully completed reviews, then scans still to complete; newest
+ * Analysis errors first, then other failures, filled reviews and incomplete scans; newest
  * first inside each group. The input queue is never mutated.
  */
 export function sortPendingScansByAttention<

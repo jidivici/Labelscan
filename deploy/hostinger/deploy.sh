@@ -106,7 +106,7 @@ preserve_running_image() {
   local target="$2"
   local container image
   docker image inspect "$target" >/dev/null 2>&1 && return
-  container="$(docker compose -f "$COMPOSE_FILE" ps -q "$service")"
+  container="$(docker compose -f "$COMPOSE_FILE" ps -a -q "$service")"
   [[ -n "$container" ]] || die "cannot identify the running ${service} image for rollback"
   image="$(docker inspect --format '{{.Image}}' "$container")"
   docker tag "$image" "$target"
@@ -302,8 +302,13 @@ docker compose -f "$COMPOSE_FILE" exec -T db \
 chmod 600 "$backup_file"
 
 printf '==> Backing up raw label images to %s\n' "$raw_backup_file"
-docker compose -f "$COMPOSE_FILE" exec -T api \
-  /bin/tar -C /app/data/raw -czf - . >"$raw_backup_file"
+backup_api_container="$(docker compose -f "$COMPOSE_FILE" ps -a -q api)"
+[[ -n "$backup_api_container" ]] || die "cannot identify the API raw-data volume for backup"
+backup_api_image="$(docker inspect --format '{{.Image}}' "$backup_api_container")"
+docker run --rm --network none --read-only --cap-drop ALL \
+  --security-opt no-new-privileges \
+  --volumes-from "${backup_api_container}:ro" --entrypoint /bin/tar \
+  "$backup_api_image" -C /app/data/raw -czf - . >"$raw_backup_file"
 chmod 600 "$raw_backup_file"
 
 reset_demo_data() {
@@ -531,6 +536,13 @@ grant_application_secret_access
 printf '==> Installing the reviewed single-VPS production contract\n'
 install -m 600 "${checkout_root}/${REPOSITORY_COMPOSE}" "$COMPOSE_FILE"
 install -o root -g 10002 -m 640 "${checkout_root}/${REPOSITORY_CADDY}" "$CADDY_FILE"
+
+if [[ "$reset_demo" -eq 1 || ! -f "$DEMO_CREDENTIALS_MARKER" ]]; then
+  printf '==> Validating demonstration credentials before stopping services or replacing data\n'
+  docker compose -f "$COMPOSE_FILE" run --rm --no-deps \
+    --entrypoint python demo -c \
+    'import sys; sys.path.insert(0, "/app/scripts"); from seed_demo import load_demo_passwords; load_demo_passwords()'
+fi
 
 printf '==> Validating the reviewed reverse-proxy contract\n'
 docker run --rm --network none --user 10002:10002 --read-only \

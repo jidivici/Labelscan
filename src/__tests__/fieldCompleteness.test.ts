@@ -9,6 +9,7 @@ import {
   filledCountFromInterim,
   filledCountFromRun,
   filledCountFromValues,
+  displayedFieldCount,
   initialHumanReviewValue,
   isProductNameKnownFromInterim,
   isProductNameKnownFromRun,
@@ -101,13 +102,13 @@ describe('fieldCompleteness', () => {
 
     // The home-card bubble must mirror the populated Review form. Confirmation is
     // still required before saving, but each non-empty value counts as filled.
-    expect(filledCountFromRun(fields)).toBe(3);
-    expect(filledCountFromRun(fields, { commercial_designation: 'Cabillaud' })).toBe(3);
+    expect(filledCountFromRun(fields)).toBe(4);
+    expect(filledCountFromRun(fields, { commercial_designation: 'Cabillaud' })).toBe(4);
     expect(filledCountFromRun(fields, {
       commercial_designation: 'Cabillaud',
       batch_number: 'LOT-42',
       gtin: NOT_COMMUNICATED_VALUE,
-    })).toBe(3);
+    })).toBe(4);
   });
 
   it('filledCountFromRun is null/empty-safe', () => {
@@ -252,5 +253,16 @@ describe('fieldCompleteness', () => {
     expect(
       filledCountFromRun([...boucherieFields, field('scientific_name')], undefined, 'boucherie'),
     ).toBe(21);
+  });
+});
+
+describe('visible prefills', () => {
+  it('counts the proposed allergen once on the home card and form without confirming it', () => {
+    const values = { commercial_designation: 'Cabillaud', allergens: '' };
+    expect(displayedFieldCount(values)).toBe(2);
+    expect(filledCountFromRun([field('commercial_designation', { value: 'Cabillaud' })])).toBe(2);
+    expect(filledCountFromValues(values)).toBe(1);
+    expect(displayedFieldCount({ ...values, allergens: 'Poisson' })).toBe(2);
+    expect(displayedFieldCount({ ...values, commercial_designation: 'Produit inconnu' })).toBe(1);
   });
 });

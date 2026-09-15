@@ -13,6 +13,7 @@
  * Pure + framework-free so it is unit-tested without React.
  */
 
+import { suggestAllergen } from './allergenSuggestions';
 import { fieldOrderForTrade } from './fieldOrder';
 import { allowsNotCommunicated } from './finalReviewValidation';
 import type { ExtractionField, ValidationStatus } from '../types/api';
@@ -82,7 +83,8 @@ function isFilledValue(
  * A non-empty extracted value counts immediately, even when its status still requires
  * the operator to confirm it. This deliberately mirrors the Review form's visible
  * completion score; confirmation controls save eligibility, not whether the field is
- * filled. Fields outside the canonical profile set are ignored.
+ * filled. Visible allergen proposals count once while awaiting confirmation.
+ * Fields outside the canonical profile set are ignored.
  *
  * `edits` (workflow v2, optional) is the scan's persisted review draft: where a key
  * exists it OVERRIDES the run value — a typed value fills the field, a blanked draft
@@ -117,7 +119,7 @@ export function filledCountFromRun(
   ) {
     effectiveValues.FAO_area = NOT_COMMUNICATED_VALUE;
   }
-  return filledCountFromValues(effectiveValues, tradeCode);
+  return displayedFieldCount(effectiveValues, tradeCode);
 }
 
 /**
@@ -175,3 +177,16 @@ export function isProductNameKnownFromInterim(
 
 /** The canonical field name used as the "name known" probe (exported for tests/UI). */
 export const PRODUCT_NAME_FIELD = 'commercial_designation';
+
+/** Count what the operator sees, including a prefilled proposal awaiting confirmation. */
+export function displayedFieldCount(values: Record<string, string>, tradeCode?: string | null): number {
+  return filledCountFromValues({
+    ...values,
+    allergens: values.allergens?.trim() ? values.allergens : reviewAllergenSuggestion(values, tradeCode) ?? '',
+  }, tradeCode);
+}
+
+export function reviewAllergenSuggestion(values: Record<string, string>, tradeCode?: string | null): string | null {
+  if (!fieldOrderForTrade(tradeCode).includes('allergens')) return null;
+  return suggestAllergen(Object.entries(values).map(([field_name, value]) => ({ field_name, value })));
+}

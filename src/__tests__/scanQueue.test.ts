@@ -508,7 +508,7 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].status).toBe('recapture_required');
   });
 
-  it('a terminal extraction failure queues a fresh server analysis with the same photo', async () => {
+  it('automatically recovers a terminal extraction failure and queues a fresh server analysis with the same photo', async () => {
     mockedEnqueueCapture.mockResolvedValue(fakeOp());
     mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-1', replayed: false });
     mockedWait.mockResolvedValueOnce({
@@ -518,8 +518,9 @@ describe('scanQueue', () => {
     });
 
     const scan = await enqueueScan({ tempUri: 'file:///cache/x.jpg', capturedAt: '2026-07-05T10:00:00Z' });
-    await flush(6);
-    expect(getSnapshot().scans[0].status).toBe('extract_error');
+    await flush(18);
+    expect(getSnapshot().scans[0].status).toBe('extracting');
+    expect(getSnapshot().scans[0].automaticAnalysisRetries).toBe(1);
     expect(getSnapshot().results[scan.id]).toBeUndefined();
     expect(getSnapshot().interim[scan.id]).toBeUndefined();
 
@@ -529,7 +530,7 @@ describe('scanQueue', () => {
     expect(getSnapshot().scans[0].status).toBe('extracting');
     expect(mockedRetryAnalysis).toHaveBeenCalledWith('ing-1', expect.anything());
     expect(mockedRetryAnalysis).toHaveBeenCalledTimes(1);
-    expect(mockedWait).toHaveBeenCalledTimes(pollCalls + 1);
+    expect(mockedWait).toHaveBeenCalledTimes(pollCalls);
   });
 
   it('requeues an OCR provider failure instead of polling its old terminal state', async () => {
@@ -545,14 +546,31 @@ describe('scanQueue', () => {
       tempUri: 'file:///cache/julienne.jpg',
       capturedAt: '2026-07-05T10:00:00Z',
     });
-    await flush(6);
-    expect(getSnapshot().scans[0].status).toBe('extract_error');
+    await flush(18);
+    expect(getSnapshot().scans[0].status).toBe('extracting');
+    expect(getSnapshot().scans[0].automaticAnalysisRetries).toBe(1);
 
     await retryScan(scan.id);
     await flush();
 
     expect(mockedRetryAnalysis).toHaveBeenCalledWith('ing-ocr', expect.anything());
     expect(getSnapshot().scans[0].status).toBe('extracting');
+  });
+
+  it('stops automatic recovery after one retry and keeps a persistent failure actionable', async () => {
+    mockedEnqueueCapture.mockResolvedValue(fakeOp());
+    mockedExecute.mockResolvedValue({ kind: 'succeeded', ingestionId: 'ing-fails', replayed: false });
+    mockedWait.mockResolvedValue({
+      kind: 'failed', status: 'extraction_failed',
+      ingestion: { recapture_required: false } as never,
+    });
+    await enqueueScan({ tempUri: 'file:///cache/x.jpg', capturedAt: '2026-07-05T10:00:00Z' });
+    await flush(30);
+    expect(mockedRetryAnalysis).toHaveBeenCalledTimes(1);
+    expect(mockedWait).toHaveBeenCalledTimes(2);
+    expect(getSnapshot().scans[0]).toMatchObject({
+      status: 'extract_error', errorCode: 'extraction_failed', automaticAnalysisRetries: 1,
+    });
   });
 
   it('requires a new photo only when the server explicitly marks it for recapture', async () => {

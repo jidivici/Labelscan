@@ -27,7 +27,7 @@ describe('sortPendingScansByAttention', () => {
     ];
     expect(sortPendingScansByAttention(scans, (scan) => scan.id === 'ready-new')
       .map((scan) => scan.id)).toEqual([
-      'recapture', 'error-old', 'ready-new', 'extracting', 'submitting', 'ready-old',
+      'error-old', 'recapture', 'ready-new', 'extracting', 'submitting', 'ready-old',
     ]);
   });
 });
