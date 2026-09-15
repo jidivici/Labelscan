@@ -307,7 +307,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   /** Per-field autocomplete history (workflow v2.1) — STABLE reference, built once. */
   history?: FieldHistory | null;
   edited: boolean;
-  onFocusField: (target: KeyboardFocusTarget) => void;
+  onFocusField: (fieldName: string, target: KeyboardFocusTarget) => void;
   skipExplicitConfirmation?: boolean;
 }) {
   // The review cue is REACTIVE to the live draft (not the server value): an empty
@@ -360,7 +360,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   const [focused, setFocused] = useState(false);
   const handleFocus = (target: KeyboardFocusTarget) => {
     setFocused(true);
-    onFocusField(target);
+    onFocusField(field.field_name, target);
   };
   const historySuggestions = useMemo(() => {
     if (!focused) return [];
@@ -542,14 +542,15 @@ export function ReviewScreen() {
 
   const [saving, setSaving] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
-  // Android does not consistently apply ScrollView's automatic keyboard inset.
-  // Keep the normal compact page at rest, then add exactly the keyboard height so
-  // the last field (weight) can be scrolled above it while being edited.
+  // Keep the form compact at rest. Only the final weight field needs temporary
+  // scroll room when the keyboard is open; earlier rows already have content below.
   const [keyboardInset, setKeyboardInset] = useState(0);
   const saveInFlightRef = useRef(false);
   const contentScrollRef = useRef<ScrollViewHandle>(null);
   const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const focusedFieldTargetRef = useRef<KeyboardFocusTarget | null>(null);
+  const focusedFieldNameRef = useRef<string | null>(null);
+  const keyboardHeightRef = useRef(0);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
@@ -646,26 +647,39 @@ export function ReviewScreen() {
     keyboardScrollTimerRef.current = setTimeout(() => {
       contentScrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
         target,
-        140,
+        // Keep the input immediately above the keyboard: this makes the keyboard
+        // start at the divider below the active row instead of pushing the row high
+        // into the form.
+        8,
         true,
       );
       keyboardScrollTimerRef.current = null;
     }, delay);
   }, []);
-  const handleFieldFocus = useCallback((target: KeyboardFocusTarget) => {
+  const handleFieldFocus = useCallback((fieldName: string, target: KeyboardFocusTarget) => {
     focusedFieldTargetRef.current = target;
-    // This first pass is useful on iOS and when the keyboard is already open.
-    scrollFocusedFieldAboveKeyboard(target, 250);
+    focusedFieldNameRef.current = fieldName;
+    // The trailing weight row is the only one that needs extra scrollable space.
+    setKeyboardInset(fieldName === 'weight' ? keyboardHeightRef.current : 0);
+    // If another field receives focus while the keyboard is already visible, there
+    // is no second keyboard event. Position it directly in that case.
+    if (keyboardHeightRef.current > 0) scrollFocusedFieldAboveKeyboard(target, 0);
   }, [scrollFocusedFieldAboveKeyboard]);
   useEffect(() => {
     const shown = Keyboard.addListener('keyboardDidShow', (event) => {
-      setKeyboardInset(event.endCoordinates.height);
+      keyboardHeightRef.current = event.endCoordinates.height;
+      setKeyboardInset(
+        focusedFieldNameRef.current === 'weight' ? event.endCoordinates.height : 0,
+      );
       // On Android, a focus event happens before the keyboard's final geometry is
-      // known. Scroll a second time after `keyboardDidShow`, using its real height.
+      // known. Position once it has settled, rather than applying a premature jump.
       const target = focusedFieldTargetRef.current;
-      if (target) scrollFocusedFieldAboveKeyboard(target, 80);
+      if (target) scrollFocusedFieldAboveKeyboard(target, 40);
     });
-    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardInset(0));
+    const hidden = Keyboard.addListener('keyboardDidHide', () => {
+      keyboardHeightRef.current = 0;
+      setKeyboardInset(0);
+    });
     return () => {
       shown.remove();
       hidden.remove();
@@ -1067,7 +1081,6 @@ export function ReviewScreen() {
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
-        automaticallyAdjustKeyboardInsets
       >
         {/* Épuré au maximum : au plus l'admin + la date d'enregistrement, un point. */}
         {user || capturedAt ? (
