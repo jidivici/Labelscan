@@ -118,6 +118,8 @@ def test_seafood_prompt_preserves_compound_lots_and_marks_origin_fallback_for_re
     assert "date limite d'utilisation optimale" in prompt
     assert '"MEDI-PECHE SET B.P. 94 ... Tél ..."' in prompt
     assert "Never copy that producer into reseller_brand" in prompt
+    assert '"Atlantique Nord-Est 27.VIII"' in prompt
+    assert "FAO catch-area description is NOT an origin-country candidate" in prompt
 
 
 def test_boucherie_prompt_keeps_each_origin_stage_and_approval_separate() -> None:

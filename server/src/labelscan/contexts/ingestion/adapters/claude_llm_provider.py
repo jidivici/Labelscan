@@ -55,6 +55,9 @@ anthropic_model(_MODEL)
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v3.7.0 — FAO catch-area wording is never accepted as origin_country. If no explicit
+# country remains after that check, the health-mark prefix is proposed as an ambiguous
+# value that the operator must confirm.
 # v3.6.0 — a prominent company header with address/contact details is captured as
 # the producer when no explicit reseller role is printed. This supports standard
 # fishmonger labels such as "MEDI-PECHE SET B.P. 94 ... Tél ..." without copying
@@ -102,7 +105,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v3.6.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.7.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -494,9 +497,10 @@ FAO_area, production_method - have no language; this rule is about text fields.)
 8. HEALTH MARK ≠ ORIGIN. The oval health / identification mark (estampille sanitaire, e.g. \
 "FR 34.108.504 CE", "ES 12.932470 UE", "GB BB004") identifies the APPROVED ESTABLISHMENT, \
 not the origin. It goes in health_mark and NEVER proves origin (a FR mark appears on Spanish \
-mussels; an ES mark on Atlantic hake), producer_name or reseller_brand. ONLY when no explicit \
-origin candidate exists anywhere on the label, also emit its two-letter prefix in origin_country \
-as a provisional review cue: validation_status MUST be "ambiguous" and warnings MUST say \
+mussels; an ES mark on Atlantic hake), producer_name or reseller_brand. A FAO catch-area \
+description is NOT an origin-country candidate. When no explicit COUNTRY remains after excluding \
+FAO wording, also emit the mark's two-letter prefix in origin_country as a provisional review cue: \
+validation_status MUST be "ambiguous" and warnings MUST say \
 "Initiales de l'estampille sanitaire — à vérifier". Never call that cue a country of origin.
 9. PRODUCER vs RESELLER. producer_name is the PROVENANCE (a "Pisciculture …", a vessel, an \
 "Elevé/Pêché par", or the establishment whose country matches the origin / health mark); \
@@ -604,12 +608,15 @@ COLIS DE 1.4KG") is NEVER the net weight - if only such a figure is present, wei
 warning. Ignore the estimated-sign mark (the lowercase "e").
 - origin_country: "value" is the COUNTRY OF ORIGIN (where the fish was caught or farmed), as \
 written, e.g. "Norway". Do NOT convert it to an ISO code, and do NOT infer a country from a \
-garbled or partial token - if the text is garbled, keep it verbatim with "validation_status" \
-"ambiguous" and a warning. The packing / conditioning / dispatch country ("conditionné" / \
-"emballé" / "expédié en X", the FBO postal address) and the health-mark country are NOT the \
-origin: when an explicit catch/rearing origin is printed ("Origine", "Pays d'origine", "Pêché \
-en", "Elevé en"), use THAT; fall back to another country wording only when no catch/rearing \
-origin is printed, and warn.
+garbled or partial token. NEVER put an FAO area, a sea, ocean, zone or sub-zone description in \
+origin_country, even when it follows "Pêché en" or "Origine": "Atlantique Nord-Est 27.VIII", \
+"Méditerranée", "FAO 27", "zone 27" and "sous-zone VIII" belong only in FAO_area. If that \
+is the only supposed origin evidence, it is doubt — use the health-mark initials as the \
+ambiguous "Initiales de l'estampille sanitaire — à vérifier" fallback from ABSOLUTE RULE 8. The \
+packing / conditioning / dispatch country ("conditionné" / "emballé" / "expédié en X", the FBO \
+postal address) and the health-mark country are NOT the origin. When an explicit country is \
+printed ("Origine : Norvège", "Pays d'origine : France", "Elevé en France"), use that country; \
+otherwise use the Rule 8 review fallback when a health mark is available.
 - FAO_area: capture the FAO catch-area designation EXACTLY AS PRINTED, copied verbatim, \
 keeping EVERY level shown — major area, sub-area / sous-zone, division and sub-division. \
 This covers BOTH a numeric code ("27", "27.7", "27.8.b.1" — copy the MOST precise one \

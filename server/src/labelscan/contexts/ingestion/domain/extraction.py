@@ -9,6 +9,7 @@ is coerced to null, and any defect routes the whole run to human review.
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 
@@ -26,6 +27,12 @@ class ConfidenceBand(StrEnum):
 
 # Controlled vocabulary (the only values the gate will accept for these fields).
 _PRODUCTION_METHODS = frozenset({"wild_caught", "farmed"})
+_FAO_ORIGIN_TERMS = re.compile(
+    r"\b(?:fao|atlantique|mediterran|ocean|mer|zone|sous[ -]?zone|sub[ -]?area|north[ -]?east)\b",
+    re.IGNORECASE,
+)
+_HEALTH_MARK_PREFIX = re.compile(r"^([A-Z]{2})\b")
+_ORIGIN_PREFIX_WARNING = "Initiales de l'estampille sanitaire — à vérifier"
 
 
 @dataclass(frozen=True)
@@ -153,6 +160,71 @@ def _spans_for(
     return tuple(spans)
 
 
+def _health_mark_origin_fallback(
+    evaluated: list[EvaluatedField], *, ocr_text: str, page: int, rule_set: RuleSet
+) -> list[EvaluatedField]:
+    """Route an FAO-like origin candidate to an explicit, confirmable mark prefix.
+
+    A fishing area ("Atlantique Nord-Est 27.VIII") is not a country. When the
+    model emits such wording — or finds no country at all — the printed sanitary
+    mark still offers a useful two-letter *review cue*. It remains ambiguous, so
+    the mobile form requires the operator's explicit confirmation before saving.
+    """
+    if rule_set.allowed_fields and "origin_country" not in rule_set.allowed_fields:
+        return evaluated
+    health_mark = next(
+        (item for item in evaluated if item.name == "health_mark" and item.value), None
+    )
+    if health_mark is None:
+        return evaluated
+    prefix_match = _HEALTH_MARK_PREFIX.match(health_mark.value or "")
+    if prefix_match is None:
+        return evaluated
+    prefix = prefix_match.group(1)
+    spans = _spans_for((prefix,), ocr_text, page)
+    if spans is None:
+        return evaluated
+
+    origin_index = next(
+        (index for index, item in enumerate(evaluated) if item.name == "origin_country"),
+        None,
+    )
+    if origin_index is not None:
+        origin = evaluated[origin_index]
+        if origin.value is not None and not _FAO_ORIGIN_TERMS.search(origin.value):
+            return evaluated  # an explicit non-FAO country remains authoritative
+        warnings = tuple(dict.fromkeys((*origin.warnings, _ORIGIN_PREFIX_WARNING)))
+        evaluated[origin_index] = EvaluatedField(
+            name="origin_country",
+            value=prefix,
+            evidence=(prefix,),
+            spans=spans,
+            validation_status="ambiguous",
+            warnings=warnings,
+            llm_confidence=health_mark.llm_confidence,
+            ocr_confidence=health_mark.ocr_confidence,
+            combined_confidence=health_mark.combined_confidence,
+            confidence_band=health_mark.confidence_band,
+        )
+        return evaluated
+
+    evaluated.append(
+        EvaluatedField(
+            name="origin_country",
+            value=prefix,
+            evidence=(prefix,),
+            spans=spans,
+            validation_status="ambiguous",
+            warnings=(_ORIGIN_PREFIX_WARNING,),
+            llm_confidence=health_mark.llm_confidence,
+            ocr_confidence=health_mark.ocr_confidence,
+            combined_confidence=health_mark.combined_confidence,
+            confidence_band=health_mark.confidence_band,
+        )
+    )
+    return evaluated
+
+
 def evaluate(
     fields: tuple[LlmField, ...],
     *,
@@ -247,6 +319,10 @@ def evaluate(
                 confidence_band=band,
             )
         )
+
+    evaluated = _health_mark_origin_fallback(
+        evaluated, ocr_text=ocr_text, page=page, rule_set=rule_set
+    )
 
     # --- cross-field consistency (representative): expiry must not precede packaging ---
     by_name = {e.name: e for e in evaluated}

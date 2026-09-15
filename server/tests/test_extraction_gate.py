@@ -140,6 +140,37 @@ def test_inconsistent_dates_routes_to_review():
     assert "expiry_date" in v.inconsistent
 
 
+def test_fao_wording_never_becomes_origin_country_and_uses_confirmable_mark_prefix():
+    text = "Pêché en Atlantique Nord-Est 27.VIII\nFR 34-108-593 CE"
+    fields = (
+        field("origin_country", "Atlantique Nord-Est 27.VIII", 0.9, ["Atlantique Nord-Est 27.VIII"]),
+        field("health_mark", "FR 34-108-593 CE", 0.95, ["FR 34-108-593 CE"]),
+    )
+    verdict = evaluate(
+        fields,
+        ocr_text=text,
+        ocr_confidence=0.95,
+        rule_set=RuleSet(version="origin", required_fields=frozenset()),
+    )
+    origin = _by(verdict, "origin_country")
+    assert origin.value == "FR"
+    assert origin.validation_status == "ambiguous"
+    assert origin.warnings == ("Initiales de l'estampille sanitaire — à vérifier",)
+
+
+def test_missing_origin_gets_confirmable_health_mark_prefix():
+    text = "FR 34-108-593 CE"
+    verdict = evaluate(
+        (field("health_mark", "FR 34-108-593 CE", 0.95, ["FR 34-108-593 CE"]),),
+        ocr_text=text,
+        ocr_confidence=0.95,
+        rule_set=RuleSet(version="origin", required_fields=frozenset()),
+    )
+    origin = _by(verdict, "origin_country")
+    assert origin.value == "FR"
+    assert origin.validation_status == "ambiguous"
+
+
 def test_non_finite_model_confidence_is_quarantined() -> None:
     fields = (
         field("scientific_name", "Gadus morhua", float("nan"), ["Gadus morhua"]),

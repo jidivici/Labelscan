@@ -549,6 +549,7 @@ export function ReviewScreen() {
   const saveInFlightRef = useRef(false);
   const contentScrollRef = useRef<ScrollViewHandle>(null);
   const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const focusedFieldTargetRef = useRef<KeyboardFocusTarget | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [photoRotationDegrees, setPhotoRotationDegrees] = useState<0 | 180>(scan?.photoRotationDegrees ?? 0);
   // Workflow v2 "session": seed the draft from the scan's persisted edits so a
@@ -567,16 +568,6 @@ export function ReviewScreen() {
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
   }, [pendingScanId]);
-  useEffect(() => {
-    const shown = Keyboard.addListener('keyboardDidShow', (event) => {
-      setKeyboardInset(event.endCoordinates.height);
-    });
-    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardInset(0));
-    return () => {
-      shown.remove();
-      hidden.remove();
-    };
-  }, []);
   // Start the staged-progress clock at mount so the 3-step box advances Lecture →
   // Analyse while the run is polled. A scan opened already 'ready' never shows it.
   const [mountedAt] = useState(() => Date.now());
@@ -650,7 +641,7 @@ export function ReviewScreen() {
   const handleFieldChange = useCallback((name: string, text: string) => {
     setEdits((prev) => ({ ...prev, [name]: text }));
   }, []);
-  const handleFieldFocus = useCallback((target: KeyboardFocusTarget) => {
+  const scrollFocusedFieldAboveKeyboard = useCallback((target: KeyboardFocusTarget, delay: number) => {
     if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     keyboardScrollTimerRef.current = setTimeout(() => {
       contentScrollRef.current?.scrollResponderScrollNativeHandleToKeyboard(
@@ -659,8 +650,27 @@ export function ReviewScreen() {
         true,
       );
       keyboardScrollTimerRef.current = null;
-    }, 250);
+    }, delay);
   }, []);
+  const handleFieldFocus = useCallback((target: KeyboardFocusTarget) => {
+    focusedFieldTargetRef.current = target;
+    // This first pass is useful on iOS and when the keyboard is already open.
+    scrollFocusedFieldAboveKeyboard(target, 250);
+  }, [scrollFocusedFieldAboveKeyboard]);
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardInset(event.endCoordinates.height);
+      // On Android, a focus event happens before the keyboard's final geometry is
+      // known. Scroll a second time after `keyboardDidShow`, using its real height.
+      const target = focusedFieldTargetRef.current;
+      if (target) scrollFocusedFieldAboveKeyboard(target, 80);
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardInset(0));
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, [scrollFocusedFieldAboveKeyboard]);
 
   // GS1-decoded values keyed by field name — shown IN the field list at T+0 (before the
   // LLM run lands) so those rows are filled immediately rather than skeletoned (§2.1).

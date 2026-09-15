@@ -170,7 +170,7 @@ def test_cached_prefix_excludes_dynamic_and_secrets():
     assert "trace_id" not in _SYSTEM_TEXT
     # no wall-clock timestamp leaked (a HH:MM:SS would mean a per-request clock value).
     assert re.search(r"\d{2}:\d{2}:\d{2}", _SYSTEM_TEXT) is None
-    assert _PROMPT_VERSION == "seafood-label-extraction/v3.6.0"
+    assert _PROMPT_VERSION == "seafood-label-extraction/v3.7.0"
     assert re.search(r'"evidence"(?:\s+|:\s*)null', _SYSTEM_TEXT) is None
     assert '"evidence":[]' in _SYSTEM_TEXT
 
