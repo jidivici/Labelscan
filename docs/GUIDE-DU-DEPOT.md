@@ -102,7 +102,7 @@ Ces commandes construisent et lancent le client natif de développement. Pour un
 LABELSCAN_BUILD_PROFILE=development npx expo start --dev-client
 ```
 
-Le profil `development` active la configuration Android destinée à l'API locale HTTP. Les réglages natifs sont regroupés dans [app.config.js](../app.config.js).
+Le profil `development` active la configuration Android destinée à l'API locale HTTP. Les réglages natifs sont regroupés dans [app.config.js](../app.config.js). L'application cible uniquement Android 16 ou une version ultérieure (API 36 minimum) ; cette règle est vérifiée par `npm run check:android16` avant chaque livraison.
 
 ### Back-office web
 
