@@ -166,7 +166,7 @@ def _group_grants(rows):
 
 def test_consolidated_baseline_preserves_the_complete_catalog(conn) -> None:
     assert conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == (
-        "0036_manager_store_credentials"
+        "0037_interim_preview_fields"
     )
 
     logical_tables = set(
