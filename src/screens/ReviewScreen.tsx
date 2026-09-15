@@ -19,6 +19,7 @@ import {
   Alert,
   TextInput,
   Image,
+  Keyboard,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -541,6 +542,10 @@ export function ReviewScreen() {
 
   const [saving, setSaving] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState<string | null>(null);
+  // Android does not consistently apply ScrollView's automatic keyboard inset.
+  // Keep the normal compact page at rest, then add exactly the keyboard height so
+  // the last field (weight) can be scrolled above it while being edited.
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const saveInFlightRef = useRef(false);
   const contentScrollRef = useRef<ScrollViewHandle>(null);
   const keyboardScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -562,6 +567,16 @@ export function ReviewScreen() {
       if (keyboardScrollTimerRef.current) clearTimeout(keyboardScrollTimerRef.current);
     };
   }, [pendingScanId]);
+  useEffect(() => {
+    const shown = Keyboard.addListener('keyboardDidShow', (event) => {
+      setKeyboardInset(event.endCoordinates.height);
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => setKeyboardInset(0));
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
   // Start the staged-progress clock at mount so the 3-step box advances Lecture →
   // Analyse while the run is polled. A scan opened already 'ready' never shows it.
   const [mountedAt] = useState(() => Date.now());
@@ -1034,7 +1049,12 @@ export function ReviewScreen() {
       <ScrollView
         ref={contentScrollRef}
         style={styles.contentCard}
-        contentContainerStyle={styles.contentInner}
+        contentContainerStyle={[
+          styles.contentInner,
+          {
+            paddingBottom: spacing['2xl'] + keyboardInset,
+          },
+        ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         automaticallyAdjustKeyboardInsets
