@@ -92,15 +92,17 @@ describe('fieldCompleteness', () => {
     expect(filledCountFromRun(fields)).toBe(3);
   });
 
-  it('does not count questionable machine suggestions before explicit human confirmation', () => {
+  it('counts every non-empty machine suggestion while confirmation remains pending', () => {
     const fields = [
       field('commercial_designation', { value: 'Cabillaud ?', validation_status: 'ambiguous' }),
       field('batch_number', { value: 'LOT-?', validation_status: 'unnormalizable' }),
       field('gtin', { value: '1234', validation_status: 'invalid' }),
     ];
 
-    expect(filledCountFromRun(fields)).toBe(0);
-    expect(filledCountFromRun(fields, { commercial_designation: 'Cabillaud' })).toBe(1);
+    // The home-card bubble must mirror the populated Review form. Confirmation is
+    // still required before saving, but each non-empty value counts as filled.
+    expect(filledCountFromRun(fields)).toBe(3);
+    expect(filledCountFromRun(fields, { commercial_designation: 'Cabillaud' })).toBe(3);
     expect(filledCountFromRun(fields, {
       commercial_designation: 'Cabillaud',
       batch_number: 'LOT-42',

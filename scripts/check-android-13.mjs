@@ -31,7 +31,7 @@ const developmentAndroidBuild = developmentConfig.plugins.find(
 )?.[1]?.android;
 const blockedPermissions = config.android?.blockedPermissions ?? [];
 const checks = [
-  ['Expo SDK 57', /^\^?57\./.test(packageJson.dependencies.expo)],
+  ['Expo SDK 57', /^[~^]?57\./.test(packageJson.dependencies.expo)],
   ['Android minimum API 33 (Android 13)', androidBuild?.minSdkVersion === 33],
   ['HTTP clair interdit en production', androidBuild?.usesCleartextTraffic === false],
   ['Repli sans profil interdit le HTTP clair', fallbackAndroidBuild?.usesCleartextTraffic === false],

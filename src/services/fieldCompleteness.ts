@@ -15,7 +15,6 @@
 
 import { fieldOrderForTrade } from './fieldOrder';
 import { allowsNotCommunicated } from './finalReviewValidation';
-import { requiresExplicitHumanConfirmation } from './reviewFieldAttention';
 import type { ExtractionField, ValidationStatus } from '../types/api';
 
 /** The active poissonnerie V2 denominator shown in the UI. */
@@ -80,9 +79,10 @@ function isFilledValue(
 
 /**
  * Count filled canonical fields from a FINAL extraction run's field list.
- * A field with a questionable machine status never counts until a human draft exists,
- * even if it carries a proposed value. Fields outside the canonical profile set are
- * ignored.
+ * A non-empty extracted value counts immediately, even when its status still requires
+ * the operator to confirm it. This deliberately mirrors the Review form's visible
+ * completion score; confirmation controls save eligibility, not whether the field is
+ * filled. Fields outside the canonical profile set are ignored.
  *
  * `edits` (workflow v2, optional) is the scan's persisted review draft: where a key
  * exists it OVERRIDES the run value — a typed value fills the field, a blanked draft
@@ -103,8 +103,7 @@ export function filledCountFromRun(
     }
     const f = byName.get(name);
     if (!f) continue;
-    if (requiresExplicitHumanConfirmation(f.validation_status, f.source)) continue;
-    effectiveValues[name] = normalizeFinalReviewValue(f.value);
+    effectiveValues[name] = initialHumanReviewValue(f.value, f.validation_status);
   }
   // The Review screen projects FAO=NC for farmed seafood because a catch area does
   // not apply. Mirror that projection on the home card so a saveable 16/16 review
