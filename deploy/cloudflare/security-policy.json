@@ -1,0 +1,82 @@
+{
+  "zone_id": "98aa643525c74886f81afce23c530405",
+  "account_id": "9b3eee17b0d8b32bf4916f8e4f0a386a",
+  "zone_name": "label-scan.fr",
+  "settings": {
+    "min_tls_version": "1.2",
+    "ssl": "strict",
+    "always_use_https": "on"
+  },
+  "custom": {
+    "description": "",
+    "id": "e3e8de1f17ee4664910b8adb08dae55f",
+    "kind": "zone",
+    "last_updated": "2026-09-14T17:24:49.031362Z",
+    "name": "default",
+    "phase": "http_request_firewall_custom",
+    "rules": [
+      {
+        "action": "skip",
+        "action_parameters": {
+          "products": [
+            "bic",
+            "securityLevel"
+          ]
+        },
+        "description": "LabelScan API - sans challenge navigateur",
+        "enabled": true,
+        "expression": "(http.host in {\"label-scan.fr\" \"www.label-scan.fr\"}) and (http.request.uri.path eq \"/v1\" or starts_with(http.request.uri.path, \"/v1/\"))",
+        "id": "64d3ff4f0d30436cb6c424c9bda6bf06",
+        "last_updated": "2026-09-14T17:23:08.638809Z",
+        "logging": {
+          "enabled": true
+        },
+        "ref": "64d3ff4f0d30436cb6c424c9bda6bf06",
+        "version": "1"
+      },
+      {
+        "action": "block",
+        "description": "LabelScan API - HTTP methods",
+        "enabled": true,
+        "expression": "(http.host in {\"label-scan.fr\" \"www.label-scan.fr\"}) and (http.request.uri.path eq \"/v1\" or starts_with(http.request.uri.path, \"/v1/\")) and not (http.request.method in {\"GET\" \"HEAD\" \"POST\" \"PUT\" \"PATCH\" \"DELETE\" \"OPTIONS\"})",
+        "id": "b2ecdf28bfc54e6cb7a52bb5c2abb585",
+        "last_updated": "2026-09-14T17:24:49.031362Z",
+        "ref": "b2ecdf28bfc54e6cb7a52bb5c2abb585",
+        "version": "1"
+      }
+    ],
+    "source": "firewall_custom",
+    "version": "2"
+  },
+  "ratelimit": {
+    "description": "",
+    "id": "79ee22ba55544ef6bd6fabe441c4b123",
+    "kind": "zone",
+    "last_updated": "2026-09-14T17:19:25.553494Z",
+    "name": "default",
+    "phase": "http_ratelimit",
+    "rules": [
+      {
+        "action": "block",
+        "description": "LabelScan - connexions web organisation mobile",
+        "enabled": true,
+        "expression": "(http.request.uri.path in {\"/v1/auth/login\" \"/v1/mobile/auth/login\"} or (starts_with(http.request.uri.path, \"/v1/o/\") and ends_with(http.request.uri.path, \"/auth/login\")))",
+        "id": "a8621b80aee24e0686ef6f72bd1e2298",
+        "last_updated": "2026-09-14T17:19:25.553494Z",
+        "ratelimit": {
+          "characteristics": [
+            "ip.src",
+            "cf.colo.id"
+          ],
+          "mitigation_timeout": 10,
+          "period": 10,
+          "requests_per_period": 10
+        },
+        "ref": "a8621b80aee24e0686ef6f72bd1e2298",
+        "version": "1"
+      }
+    ],
+    "source": "rate_limit",
+    "version": "1"
+  }
+}

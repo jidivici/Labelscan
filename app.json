@@ -1,0 +1,60 @@
+{
+  "expo": {
+    "name": "LabelScan",
+    "slug": "LabelScan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/labelscan-logo.png",
+    "androidStatusBar": {
+      "barStyle": "dark-content"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "LabelScan uses your camera to photograph product labels and scan barcodes.",
+        "ITSAppUsesNonExemptEncryption": false
+      },
+      "bundleIdentifier": "com.anonymous.LabelScan"
+    },
+    "android": {
+      "allowBackup": false,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/labelscan-logo.png",
+        "backgroundColor": "#078B7D"
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.SYSTEM_ALERT_WINDOW"
+      ],
+      "package": "com.anonymous.LabelScan"
+    },
+    "web": {
+      "favicon": "./assets/labelscan-logo.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "LabelScan uses your camera to photograph product labels and scan barcodes.",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-secure-store",
+      "expo-font",
+      "expo-sharing",
+      "expo-build-properties"
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "124ba152-f25f-4cdb-ae98-ea1a550561fc"
+      }
+    }
+  }
+}

@@ -1,0 +1,75 @@
+import React, { useState } from 'react';
+import {
+  Image,
+  type ImageProps,
+  type ImageResizeMode,
+  type ImageSourcePropType,
+  type StyleProp,
+  StyleSheet,
+  View,
+  type ViewStyle,
+} from 'react-native';
+
+import { photoDisplayRotation, type PhotoBaseRotationDegrees } from './photoOrientation';
+
+interface RotatedPhotoProps {
+  source: ImageSourcePropType;
+  style?: StyleProp<ViewStyle>;
+  resizeMode?: ImageResizeMode;
+  accessibilityLabel?: ImageProps['accessibilityLabel'];
+  onError?: ImageProps['onError'];
+  halfTurn?: boolean;
+  /** -90 for historical raw captures; 0 for crops already rotated upright. */
+  baseRotationDegrees?: PhotoBaseRotationDegrees;
+}
+
+/**
+ * A photo frame whose image dimensions are swapped for historical quarter-turned
+ * captures. This prevents the bitmap from becoming a narrow band in rectangular frames.
+ */
+export function RotatedPhoto({
+  source,
+  style,
+  resizeMode = 'cover',
+  accessibilityLabel,
+  onError,
+  halfTurn = false,
+  baseRotationDegrees = -90,
+}: RotatedPhotoProps) {
+  const [frame, setFrame] = useState({ width: 0, height: 0 });
+  const quarterTurn = baseRotationDegrees === -90;
+  const displayRotation = photoDisplayRotation(baseRotationDegrees, halfTurn);
+
+  return (
+    <View
+      style={[styles.frame, style]}
+      onLayout={(event) => {
+        const { width, height } = event.nativeEvent.layout;
+        if (width !== frame.width || height !== frame.height) setFrame({ width, height });
+      }}
+    >
+      {frame.width > 0 && frame.height > 0 ? (
+        <Image
+          source={source}
+          resizeMode={resizeMode}
+          accessibilityLabel={accessibilityLabel}
+          onError={onError}
+          style={{
+            position: 'absolute',
+            left: quarterTurn ? (frame.width - frame.height) / 2 : 0,
+            top: quarterTurn ? (frame.height - frame.width) / 2 : 0,
+            width: quarterTurn ? frame.height : frame.width,
+            height: quarterTurn ? frame.width : frame.height,
+            transform: displayRotation === '0deg' ? [] : [{ rotate: displayRotation }],
+          }}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  frame: {
+    overflow: 'hidden',
+  },
+});

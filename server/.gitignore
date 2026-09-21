@@ -1,0 +1,14 @@
+# Python build / cache artifacts
+build/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.import_linter_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local env
+.env
+demo/credentials.local.json

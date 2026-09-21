@@ -1,0 +1,85 @@
+# Dependencies
+node_modules/
+
+# Local agent and developer state
+AGENTS.md
+CLAUDE.md
+.agents/
+.claude/
+.codex*/
+.idea/
+.vscode/
+.tmp/
+.local-archive/
+docs/archive/
+
+# Expo and generated native projects
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+/ios/
+/android/
+
+# Build, test and diagnostic output
+build/
+coverage/
+test-results/
+playwright-report/
+.nyc_output/
+output/
+# Public documentation artifact only; all other build outputs remain local.
+!/output/
+/output/*
+!/output/pdf/
+/output/pdf/*
+!/output/pdf/LabelScan_Documentation_Technique.pdf
+/tmp/pdfs/
+*.log
+npm-debug.*
+yarn-debug.*
+yarn-error.*
+.metro-health-check*
+
+# Local presentation, office and install artifacts
+*.apk
+*.aab
+*.ipa
+*.xcarchive/
+*.ppt
+*.pptx
+*.doc
+*.docx
+/*.pdf
+/LabelScan-*/
+/LabelScan_*/
+/Fiche_*/
+/build_labelscan_summary.py
+
+# Native credentials and local secrets
+.kotlin/
+*.orig.*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+*.pem
+.env
+.env.*
+!.env.example
+!.env*.example
+
+# Python tooling and caches
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.import_linter_cache/
+__pycache__/
+*.py[cod]
+
+# TypeScript and operating-system metadata
+*.tsbuildinfo
+.DS_Store

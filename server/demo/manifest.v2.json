@@ -1,0 +1,1615 @@
+{
+  "manifest_version": "demo-photo-only/v2",
+  "trade_code": "poissonnerie",
+  "trade_profile_version": "2",
+  "catalog_missing_value": "NC",
+  "policy": {
+    "scope": "Only information visibly printed on the photographed label is truth.",
+    "normalization": "Values may be normalized only when the evidence states the same fact.",
+    "exclusions": "No species inference, shelf-life calculation, barcode invention, health-mark-to-origin inference, or date-role substitution.",
+    "missing_values": "Photo truth uses normalized_value null and evidence []; the catalogue renders the explicit human-review marker NC so every profile field remains visible."
+  },
+  "images": [
+    {
+      "key": "grondin",
+      "city": "NICE",
+      "file": "grondin-rouge.jpg",
+      "sha256": "a9ae3962bd6593acfed14f5fd0568ef671a34adfb157cb1a7ef6ea03f87752fa",
+      "excluded_observations": [],
+      "fields": {
+        "FAO_area": {
+          "raw_value": "FAO 27 VII",
+          "normalized_value": "FAO 27 VII",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pêché en Zone FAO 27 VII"
+          ],
+          "unit": null,
+          "precision": "printed_designation"
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "15426",
+          "normalized_value": "15426",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "N° lot: 15426"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "GRONDIN RGE",
+          "normalized_value": "GRONDIN RGE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "GRONDIN RGE N°2 4/600GR CF"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": "CHALUT",
+          "normalized_value": "CHALUT",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Mode de pêche: CHALUT"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "gtin": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "health_mark": {
+          "raw_value": "FR 35.177.014 CE",
+          "normalized_value": "FR 35.177.014 CE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "FR 35.177.014 CE"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "packaging_date": {
+          "raw_value": "03/06/2026",
+          "normalized_value": "2026-06-03",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Date de conditionnement: 03/06/2026"
+          ],
+          "unit": null,
+          "precision": "day"
+        },
+        "producer_name": {
+          "raw_value": "CORMARÉE",
+          "normalized_value": null,
+          "source": "printed_text",
+          "status": "ambiguous",
+          "evidence": [
+            "CORMARÉE"
+          ],
+          "unit": null,
+          "precision": null,
+          "reason": "The operator is printed, but its producer role is not stated."
+        },
+        "production_method": {
+          "raw_value": "Pêché en Zone FAO 27 VII",
+          "normalized_value": "wild_caught",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pêché en Zone FAO 27 VII"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": "COOPERATIVE U VENDARGUES",
+          "normalized_value": "COOPERATIVE U VENDARGUES",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "COOPERATIVE U VENDARGUES"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "scientific_name": {
+          "raw_value": "ASPITRIGLA CUCULUS",
+          "normalized_value": "ASPITRIGLA CUCULUS",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "ASPITRIGLA CUCULUS"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "A conserver entre 0 et 2°C",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "A conserver entre 0 et 2°C"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "2,00",
+          "normalized_value": "2.00 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Poids Net(KG): 2,00"
+          ],
+          "unit": "kg",
+          "precision": "0.01 kg"
+        }
+      }
+    },
+    {
+      "key": "merlan",
+      "city": "FREJUS",
+      "file": "merlan-filet.jpg",
+      "sha256": "85c1fd34d49eb93ca6b5b830f70a66a476cf044a1eb84dafcae3496e41c25a1a",
+      "excluded_observations": [
+        "Date de Production 12/06/26 is not a packaging date."
+      ],
+      "fields": {
+        "FAO_area": {
+          "raw_value": "FAO 27/IVa",
+          "normalized_value": "FAO 27/IVa",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Peche en Atlantique Nord Est FAO 27/IVa"
+          ],
+          "unit": null,
+          "precision": "printed_designation"
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "F 12P",
+          "normalized_value": "F 12P",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "LOT: F 12P"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "MERLAN FILET",
+          "normalized_value": "MERLAN FILET",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "MERLAN FILET"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": "chaluts",
+          "normalized_value": "chaluts",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Engin de peche: chaluts"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "gtin": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "health_mark": {
+          "raw_value": "GB BB004",
+          "normalized_value": "GB BB004",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "GB BB004"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": "UK",
+          "normalized_value": "UK",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pays m d'origine: UK"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "packaging_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "producer_name": {
+          "raw_value": "G&J JACK SEAFOODS",
+          "normalized_value": "G&J JACK SEAFOODS",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "G&J JACK SEAFOODS"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "production_method": {
+          "raw_value": "Peche en Atlantique Nord Est FAO 27/IVa",
+          "normalized_value": "wild_caught",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Peche en Atlantique Nord Est FAO 27/IVa"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": "MERICQ",
+          "normalized_value": "MERICQ",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Produit pour: MERICQ"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "scientific_name": {
+          "raw_value": "MERLANGIUS MERLANGUS",
+          "normalized_value": "MERLANGIUS MERLANGUS",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "MERLANGIUS MERLANGUS"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "Conserver entre 0c - 2c",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Conserver entre 0c - 2c"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "3KG",
+          "normalized_value": "3 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Poids net 3KG"
+          ],
+          "unit": "kg",
+          "precision": "1 kg"
+        }
+      }
+    },
+    {
+      "key": "julienne",
+      "city": "NICE",
+      "file": "dos-julienne.jpg",
+      "sha256": "2439c9601d1490c7bb3cbc5003ab5e961530ef63b18ea6fd015bcdcefa1d4d6c",
+      "excluded_observations": [],
+      "fields": {
+        "FAO_area": {
+          "raw_value": "FAO27",
+          "normalized_value": "FAO27",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "zone FAO27 (Atlantique Nord-Est)"
+          ],
+          "unit": null,
+          "precision": "printed_designation"
+        },
+        "allergens": {
+          "raw_value": "Poisson",
+          "normalized_value": "Poisson",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Julienne (Poisson)"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "batch_number": {
+          "raw_value": "400111",
+          "normalized_value": "400111",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Lot 400111"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "Dos de Julienne",
+          "normalized_value": "Dos de Julienne",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Dos de Julienne"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": "Chaluts de fond à panneaux (OTB)",
+          "normalized_value": "Chaluts de fond à panneaux (OTB)",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Chaluts de fond à panneaux (OTB)"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "gtin": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "health_mark": {
+          "raw_value": "GB BB027",
+          "normalized_value": "GB BB027",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "GB BB027"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": "Ecosse",
+          "normalized_value": "Ecosse",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Origine Ecosse"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "packaging_date": {
+          "raw_value": "17/06/2026",
+          "normalized_value": "2026-06-17",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Date d'emballage 17/06/2026"
+          ],
+          "unit": null,
+          "precision": "day"
+        },
+        "producer_name": {
+          "raw_value": "WHITELINK SEAFOODS LTD",
+          "normalized_value": "WHITELINK SEAFOODS LTD",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "WHITELINK SEAFOODS LTD"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "production_method": {
+          "raw_value": "Pêche dans la zone FAO27",
+          "normalized_value": "wild_caught",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pêche dans la zone FAO27"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": "SAS MERICQ AGEN",
+          "normalized_value": "SAS MERICQ AGEN",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Client SAS MERICQ AGEN"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "scientific_name": {
+          "raw_value": "Molva molva",
+          "normalized_value": "Molva molva",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Molva molva"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "A Conserver entre 0 - 2°C",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "A Conserver entre 0 - 2°C"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "3 Kg",
+          "normalized_value": "3 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Poids Net x 3 Kg"
+          ],
+          "unit": "kg",
+          "precision": "1 kg"
+        }
+      }
+    },
+    {
+      "key": "truite",
+      "city": "CANNES",
+      "file": "truite.jpg",
+      "sha256": "75bf4f4bed13bec6cefb32c378b25c8bf0d85ee8e2d66a69f5dde385ffb86e67",
+      "excluded_observations": [
+        "X 2 kg is a pack/calibre indication, not an explicit net weight."
+      ],
+      "fields": {
+        "FAO_area": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "170",
+          "normalized_value": "170",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Code de traçabilité : 170"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "Truite PAC U",
+          "normalized_value": "Truite PAC U",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Truite PAC U"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": "Pisciculture",
+          "normalized_value": "Pisciculture",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pisciculture FONT-ROME"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "gtin": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "health_mark": {
+          "raw_value": "FR 07 019 003 UE",
+          "normalized_value": "FR 07 019 003 UE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "FR 07 019 003 UE"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": "France",
+          "normalized_value": "France",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Elevée en France"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "packaging_date": {
+          "raw_value": "19 Juin 2026",
+          "normalized_value": "2026-06-19",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Récoltée et conditionnée le : 19 Juin 2026"
+          ],
+          "unit": null,
+          "precision": "day"
+        },
+        "producer_name": {
+          "raw_value": "Pisciculture FONT-ROME",
+          "normalized_value": "Pisciculture FONT-ROME",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pisciculture FONT-ROME"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "production_method": {
+          "raw_value": "Elevée en France",
+          "normalized_value": "farmed",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Elevée en France"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": "COOPERATIVE U ENSEIGNE VENDARGUES V2",
+          "normalized_value": "COOPERATIVE U ENSEIGNE VENDARGUES V2",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "COOPERATIVE U ENSEIGNE VENDARGUES V2"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "scientific_name": {
+          "raw_value": "Oncorhynchus Mykiss",
+          "normalized_value": "Oncorhynchus Mykiss",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Oncorhynchus Mykiss"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "Température de transport et de conservation : 0°C<T<2°C",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Température de transport et de conservation : 0°C<T<2°C"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        }
+      }
+    },
+    {
+      "key": "maquereau",
+      "city": "CANNES",
+      "file": "maquereau.jpg",
+      "sha256": "18245ac3eae2120136533944a306c7945c7994432f7c3212bbb6abddff7d1dfd",
+      "excluded_observations": [
+        "PAVILLON FRANCE is a mark on the label, not an explicit origin country."
+      ],
+      "fields": {
+        "FAO_area": {
+          "raw_value": "ATLANTIQUE NORD EST, SOUS ZONE VIII ET AUTRES SOUS-ZONES",
+          "normalized_value": "ATLANTIQUE NORD EST, SOUS ZONE VIII ET AUTRES SOUS-ZONES",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "PECHE EN ATLANTIQUE NORD EST, SOUS ZONE VIII ET AUTRES SOUS-ZONES"
+          ],
+          "unit": null,
+          "precision": "printed_designation"
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "256541",
+          "normalized_value": "256541",
+          "source": "printed_barcode",
+          "status": "present",
+          "evidence": [
+            "(10)256541"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "Maquereau 300/500 QMC PF C/3K",
+          "normalized_value": "Maquereau 300/500 QMC PF C/3K",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Maquereau 300/500 QMC PF C/3K"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "gtin": {
+          "raw_value": "(01)3700161210047",
+          "normalized_value": "3700161210047",
+          "source": "printed_barcode",
+          "status": "present",
+          "evidence": [
+            "(01)3700161210047"
+          ],
+          "unit": null,
+          "precision": "check_digit"
+        },
+        "health_mark": {
+          "raw_value": "FR 17-300-147 CE",
+          "normalized_value": "FR 17-300-147 CE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "FR 17-300-147 CE"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "packaging_date": {
+          "raw_value": "15/06/2026",
+          "normalized_value": "2026-06-15",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Date Conditionnement : 15/06/2026"
+          ],
+          "unit": null,
+          "precision": "day"
+        },
+        "producer_name": {
+          "raw_value": "MERICQ La Rochelle",
+          "normalized_value": "MERICQ La Rochelle",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "MERICQ La Rochelle"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "production_method": {
+          "raw_value": "PECHE EN ATLANTIQUE NORD EST",
+          "normalized_value": "wild_caught",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "PECHE EN ATLANTIQUE NORD EST"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "scientific_name": {
+          "raw_value": "SCOMBER SCOMBRUS",
+          "normalized_value": "SCOMBER SCOMBRUS",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "SCOMBER SCOMBRUS"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "A conserver entre 0 et +2 C",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "A conserver entre 0 et +2 C"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "3,000",
+          "normalized_value": "3.000 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Poids Net en Kg 3,000"
+          ],
+          "unit": "kg",
+          "precision": "0.001 kg"
+        }
+      }
+    },
+    {
+      "key": "cabillaud",
+      "city": "MARSEILLE",
+      "file": "cabillaud.jpg",
+      "sha256": "824c60d0abfa320bb3918cc9dc0d75fe9d00e4ada35e3ec849e87bfaabeb425d",
+      "excluded_observations": [],
+      "fields": {
+        "FAO_area": {
+          "raw_value": "FAO area 27",
+          "normalized_value": "FAO area 27",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Wild-caught in FAO area 27"
+          ],
+          "unit": null,
+          "precision": "printed_designation"
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "L-6152",
+          "normalized_value": "L-6152",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Batch: L-6152"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "Cabillaud - Dos de cabillaud",
+          "normalized_value": "Cabillaud - Dos de cabillaud",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Cabillaud - Dos de cabillaud"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "ambiguous",
+          "evidence": [],
+          "unit": null,
+          "precision": null,
+          "reason": "The small multilingual gear text is not reliable enough for this curated truth set."
+        },
+        "gtin": {
+          "raw_value": "01M101305",
+          "normalized_value": null,
+          "source": "printed_barcode",
+          "status": "ambiguous",
+          "evidence": [
+            "01M101305"
+          ],
+          "unit": null,
+          "precision": null,
+          "reason": "The human-readable barcode line is damaged or non-numeric."
+        },
+        "health_mark": {
+          "raw_value": "IS A-003 EFTA",
+          "normalized_value": "IS A-003 EFTA",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "IS A-003 EFTA"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": "ICELAND",
+          "normalized_value": "ICELAND",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "PRODUCT OF ICELAND"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "packaging_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "producer_name": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "production_method": {
+          "raw_value": "Wild-caught in FAO area 27",
+          "normalized_value": "wild_caught",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Wild-caught in FAO area 27"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "scientific_name": {
+          "raw_value": "Gadus Morhua",
+          "normalized_value": "Gadus Morhua",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Gadus Morhua"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "Keep stored below 2° C - À conserver à 0-2°C",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Keep stored below 2° C - À conserver à 0-2°C"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "3.0 kg",
+          "normalized_value": "3.0 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Net Weight 3.0 kg"
+          ],
+          "unit": "kg",
+          "precision": "0.1 kg"
+        }
+      }
+    },
+    {
+      "key": "espadon",
+      "city": "MARSEILLE",
+      "file": "espadon-longe.jpg",
+      "sha256": "97416cce841dc9ebccae3367a34d31bc9ab72bbd3ba86a443c56a4f699ebe17a",
+      "excluded_observations": [],
+      "fields": {
+        "FAO_area": {
+          "raw_value": "27.VIII",
+          "normalized_value": "27.VIII",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Peche en Atlantique Nord Est 27.VIII"
+          ],
+          "unit": null,
+          "precision": "printed_designation"
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "107083 - 21526",
+          "normalized_value": "107083 - 21526",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Lot: 107083 - 21526"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "ESPADON Longe",
+          "normalized_value": "ESPADON Longe",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "ESPADON Longe"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": "12/08/26",
+          "normalized_value": "2026-08-12",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "DLC 12/08/26"
+          ],
+          "unit": null,
+          "precision": "day"
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": "Palangres calées",
+          "normalized_value": "Palangres calées",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "LLS-Palangres calées"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "gtin": {
+          "raw_value": "(01)93000502900206",
+          "normalized_value": null,
+          "source": "printed_barcode",
+          "status": "ambiguous",
+          "evidence": [
+            "(01)93000502900206"
+          ],
+          "unit": null,
+          "precision": null,
+          "reason": "The printed GTIN fails its check digit and requires human verification."
+        },
+        "health_mark": {
+          "raw_value": "FR 34-108-593 CE",
+          "normalized_value": "FR 34-108-593 CE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "FR 34-108-593 CE"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "packaging_date": {
+          "raw_value": "03/08/26",
+          "normalized_value": "2026-08-03",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Conditionné le: 03/08/26"
+          ],
+          "unit": null,
+          "precision": "day"
+        },
+        "producer_name": {
+          "raw_value": "MEDI-PECHE SET",
+          "normalized_value": "MEDI-PECHE SET",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "MEDI-PECHE SET"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "production_method": {
+          "raw_value": "Peche en Atlantique Nord Est 27.VIII",
+          "normalized_value": "wild_caught",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Peche en Atlantique Nord Est 27.VIII"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "scientific_name": {
+          "raw_value": "Xiphias gladius",
+          "normalized_value": "Xiphias gladius",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Xiphias gladius"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "A conserver entre 0° et 2°",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "A conserver entre 0° et 2°"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "4,500Kg",
+          "normalized_value": "4.500 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "4,500Kg"
+          ],
+          "unit": "kg",
+          "precision": "0.001 kg"
+        }
+      }
+    },
+    {
+      "key": "encornet",
+      "city": "MARSEILLE",
+      "file": "encornet-rouge.jpg",
+      "sha256": "55b8dca4bca1ffbd5b3e8790724bb77a98b0df57e1dae531db5660b4b434902b",
+      "excluded_observations": [
+        "Date d'expédition 03/08/2026 is not a packaging date."
+      ],
+      "fields": {
+        "FAO_area": {
+          "raw_value": "FAO 37.1",
+          "normalized_value": "FAO 37.1",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pêché en Mer Méditerranée zone FAO 37.1"
+          ],
+          "unit": null,
+          "precision": "printed_designation"
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "MM215",
+          "normalized_value": "MM215",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Lot N° : MM215"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "Encornet rouge",
+          "normalized_value": "Encornet rouge",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Encornet rouge"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": "Chaluts de fond à panneaux OTB",
+          "normalized_value": "Chaluts de fond à panneaux OTB",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Chaluts de fond à panneaux OTB"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "gtin": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "health_mark": {
+          "raw_value": "FRANCE 34.108.534 C.E.",
+          "normalized_value": "FRANCE 34.108.534 C.E.",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "FRANCE 34.108.534 C.E."
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "packaging_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "producer_name": {
+          "raw_value": "MICHEL MAREE",
+          "normalized_value": "MICHEL MAREE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "MICHEL MAREE"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "production_method": {
+          "raw_value": "Pêché en Mer Méditerranée zone FAO 37.1",
+          "normalized_value": "wild_caught",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Pêché en Mer Méditerranée zone FAO 37.1"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": "U ENSEIGNE VENDARGUES",
+          "normalized_value": "U ENSEIGNE VENDARGUES",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "U ENSEIGNE VENDARGUES"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "scientific_name": {
+          "raw_value": "Illex coindetii",
+          "normalized_value": "Illex coindetii",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Illex coindetii"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "A Conserver entre 0 °c et 2 °c",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "A Conserver entre 0 °c et 2 °c"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "3,000 Kg",
+          "normalized_value": "3.000 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Poids net : 3,000 Kg"
+          ],
+          "unit": "kg",
+          "precision": "0.001 kg"
+        }
+      }
+    },
+    {
+      "key": "saumon",
+      "city": "FREJUS",
+      "file": "saumon.jpg",
+      "sha256": "e54b039323d80925dc28f771f57b0dc78b2661b7da4a774df35524c9c498edde",
+      "excluded_observations": [
+        "Date abattage : 10/06/26 is a slaughter date, not a packaging date.",
+        "The date printed after the lot is not labelled as an expiry date."
+      ],
+      "fields": {
+        "FAO_area": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "allergens": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "batch_number": {
+          "raw_value": "26167",
+          "normalized_value": "26167",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Lot : 26167"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "commercial_designation": {
+          "raw_value": "SAUMON FJORD NV 4/5",
+          "normalized_value": "SAUMON FJORD NV 4/5",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "SAUMON FJORD NV 4/5"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "expiry_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "fishing_gear_or_farming_method": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "gtin": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "health_mark": {
+          "raw_value": "FR 85.100.002 CE",
+          "normalized_value": "FR 85.100.002 CE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "FR 85.100.002 CE"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "origin_country": {
+          "raw_value": "Norvege",
+          "normalized_value": "Norvege",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Eleve en Norvege"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "packaging_date": {
+          "raw_value": null,
+          "normalized_value": null,
+          "source": null,
+          "status": "absent",
+          "evidence": [],
+          "unit": null,
+          "precision": null
+        },
+        "producer_name": {
+          "raw_value": "Fil Mer",
+          "normalized_value": null,
+          "source": "printed_text",
+          "status": "ambiguous",
+          "evidence": [
+            "Fil Mer"
+          ],
+          "unit": null,
+          "precision": null,
+          "reason": "The operator is printed, but its producer role is not stated."
+        },
+        "production_method": {
+          "raw_value": "Eleve en Norvege",
+          "normalized_value": "farmed",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Eleve en Norvege"
+          ],
+          "unit": null,
+          "precision": "controlled_enum"
+        },
+        "reseller_brand": {
+          "raw_value": "COOPERATIVE U VENDARGUE",
+          "normalized_value": "COOPERATIVE U VENDARGUE",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "COOPERATIVE U VENDARGUE"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "scientific_name": {
+          "raw_value": "Salmo salar",
+          "normalized_value": "Salmo salar",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Salmo salar"
+          ],
+          "unit": null,
+          "precision": "verbatim"
+        },
+        "storage_temperature": {
+          "raw_value": "A conserver entre 0 et 2°C",
+          "normalized_value": "0 à 2 °C",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "A conserver entre 0 et 2°C"
+          ],
+          "unit": "°C",
+          "precision": "range"
+        },
+        "weight": {
+          "raw_value": "8.830 kg",
+          "normalized_value": "8.830 kg",
+          "source": "printed_text",
+          "status": "present",
+          "evidence": [
+            "Poids net : 8.830 kg"
+          ],
+          "unit": "kg",
+          "precision": "0.001 kg"
+        }
+      }
+    }
+  ]
+}

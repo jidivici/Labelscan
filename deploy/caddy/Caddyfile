@@ -1,0 +1,104 @@
+{
+	auto_https disable_redirects
+	admin off
+	servers {
+		# Cloudflare IP ranges verified 2026-09-14 against cloudflare.com/ips-v4
+		# and /ips-v6. Never trust CF-Connecting-IP from arbitrary peers.
+		trusted_proxies static 173.245.48.0/20 103.21.244.0/22 103.22.200.0/22 103.31.4.0/22 141.101.64.0/18 108.162.192.0/18 190.93.240.0/20 188.114.96.0/20 197.234.240.0/22 198.41.128.0/17 162.158.0.0/15 104.16.0.0/13 104.24.0.0/14 172.64.0.0/13 131.0.72.0/22 2400:cb00::/32 2606:4700::/32 2803:f800::/32 2405:b500::/32 2405:8100::/32 2a06:98c0::/29 2c0f:f248::/32
+		client_ip_headers CF-Connecting-IP
+		trusted_proxies_strict
+		timeouts {
+			read_body 30s
+			read_header 10s
+			write 30s
+			idle 2m
+		}
+		max_header_size 32KB
+		strict_sni_host on
+	}
+}
+
+(access_logs) {
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers delete
+				resp_headers delete
+				request>uri regexp "[?].*$" ""
+			}
+		}
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+}
+
+# Container-local health endpoint. It is bound to loopback only and is not
+# published by Compose or reachable from another container.
+http://127.0.0.1:2018 {
+	respond /health 200
+}
+
+http://label-scan.fr, http://www.label-scan.fr {
+	import access_logs
+	redir https://label-scan.fr{uri} permanent
+}
+
+http:// {
+	import access_logs
+	respond 421
+}
+
+https://www.label-scan.fr {
+	import access_logs
+	import security_headers
+	redir https://label-scan.fr{uri} permanent
+}
+
+https://label-scan.fr {
+	import access_logs
+	import security_headers
+	encode zstd gzip
+
+	@root path /
+	redir @root /backoffice/o/labelscan/ permanent
+
+	@backoffice_without_slash path /backoffice
+	redir @backoffice_without_slash /backoffice/ permanent
+
+	# The application accepts a 10 MiB label image. The extra MiB covers the
+	# multipart envelope while rejecting oversized unauthenticated uploads at
+	# the edge before they consume API resources.
+	@oversized_upload {
+		method POST
+		path /v1/ingestions
+		# Caddy may evaluate matcher modules before method/path matching. Guard
+		# the conversion inside CEL so requests without Content-Length (including
+		# every ordinary GET) cannot fail with a proxy-generated HTTP 500.
+		expression `{http.request.header.Content-Length} != "" && int({http.request.header.Content-Length}) > 11534336`
+	}
+	respond @oversized_upload 413
+
+	request_body {
+		max_size 11MiB
+	}
+
+	reverse_proxy api:8000 {
+		# Send exactly the address resolved from the trusted peer. The API trusts
+		# only its internal proxy; it must not rate-limit Cloudflare's shared IP.
+		header_up X-Forwarded-For {client_ip}
+		# The edge owns these headers on every HTTPS response, including local
+		# redirects. Remove application copies before setting the canonical value.
+		header_down -Strict-Transport-Security
+		header_down -X-Content-Type-Options
+		header_down -Referrer-Policy
+	}
+}

@@ -1,0 +1,84 @@
+# G-ARCH — dependency-boundary enforcement (PG-0).
+# Run with `lint-imports` (import-linter). CI fails the build on any violation.
+# Enforces the dependency-direction law from ARCHITECTURE.md §5:
+#   adapters -> application -> domain   (dependencies point inward; domain depends on nothing)
+#   bounded contexts are independent (cross-context only via events/IDs, never imports)
+#   the domain layer imports no framework / DB / provider / platform code.
+
+[importlinter]
+root_package = labelscan
+# Required so `forbidden` contracts can name external packages (sqlalchemy, etc.)
+# and actually be enforced — without this, those contracts are skipped.
+include_external_packages = True
+
+[importlinter:contract:layering]
+name = Hexagonal layering within every context (adapters > application > domain)
+type = layers
+layers =
+    adapters
+    application
+    domain
+containers =
+    labelscan.contexts.ingestion
+    labelscan.contexts.compliance
+    labelscan.contexts.traceability
+    labelscan.contexts.haccp
+    labelscan.contexts.audit
+    labelscan.contexts.identity
+
+[importlinter:contract:context-independence]
+name = Bounded contexts must not import one another (integrate via events/IDs only)
+type = independence
+modules =
+    labelscan.contexts.ingestion
+    labelscan.contexts.compliance
+    labelscan.contexts.traceability
+    labelscan.contexts.haccp
+    labelscan.contexts.audit
+    labelscan.contexts.identity
+
+[importlinter:contract:domain-purity]
+name = Domain layer depends on nothing (no frameworks, DB, providers, platform, or adapters)
+type = forbidden
+source_modules =
+    labelscan.contexts.ingestion.domain
+    labelscan.contexts.compliance.domain
+    labelscan.contexts.traceability.domain
+    labelscan.contexts.haccp.domain
+    labelscan.contexts.audit.domain
+    labelscan.contexts.identity.domain
+forbidden_modules =
+    labelscan.platform
+    labelscan.app
+    sqlalchemy
+    alembic
+    psycopg
+    fastapi
+    httpx
+    pydantic
+allow_indirect_imports = false
+
+[importlinter:contract:ingestion-decoupled-from-worker]
+name = Ingestion (producer) must not import the outbox relay/worker or consumers (it only writes outbox rows)
+type = forbidden
+source_modules =
+    labelscan.contexts.ingestion
+forbidden_modules =
+    labelscan.platform.outbox
+
+[importlinter:contract:application-purity]
+name = Application layer may use its own domain + ports, but not frameworks/DB/providers/adapters
+type = forbidden
+source_modules =
+    labelscan.contexts.ingestion.application
+    labelscan.contexts.compliance.application
+    labelscan.contexts.traceability.application
+    labelscan.contexts.haccp.application
+    labelscan.contexts.audit.application
+    labelscan.contexts.identity.application
+forbidden_modules =
+    sqlalchemy
+    alembic
+    psycopg
+    fastapi
+    httpx

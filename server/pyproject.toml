@@ -1,0 +1,74 @@
+[project]
+name = "labelscan-server"
+version = "0.0.1"
+description = "LabelScan — HACCP seafood traceability backend (modular monolith). PG-0/PG-1 foundations."
+requires-python = ">=3.11"
+dependencies = [
+    "sqlalchemy>=2.0",
+    "greenlet>=3.0",  # Explicit for cross-platform hashed locks (Linux CPython).
+    "alembic>=1.13",
+    "psycopg[binary]>=3.1",
+    "fastapi>=0.115",
+    "pydantic>=2.0",
+    "python-multipart>=0.0.9",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "anthropic>=0.40",
+    "pyjwt>=2.8",
+    "boto3>=1.35",
+    "pillow>=12.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "import-linter>=2.0",
+    "ruff>=0.6",
+    "pip-audit>=2.9",
+    "pip>=26.2.1",  # pip-audit/pip-api need pip; keep the audited toolchain explicit.
+]
+
+# src layout: the importable package is `labelscan` under src/.
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra -q"
+
+# --- Ruff: general lint + a coarse safety net banning provider/framework imports anywhere
+#     they have no business. The authoritative boundary check is import-linter (G-ARCH). ---
+[tool.ruff]
+src = ["src"]
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "S608", "TID"]
+ignore = ["E501"]  # Legacy SQL/prompts exceed 88 chars; formatting is not a security gate.
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S608"]
+"migrations/**" = ["S608"]
+# These repositories interpolate only fixed column fragments selected in code;
+# all caller-controlled values remain SQLAlchemy bind parameters.
+"src/labelscan/contexts/haccp/adapters/http/read_router.py" = ["S608"]
+"src/labelscan/contexts/haccp/adapters/sql_alert_repository.py" = ["S608"]
+"src/labelscan/contexts/identity/adapters/sql_store_repository.py" = ["S608"]
+"src/labelscan/contexts/identity/adapters/sql_user_repository.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/extraction_consumer.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/http/read_router.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/sql_confirm_repository.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/sql_extraction_retry_repository.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/sql_field_override_repository.py" = ["S608"]
+"src/labelscan/contexts/ingestion/adapters/sql_review_repository.py" = ["S608"]
+"src/labelscan/contexts/traceability/adapters/sql_catalog_repository.py" = ["S608"]
+
+[tool.ruff.lint.flake8-tidy-imports]
+ban-relative-imports = "all"

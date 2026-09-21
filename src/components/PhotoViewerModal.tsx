@@ -1,0 +1,238 @@
+/**
+ * PhotoViewerModal — full-screen photo viewer (workflow v1, §6.3).
+ *
+ * Lets the operator inspect the label photo at full resolution: pinch to zoom
+ * (clamped ×1–5), pan while zoomed, double-tap to toggle zoom, tap the close
+ * button to dismiss. Opens from the cover-cropped photo card in Review and the
+ * article detail — the crop there never loses content because THIS view always
+ * shows the full photo (`resizeMode="contain"`).
+ *
+ * No new dependency: react-native-gesture-handler + react-native-reanimated are
+ * already in the app (ArticleCard's swipe-to-delete). RN's `Modal` renders its
+ * content in a separate native root, so gesture-handler needs its OWN
+ * `GestureHandlerRootView` inside the modal (the app-root one at App.tsx does
+ * not cover it) — a known requirement, not a workaround.
+ */
+
+import React, { useEffect, useState } from 'react';
+import { Modal, Platform, Pressable, StatusBar, StyleSheet, View, useWindowDimensions, type ImageProps } from 'react-native';
+import { GestureHandlerRootView, GestureDetector, Gesture } from 'react-native-gesture-handler';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+import { colors, spacing } from '../theme';
+import { photoDisplayRotation, type PhotoBaseRotationDegrees } from './photoOrientation';
+
+const MIN_SCALE = 1;
+const MAX_SCALE = 5;
+const DOUBLE_TAP_SCALE = 2.5;
+const INITIAL_SCALE = 1;
+
+export interface PhotoViewerModalProps {
+  visible: boolean;
+  photoUri: string | null | undefined;
+  headers?: Record<string, string>;
+  onImageError?: ImageProps['onError'];
+  allowHalfTurn?: boolean;
+  halfTurn?: boolean;
+  onHalfTurn?: () => void;
+  /** -90 for historical raw captures; 0 for crops already rotated upright. */
+  baseRotationDegrees?: PhotoBaseRotationDegrees;
+  onClose: () => void;
+}
+
+export function PhotoViewerModal({
+  visible,
+  photoUri,
+  headers,
+  onImageError,
+  allowHalfTurn = false,
+  halfTurn = false,
+  onHalfTurn,
+  baseRotationDegrees = -90,
+  onClose,
+}: PhotoViewerModalProps) {
+  const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isAndroid = Platform.OS === 'android';
+  const [modalSize, setModalSize] = useState<{ width: number; height: number } | null>(null);
+  // An Android dialog can include the system bars while the activity's window
+  // dimensions exclude them. Measure that dialog instead of centering its image
+  // within the shorter screen underneath. Keep iOS's existing geometry intact.
+  const viewerWidth = isAndroid && modalSize ? modalSize.width : windowWidth;
+  const viewerHeight = isAndroid && modalSize ? modalSize.height : windowHeight;
+  const quarterTurn = baseRotationDegrees === -90;
+  const displayRotation = photoDisplayRotation(baseRotationDegrees, halfTurn);
+  const scale = useSharedValue(INITIAL_SCALE);
+  const savedScale = useSharedValue(INITIAL_SCALE);
+  const translateX = useSharedValue(0);
+  const savedTranslateX = useSharedValue(0);
+  const translateY = useSharedValue(0);
+  const savedTranslateY = useSharedValue(0);
+
+  const reset = () => {
+    scale.value = withTiming(INITIAL_SCALE);
+    savedScale.value = INITIAL_SCALE;
+    translateX.value = withTiming(0);
+    savedTranslateX.value = 0;
+    translateY.value = withTiming(0);
+    savedTranslateY.value = 0;
+  };
+
+  // Every open starts at its natural scale and centered, without carrying
+  // zoom/pan state over from the previous photo.
+  useEffect(() => {
+    if (visible) reset();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, photoUri, isAndroid ? viewerWidth : undefined, isAndroid ? viewerHeight : undefined]);
+
+  const pinch = Gesture.Pinch().onUpdate((e) => {
+    scale.value = Math.min(Math.max(savedScale.value * e.scale, MIN_SCALE), MAX_SCALE);
+  }).onEnd(() => {
+    savedScale.value = scale.value;
+    if (scale.value <= MIN_SCALE) {
+      translateX.value = withTiming(0);
+      translateY.value = withTiming(0);
+      savedTranslateX.value = 0;
+      savedTranslateY.value = 0;
+    }
+  });
+
+  const pan = Gesture.Pan().onUpdate((e) => {
+    // Panning only makes sense once zoomed in — otherwise the image just re-centers.
+    if (savedScale.value <= MIN_SCALE) return;
+    translateX.value = savedTranslateX.value + e.translationX;
+    translateY.value = savedTranslateY.value + e.translationY;
+  }).onEnd(() => {
+    savedTranslateX.value = translateX.value;
+    savedTranslateY.value = translateY.value;
+  });
+
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .onEnd(() => {
+      const target = savedScale.value > INITIAL_SCALE ? INITIAL_SCALE : DOUBLE_TAP_SCALE;
+      scale.value = withTiming(target);
+      savedScale.value = target;
+      translateX.value = withTiming(0);
+      translateY.value = withTiming(0);
+      savedTranslateX.value = 0;
+      savedTranslateY.value = 0;
+    });
+
+  const composed = Gesture.Simultaneous(pinch, pan);
+  const gesture = Gesture.Race(doubleTap, composed);
+
+  // Keep pan translations in screen coordinates. React Native composes transform
+  // entries from right to left, so putting the rotation first also rotates the pan
+  // axes (a horizontal drag moves a quarter-turned photo vertically). Applying the
+  // translations first keeps drag direction natural while preserving the exact same
+  // base + manager-approved rotation as every thumbnail/card.
+  const imageStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: translateX.value },
+      { translateY: translateY.value },
+      ...(displayRotation === '0deg' ? [] : [{ rotate: displayRotation }]),
+      { scale: scale.value },
+    ],
+  }));
+
+  if (!photoUri) return null;
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={!isAndroid}
+      animationType="fade"
+      onRequestClose={onClose}
+      {...(isAndroid ? {
+        statusBarTranslucent: true,
+        navigationBarTranslucent: true,
+        backdropColor: '#000',
+      } : {})}
+    >
+      <GestureHandlerRootView
+        style={styles.root}
+        onLayout={isAndroid ? (event) => {
+          const { width, height } = event.nativeEvent.layout;
+          if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return;
+          setModalSize((previous) => previous?.width === width && previous.height === height
+            ? previous
+            : { width, height });
+        } : undefined}
+      >
+        {isAndroid && visible && <StatusBar barStyle="light-content" />}
+        <GestureDetector gesture={gesture}>
+          <Animated.Image
+            source={{ uri: photoUri, headers }}
+            onError={onImageError}
+            style={[
+              styles.image,
+              {
+                left: quarterTurn ? (viewerWidth - viewerHeight) / 2 : 0,
+                top: quarterTurn ? (viewerHeight - viewerWidth) / 2 : 0,
+                width: quarterTurn ? viewerHeight : viewerWidth,
+                height: quarterTurn ? viewerWidth : viewerHeight,
+              },
+              imageStyle,
+            ]}
+            resizeMode="contain"
+          />
+        </GestureDetector>
+        <Pressable
+          onPress={onClose}
+          hitSlop={12}
+          style={[styles.closeButton, { top: insets.top + spacing.sm }]}
+          accessibilityRole="button"
+          accessibilityLabel="Fermer la photo"
+        >
+          <View style={styles.closeCircle}>
+            <MaterialCommunityIcons name="close" size={22} color={colors.onPrimary} />
+          </View>
+        </Pressable>
+        {allowHalfTurn ? (
+          <Pressable
+            onPress={() => {
+              onHalfTurn?.();
+            }}
+            hitSlop={12}
+            style={[styles.rotateButton, { top: insets.top + spacing.sm }]}
+            accessibilityRole="button"
+            accessibilityLabel="Tourner la photo d’un demi-tour"
+          >
+            <View style={styles.closeCircle}>
+              <MaterialCommunityIcons name="rotate-left" size={22} color={colors.onPrimary} />
+            </View>
+          </Pressable>
+        ) : null}
+      </GestureHandlerRootView>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: '#000',
+  },
+  image: {
+    position: 'absolute',
+  },
+  closeButton: {
+    position: 'absolute',
+    right: spacing.md,
+  },
+  rotateButton: {
+    position: 'absolute',
+    right: spacing.md + 52,
+  },
+  closeCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});

@@ -1,0 +1,2 @@
+# Preserve generated PDF bytes and review them as binary artifacts.
+*.pdf binary
