@@ -24,10 +24,17 @@ RUN git init \
     && git config user.name "LabelScan Security" \
     && git config user.email "security@label-scan.fr" \
     && git commit -am "Backport Caddy security and dependency compatibility fixes" \
-    && git tag "v2.11.4+labelscan.8"
+    && git tag "v2.11.4+labelscan.9"
 
 RUN go get \
       github.com/google/cel-go@v0.29.2 \
+      go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc@v0.21.0 \
+      go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploghttp@v0.21.0 \
+      go.opentelemetry.io/otel/exporters/otlp/otlptrace@v1.45.0 \
+      go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc@v1.45.0 \
+      go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracehttp@v1.45.0 \
+      go.opentelemetry.io/otel/exporters/stdout/stdoutlog@v0.21.0 \
+      go.opentelemetry.io/otel/sdk@v1.45.0 \
       golang.org/x/crypto@v0.56.0 \
       golang.org/x/net@v0.58.0 \
       golang.org/x/text@v0.41.0 \
@@ -45,14 +52,19 @@ RUN go mod init labelscan.local/caddy-build \
     && go list -deps . > /tmp/caddy-dependencies \
     && if grep -E '^golang.org/x/crypto/openpgp(/|$)' /tmp/caddy-dependencies; then exit 1; fi \
     && CGO_ENABLED=0 go build -trimpath \
-      -ldflags='-s -w -buildid= -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4+labelscan.8' \
+      -ldflags='-s -w -buildid= -X github.com/caddyserver/caddy/v2.CustomVersion=v2.11.4+labelscan.9' \
       -o /usr/bin/caddy . \
     && go version -m /usr/bin/caddy \
       | grep -E 'github\.com/caddyserver/caddy/v2[[:space:]]+v2\.11\.4' \
     && go version -m /usr/bin/caddy \
       | grep -E 'golang\.org/x/crypto[[:space:]]+v0\.56\.0' \
     && go version -m /usr/bin/caddy \
-      | grep -E 'google\.golang\.org/grpc[[:space:]]+v1\.83\.2'
+      | grep -E 'google\.golang\.org/grpc[[:space:]]+v1\.83\.2' \
+    && go version -m /usr/bin/caddy \
+      | grep -E 'go\.opentelemetry\.io/otel/exporters/otlp/otlplog/otlploggrpc[[:space:]]+v0\.21\.0' \
+    && for module in exporters/otlp/otlptrace exporters/otlp/otlptrace/otlptracegrpc exporters/otlp/otlptrace/otlptracehttp sdk; do \
+         go version -m /usr/bin/caddy | grep -E "go[.]opentelemetry[.]io/otel/$module[[:space:]]+v1[.]45[.]0[[:space:]]" || exit 1; \
+       done
 
 
 FROM alpine:3.24.1@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
@@ -61,7 +73,7 @@ ARG LABELSCAN_VERSION=unknown
 LABEL org.opencontainers.image.title="LabelScan Caddy edge" \
       org.opencontainers.image.revision="$LABELSCAN_VERSION" \
       org.opencontainers.image.source="https://github.com/jidivici/Labelscan" \
-      org.opencontainers.image.version="2.11.4+labelscan.8"
+      org.opencontainers.image.version="2.11.4+labelscan.9"
 
 RUN apk upgrade --no-cache \
     && apk add --no-cache ca-certificates tzdata \
