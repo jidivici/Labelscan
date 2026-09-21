@@ -499,6 +499,14 @@ export function ArticleListScreen() {
         </View>
       </View>
 
+      {tradeCode === 'poissonnerie' && (
+        <Pressable accessibilityRole="button" accessibilityLabel="Ouvrir Hygiène en mode test"
+          onPress={() => navigation.navigate('HygieneWorkflow', { day: selectedDay })}
+          style={{ marginHorizontal: 16, marginBottom: 8, padding: 14, borderRadius: 12, backgroundColor: colors.primaryContainer }}>
+          <Text style={{ color: colors.primary, fontWeight: '600', fontSize: 15 }}>Hygiène · Test du parcours employé →</Text>
+        </Pressable>
+      )}
+
       {/* Slide-open calendar (driven by the header calendar button) — a date
           selector, never a page: picking a day swaps the list content below. */}
       <Animated.View

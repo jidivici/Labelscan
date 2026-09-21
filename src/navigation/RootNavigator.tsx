@@ -17,6 +17,7 @@ import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, View } from '
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import { HygieneWorkflowScreen } from '../screens/HygieneWorkflowScreen';
 import { CameraScreen } from '../screens/CameraScreen';
 import { ReviewScreen } from '../screens/ReviewScreen';
 import { ArticleListScreen } from '../screens/ArticleListScreen';
@@ -37,6 +38,7 @@ export type ReviewParams = { pendingScanId: string };
 /** One flat root stack. Camera is the capture module; Review opens from Articles. */
 export type RootStackParamList = {
   ArticleList: undefined;
+  HygieneWorkflow: { day?: string } | undefined;
   /** Full immutable record (the "lot") for one saved article, by local id. */
   ArticleDetail: { articleId: string };
   Camera: { recapture?: boolean } | undefined;
@@ -83,6 +85,7 @@ function AppNavigator() {
       }}
     >
       <RootStack.Screen name="ArticleList" component={ArticleListScreen} />
+      <RootStack.Screen name="HygieneWorkflow" component={HygieneWorkflowScreen} />
       <RootStack.Screen name="ArticleDetail" component={ArticleDetailLazy} />
       <RootStack.Screen name="Camera" component={CameraScreen} />
       <RootStack.Screen

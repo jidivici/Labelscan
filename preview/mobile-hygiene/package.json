@@ -1,0 +1,8 @@
+{
+  "name": "labelscan-mobile-hygiene-test",
+  "private": true,
+  "type": "module",
+  "scripts": {"dev":"vite --host 127.0.0.1", "build":"vite build", "preview":"vite preview --host 127.0.0.1"},
+  "dependencies": {"react":"19.2.3", "react-dom":"19.2.3", "react-native-web":"^0.21.2"},
+  "devDependencies": {"vite":"^7.0.0", "@vitejs/plugin-react":"^5.0.0"}
+}
