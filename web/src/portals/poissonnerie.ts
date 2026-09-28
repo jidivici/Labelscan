@@ -74,7 +74,6 @@ export const poissonneriePortal = {
   secondaryColumns: [
     { key: 'scientific-name', label: 'Nom scientifique', source: 'scientific_name' },
     { key: 'fao-area', label: 'Zone FAO', source: 'fao_area_code' },
-    { key: 'use-by', label: 'À consommer avant', source: 'use_by', format: 'date' },
   ],
   labels: {
     pageTitle: 'Tableau de bord poissonnerie',

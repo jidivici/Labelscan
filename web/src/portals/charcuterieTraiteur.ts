@@ -39,7 +39,6 @@ export const charcuterieTraiteurPortal = {
         { key: 'batch_number', label: 'Numéro de lot' },
         { key: 'origin_country', label: 'Pays d’origine' },
         { key: 'health_mark', label: 'Estampille sanitaire' },
-        { key: 'gtin', label: 'Code-barres (GTIN)' },
       ],
     },
     {
@@ -48,7 +47,6 @@ export const charcuterieTraiteurPortal = {
       fields: [
         { key: 'preparation_date', label: 'Date de préparation', format: 'date' },
         { key: 'packaging_date', label: 'Date de conditionnement', format: 'date' },
-        { key: 'expiry_date', label: 'DLC / DDM', format: 'date' },
         { key: 'conditioning_type', label: 'Conditionnement' },
         { key: 'storage_mode', label: 'Chaîne de conservation' },
         { key: 'storage_temperature', label: 'Température de conservation', format: 'temperature' },
@@ -85,11 +83,10 @@ export const charcuterieTraiteurPortal = {
   ],
   secondaryColumns: [
     { key: 'packaging-date', label: 'Conditionné le', source: 'packaging_date', format: 'date' },
-    { key: 'expiry', label: 'DLC / DDM', source: 'use_by', format: 'date' },
   ],
   labels: {
     pageTitle: 'Réceptions Charcuterie–Traiteur',
-    pageDescription: 'Consultez dans un même portail les familles, compositions, DLC et chaînes de conservation.',
+    pageDescription: 'Consultez dans un même portail les familles, compositions et chaînes de conservation.',
     searchPlaceholder: 'Produit, famille, lot, fabricant ou fournisseur…',
     emptyTitle: 'Aucune réception Charcuterie–Traiteur',
     emptyDescription: 'Aucun produit transformé ou préparé ne correspond aux critères professionnels sélectionnés.',

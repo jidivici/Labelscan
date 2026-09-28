@@ -78,15 +78,15 @@ Le contrat actif est la version 2. Il partage douze champs et ajoute les champs 
 
 | Profil | Champs | Informations spécifiques |
 |---|---:|---|
-| Poissonnerie | 16 | Nom scientifique, zone FAO, méthode de production, engin de pêche ou méthode d'élevage |
-| Boucherie | 21 | Espèce et catégorie animale, morceau, pays de naissance, élevage, abattage et découpe, agréments d'abattage et de découpe |
-| Charcuterie / Traiteur | 21 | Famille, fabricant, ingrédients, additifs, préparation, conditionnement, mode de conservation, utilisation et réchauffage |
+| Poissonnerie | 14 | Nom scientifique, zone FAO, méthode de production, engin de pêche ou méthode d'élevage |
+| Boucherie | 19 | Espèce et catégorie animale, morceau, pays de naissance, élevage, abattage et découpe, agréments d'abattage et de découpe |
+| Charcuterie / Traiteur | 19 | Famille, fabricant, ingrédients, additifs, préparation, conditionnement, mode de conservation, utilisation et réchauffage |
 
-Les champs communs sont la désignation commerciale, le producteur, la marque revendeur, le lot, le pays d'origine, les dates de péremption et de conditionnement, la température de conservation, les allergènes, la marque sanitaire, le poids et le GTIN.
+Les champs communs sont la désignation commerciale, le producteur, la marque revendeur, le lot, le pays d'origine, la date de conditionnement, la température de conservation, les allergènes, la marque sanitaire et le poids. Le profil V3 retire la DLC et le GTIN des nouveaux scans ; les profils V1/V2 et leurs valeurs historiques sont conservés.
 
 Le serveur définit les noms et types canoniques. Les clients présentent les libellés métier et les groupes de champs en français. Le code `charcuterie_traiteur` correspond à un seul profil combiné.
 
-Les dates normalisées utilisent `YYYY-MM-DD`. Le poids accepte `g` et `kg`. Le GTIN couvre les longueurs 8, 12, 13 et 14 avec validation. La méthode de production distingue `wild_caught` et `farmed`.
+Les dates normalisées utilisent `YYYY-MM-DD`. Le poids accepte `g` et `kg`. La méthode de production distingue `wild_caught` et `farmed`.
 
 L'ingestion conserve le code et la version du profil au moment de la capture. Le contrat historique v1 reste résoluble pour ses données ; il comprend le champ prix, retiré de la v2.
 
@@ -132,7 +132,7 @@ Chaque champ reste visible. L'opérateur peut conserver une proposition, la corr
 | Décision humaine | Valeur renseignée ou `NC` explicite |
 | Brouillon | Reprise locale de la saisie avant finalisation |
 
-Les contrôles du formulaire portent notamment sur les dates, GTIN, méthodes de production et champs complétés. Les suggestions d'allergènes en poissonnerie sont présentées à l'opérateur pour sélection.
+Les contrôles du formulaire portent notamment sur les dates de conditionnement, méthodes de production et champs complétés. Les suggestions d'allergènes en poissonnerie sont présentées à l'opérateur pour sélection.
 
 La finalisation transmet l'ensemble exact des champs du profil. Le serveur vérifie la complétude, crée une nouvelle extraction dont les valeurs sont de source humaine, enregistre la rotation et place l'ingestion à l'état `confirmed`.
 

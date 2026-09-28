@@ -2,7 +2,7 @@
  * Versioned mobile presentation contracts for the three supported trades.
  *
  * The server remains authoritative for the operator's assignment. These constants
- * only describe how the SDK-54 client renders and reviews the trade code received
+ * only describe how the mobile client renders and reviews the trade code received
  * at login/refresh; the client never chooses or sends a portal with an ingestion.
  */
 
@@ -24,7 +24,7 @@ export interface FieldGroup {
 export interface BusinessProfile {
   code: TradeCode;
   displayName: string;
-  version: '2';
+  version: '2' | '3';
   groups: readonly FieldGroup[];
   fields: readonly string[];
   requiredFields: readonly string[];
@@ -46,7 +46,7 @@ function profile(
   };
 }
 
-export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
+const LEGACY_BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
   poissonnerie: profile(
     'poissonnerie',
     'Poissonnerie',
@@ -177,6 +177,26 @@ export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
   ),
 };
 
+function currentProfile(legacy: BusinessProfile): BusinessProfile {
+  const groups = legacy.groups.map((group) => ({
+    ...group,
+    fields: group.fields.filter((field) => !['expiry_date', 'gtin'].includes(field)),
+  }));
+  return {
+    ...legacy,
+    version: '3',
+    groups,
+    fields: groups.flatMap((group) => group.fields),
+    requiredFields: legacy.requiredFields.filter((field) => field !== 'expiry_date'),
+  };
+}
+
+export const BUSINESS_PROFILES: Readonly<Record<TradeCode, BusinessProfile>> = {
+  poissonnerie: currentProfile(LEGACY_BUSINESS_PROFILES.poissonnerie),
+  boucherie: currentProfile(LEGACY_BUSINESS_PROFILES.boucherie),
+  charcuterie_traiteur: currentProfile(LEGACY_BUSINESS_PROFILES.charcuterie_traiteur),
+};
+
 export function isTradeCode(value: unknown): value is TradeCode {
   return typeof value === 'string' && value in BUSINESS_PROFILES;
 }
@@ -185,8 +205,9 @@ export function isTradeCode(value: unknown): value is TradeCode {
  * Resolve presentation metadata. Missing/unknown historical metadata falls back to
  * the original poissonnerie profile; authentication validates new sessions strictly.
  */
-export function businessProfileFor(tradeCode: string | null | undefined): BusinessProfile {
-  return isTradeCode(tradeCode) ? BUSINESS_PROFILES[tradeCode] : BUSINESS_PROFILES.poissonnerie;
+export function businessProfileFor(tradeCode: string | null | undefined, version?: string | null): BusinessProfile {
+  const profiles = version === '1' || version === '2' ? LEGACY_BUSINESS_PROFILES : BUSINESS_PROFILES;
+  return isTradeCode(tradeCode) ? profiles[tradeCode] : profiles.poissonnerie;
 }
 
 const SPECIFIC_FIELD_TRADE = new Map<string, TradeCode>();

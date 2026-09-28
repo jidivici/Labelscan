@@ -16,7 +16,6 @@ export const COMMON_TRACEABILITY_SECTION: PortalDetailSection = {
   fields: [
     { key: 'batch_number', label: 'Numéro de lot' },
     { key: 'health_mark', label: 'Estampille sanitaire' },
-    { key: 'gtin', label: 'Code-barres (GTIN)' },
   ],
 };
 
@@ -25,7 +24,6 @@ export const COMMON_DATES_CONSERVATION_SECTION: PortalDetailSection = {
   title: 'Dates et conservation',
   fields: [
     { key: 'packaging_date', label: 'Date de conditionnement', format: 'date' },
-    { key: 'expiry_date', label: 'Date limite', format: 'date' },
     { key: 'storage_temperature', label: 'Température', format: 'temperature' },
     { key: 'allergens', label: 'Allergènes' },
   ],

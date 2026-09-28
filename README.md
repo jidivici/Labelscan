@@ -12,9 +12,14 @@ LabelScan accompagne la réception de produits alimentaires : une application mo
 
 ## Un parcours, de la capture au catalogue
 
-| Capturer | Structurer | Confirmer et retrouver |
-|---|---|---|
-| Photographier l'étiquette et joindre le code-barres détecté. | Lire le texte par OCR, produire des champs structurés et conserver leur provenance. | Revoir les propositions, enregistrer les valeurs humaines et consulter l'arrivage. |
+```mermaid
+flowchart LR
+    capture["Capturer l'étiquette"] --> extraction["Extraire les informations"]
+    extraction --> revue["Revoir et confirmer"]
+    revue --> catalogue["Consulter le catalogue"]
+```
+
+La photo et le code-barres détecté alimentent l'extraction OCR/IA. L'opérateur relit les propositions et confirme les valeurs ; la publication asynchrone rend ensuite l'arrivage consultable.
 
 La capture et la revue sont distinctes : le traitement continue en arrière-plan pendant que l'opérateur poursuit ses prises de vue. Trois profils adaptent les champs au métier. Le mobile sert le travail sur le terrain ; le web permet la recherche, la consultation et l'administration.
 

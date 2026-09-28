@@ -102,7 +102,7 @@ class SqlIngestionRepository(IngestionWriteRepository):
         store_id: str | None = None,
         business_portal_id: str | None = None,
         trade_code_snapshot: str = "poissonnerie",
-        trade_profile_version: str = "2",
+        trade_profile_version: str = "3",
         captured_by_user_id: str | None = None,
         principal: str,
         idempotency_key: str | None = None,

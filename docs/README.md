@@ -14,6 +14,43 @@ Comprendre le produit, démarrer le projet et retrouver les preuves dans le code
 
 Les entrées spécialisées restent courtes : [serveur](../server/README.md), [démonstration locale](../server/demo/README.md), [déploiement](../deploy/README.md).
 
+## Les 15 fichiers de la livraison documentaire
+
+L'ensemble comprend **7 Markdown, 4 PNG, 1 fichier Excalidraw, 1 contrat OpenAPI, 1 PDF et 1 générateur**. Les chemins ci-dessous sont relatifs à la racine du dépôt.
+
+### Lecture · 7 Markdown
+
+- [README.md](../README.md) — Présentation et démarrage local.
+- [docs/README.md](README.md) — Parcours de lecture et inventaire des livrables.
+- [docs/TECHNICAL-DOCUMENTATION-FR.md](TECHNICAL-DOCUMENTATION-FR.md) — Produit, architecture, données et API.
+- [docs/GUIDE-DU-DEPOT.md](GUIDE-DU-DEPOT.md) — Environnement, lecture du code, tests et repères RNCP niveau 5.
+- [server/README.md](../server/README.md) — Développement et tests du serveur.
+- [server/demo/README.md](../server/demo/README.md) — Configuration et lancement de la démonstration.
+- [deploy/README.md](../deploy/README.md) — Topologies et déroulement de la livraison.
+
+### Visuels · 4 PNG et la source Excalidraw
+
+- [docs/diagrams/01-composants.png](diagrams/01-composants.png) — Composants et échanges.
+- [docs/diagrams/02-sequence.png](diagrams/02-sequence.png) — Capture, extraction, revue et publication.
+- [docs/diagrams/03-etats.png](diagrams/03-etats.png) — États de l'ingestion.
+- [docs/diagrams/04-modele.png](diagrams/04-modele.png) — Modèle de données.
+- [docs/diagrams/labelscan.excalidraw](diagrams/labelscan.excalidraw) — Les quatre illustrations réunies sur une planche éditable.
+
+### Contrat · OpenAPI
+
+- [docs/backend/openapi.v1.yaml](backend/openapi.v1.yaml) — Routes, paramètres et schémas HTTP.
+
+### Génération · PDF et script
+
+- [output/pdf/LabelScan_Documentation_Technique.pdf](../output/pdf/LabelScan_Documentation_Technique.pdf) — Édition complète de 34 pages.
+- [scripts/build_documentation.py](../scripts/build_documentation.py) — Génération du PDF et des formats graphiques.
+
+## Repères visuels
+
+La palette sémantique retenue pour le PDF associe **vert aux usages**, **bleu à l'architecture**, **violet aux données**, **ambre à l'API** et **ardoise à la plateforme**. Les titres nomment également chaque thème.
+
+Les README conservent le style natif de GitHub : titres, liens, listes, tableaux et aperçus PNG. Le README d'accueil présente le parcours fonctionnel dans un petit diagramme Mermaid ; les quatre illustrations détaillées restent disponibles ci-dessous et dans Excalidraw.
+
 ## Schémas visibles sur GitHub
 
 Les aperçus PNG ci-dessous s'affichent directement dans GitHub. Cliquer sur une image permet de l'ouvrir en grand. Les mêmes définitions graphiques produisent le PDF vectoriel et la [planche Excalidraw éditable](diagrams/labelscan.excalidraw).
@@ -66,3 +103,11 @@ python scripts/build_documentation.py
 ```
 
 `LABELSCAN_DOC_FONT_DIR` permet de fournir le répertoire des polices et `LABELSCAN_DOC_PDFTOPPM` le chemin du convertisseur. Les sauts de page `<!-- page -->` organisent le PDF sans gêner la lecture GitHub.
+
+### Constituer le dossier complet
+
+```bash
+python scripts/build_documentation.py --package
+```
+
+Cette commande produit aussi `output/LabelScan_Documentation_Proposition.zip`, une archive des 15 fichiers listés ci-dessus. Elle conserve les chemins du dépôt : documents de lecture, sources éditables, aperçus et outil de génération. Elle n'embarque ni le code applicatif, déjà présent dans le dépôt, ni les fichiers locaux de configuration.

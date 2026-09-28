@@ -1293,6 +1293,81 @@ paths:
                 $ref: '#/components/schemas/Problem'
       security:
       - bearerAuth: []
+  /v1/hygiene/{portal_id}:
+    get:
+      summary: Get Board
+      operationId: get_board_v1_hygiene__portal_id__get
+      parameters:
+      - name: portal_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Portal Id
+      - name: day
+        in: query
+        required: false
+        schema:
+          anyOf:
+          - type: string
+            format: date
+          - type: 'null'
+          title: Day
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Board'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
+  /v1/hygiene/{portal_id}/{task_code}:
+    post:
+      summary: Record Check
+      operationId: record_check_v1_hygiene__portal_id___task_code__post
+      parameters:
+      - name: portal_id
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+          title: Portal Id
+      - name: task_code
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Task Code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CheckInput'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Board'
+        '400':
+          description: Request validation failed
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+      security:
+      - bearerAuth: []
   /v1/alerts:
     get:
       summary: List Alerts
@@ -1772,6 +1847,31 @@ components:
       - alerts
       - audit
       title: BatchView
+    Board:
+      properties:
+        day:
+          type: string
+          format: date
+          title: Day
+        today:
+          type: string
+          format: date
+          title: Today
+        portal_name:
+          type: string
+          title: Portal Name
+        tasks:
+          items:
+            $ref: '#/components/schemas/TaskView'
+          type: array
+          title: Tasks
+      type: object
+      required:
+      - day
+      - today
+      - portal_name
+      - tasks
+      title: Board
     Body_submit_ingestion_v1_ingestions_post:
       properties:
         image:
@@ -2075,6 +2175,36 @@ components:
       required:
       - new_password
       title: ChangePasswordRequest
+    CheckInput:
+      properties:
+        day:
+          type: string
+          format: date
+          title: Day
+        outcome:
+          type: string
+          enum:
+          - done
+          - issue
+          - not_applicable
+          title: Outcome
+        notes:
+          type: string
+          maxLength: 4000
+          minLength: 1
+          title: Notes
+        request_id:
+          type: string
+          format: uuid
+          title: Request Id
+      additionalProperties: false
+      type: object
+      required:
+      - day
+      - outcome
+      - notes
+      - request_id
+      title: CheckInput
     ConfirmIngestionResponse:
       properties:
         ingestion_id:
@@ -2526,6 +2656,9 @@ components:
       title: IngestionStatus
     IngestionView:
       properties:
+        trade_profile_version:
+          type: string
+          title: Trade Profile Version
         ingestion_id:
           type: string
           title: Ingestion Id
@@ -2597,6 +2730,7 @@ components:
           title: Audit
       type: object
       required:
+      - trade_profile_version
       - ingestion_id
       - status
       - image_ref
@@ -3020,6 +3154,59 @@ components:
       - portal_id
       - active
       title: SetPortalActiveRequest
+    TaskView:
+      properties:
+        code:
+          type: string
+          title: Code
+        title:
+          type: string
+          title: Title
+        instructions:
+          type: string
+          title: Instructions
+        source_pages:
+          type: string
+          title: Source Pages
+        frequency:
+          type: string
+          title: Frequency
+        optional:
+          type: boolean
+          title: Optional
+        period_start:
+          type: string
+          format: date
+          title: Period Start
+        outcome:
+          type: string
+          title: Outcome
+          default: pending
+        notes:
+          type: string
+          title: Notes
+          default: ''
+        recorded_at:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Recorded At
+        actor_id:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Actor Id
+      type: object
+      required:
+      - code
+      - title
+      - instructions
+      - source_pages
+      - frequency
+      - optional
+      - period_start
+      title: TaskView
     UpdateStoreRequest:
       properties:
         name:

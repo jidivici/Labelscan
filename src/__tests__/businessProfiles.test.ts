@@ -7,14 +7,14 @@ import {
 import { FIELD_ORDER, fieldOrderForTrade } from '../services/fieldOrder';
 import { fieldLabelFr } from '../services/fieldLabels';
 
-describe('V2 business profiles', () => {
+describe('V3 business profiles', () => {
   it.each([
-    ['poissonnerie', 16],
-    ['boucherie', 21],
-    ['charcuterie_traiteur', 21],
+    ['poissonnerie', 14],
+    ['boucherie', 19],
+    ['charcuterie_traiteur', 19],
   ] as const)('%s exposes one closed, duplicate-free contract of %i fields', (code, count) => {
     const profile = BUSINESS_PROFILES[code];
-    expect(profile.version).toBe('2');
+    expect(profile.version).toBe('3');
     expect(profile.fields).toHaveLength(count);
     expect(new Set(profile.fields).size).toBe(count);
     expect(profile.groups.flatMap((group) => group.fields)).toEqual(profile.fields);
@@ -37,12 +37,12 @@ describe('V2 business profiles', () => {
       {
         id: 'traceability',
         title: 'Traçabilité réglementaire',
-        fields: ['batch_number', 'health_mark', 'gtin'],
+        fields: ['batch_number', 'health_mark'],
       },
       {
         id: 'dates-conservation',
         title: 'Dates et conservation',
-        fields: ['packaging_date', 'expiry_date', 'storage_temperature', 'allergens'],
+        fields: ['packaging_date', 'storage_temperature', 'allergens'],
       },
       {
         id: 'commercial',
@@ -57,7 +57,7 @@ describe('V2 business profiles', () => {
     expect(fieldOrderForTrade('boucherie')).toEqual(BUSINESS_PROFILES.boucherie.fields);
   });
 
-  it('contains the V2 boucherie and charcuterie-specific review fields', () => {
+  it('contains the V3 boucherie and charcuterie-specific review fields', () => {
     expect(BUSINESS_PROFILES.boucherie.fields).toEqual(
       expect.arrayContaining([
         'animal_species',
@@ -97,5 +97,18 @@ describe('V2 business profiles', () => {
     for (const profile of Object.values(BUSINESS_PROFILES)) {
       for (const field of profile.fields) expect(fieldLabelFr(field)).not.toBe(field);
     }
+  });
+});
+
+describe('DLC / GTIN retirement', () => {
+  it.each(['poissonnerie', 'boucherie', 'charcuterie_traiteur'])('preserves the historical %s profile', (code) => {
+    const current = businessProfileFor(code);
+    const historical = businessProfileFor(code, '2');
+    expect(current.fields).not.toContain('expiry_date');
+    expect(current.fields).not.toContain('gtin');
+    expect(current.requiredFields).not.toContain('expiry_date');
+    expect(historical.fields).toEqual(expect.arrayContaining(['expiry_date', 'gtin']));
+    expect(historical.requiredFields).toContain('expiry_date');
+    expect(historical.fields.length).toBe(current.fields.length + 2);
   });
 });

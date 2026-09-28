@@ -24,7 +24,7 @@ def _manifest() -> dict:
 def test_every_demo_arrival_displays_every_profile_field_without_fabricated_values() -> (
     None
 ):
-    profile = trade_profile("poissonnerie")
+    profile = trade_profile("poissonnerie", "2")
     assert profile.version == "2"
     assert len(profile.fields) == 16
     assert "price" not in profile.fields

@@ -75,10 +75,10 @@ describe('fieldCompleteness', () => {
     expect(notCommunicatedSuggestion('')).toBeNull();
     expect(notCommunicatedSuggestion('na')).toBeNull();
   });
-  it('uses the V2 profile-specific field counts', () => {
-    expect(CANONICAL_FIELD_COUNT).toBe(16);
-    expect(canonicalFieldCount('boucherie')).toBe(21);
-    expect(canonicalFieldCount('charcuterie_traiteur')).toBe(21);
+  it('uses the V3 profile-specific field counts', () => {
+    expect(CANONICAL_FIELD_COUNT).toBe(14);
+    expect(canonicalFieldCount('boucherie')).toBe(19);
+    expect(canonicalFieldCount('charcuterie_traiteur')).toBe(19);
   });
 
   it('filledCountFromRun counts only canonical, present, non-blank fields', () => {
@@ -102,13 +102,13 @@ describe('fieldCompleteness', () => {
 
     // The home-card bubble must mirror the populated Review form. Confirmation is
     // still required before saving, but each non-empty value counts as filled.
-    expect(filledCountFromRun(fields)).toBe(4);
-    expect(filledCountFromRun(fields, { commercial_designation: 'Cabillaud' })).toBe(4);
+    expect(filledCountFromRun(fields)).toBe(3);
+    expect(filledCountFromRun(fields, { commercial_designation: 'Cabillaud' })).toBe(3);
     expect(filledCountFromRun(fields, {
       commercial_designation: 'Cabillaud',
       batch_number: 'LOT-42',
       gtin: NOT_COMMUNICATED_VALUE,
-    })).toBe(4);
+    })).toBe(3);
   });
 
   it('filledCountFromRun is null/empty-safe', () => {
@@ -148,22 +148,22 @@ describe('fieldCompleteness', () => {
     expect(isProductNameKnownFromInterim(null)).toBe(false);
   });
 
-  it('filledCountFromValues drives the Review 16/16 save gate on effective drafts', () => {
+  it('filledCountFromValues drives the Review 14/14 save gate on effective drafts', () => {
     const allNames = [
       'commercial_designation', 'scientific_name', 'producer_name', 'reseller_brand',
       'production_method', 'fishing_gear_or_farming_method', 'FAO_area', 'origin_country',
       'health_mark', 'batch_number', 'expiry_date', 'packaging_date',
       'storage_temperature', 'weight', 'allergens', 'gtin',
     ];
-    // 15/16 filled (gtin blank) → gate CLOSED.
+    // 13/14 filled (weight blank) → gate CLOSED.
     const near: Record<string, string> = {};
-    for (const n of allNames) near[n] = n === 'gtin' ? '   ' : 'v';
-    expect(filledCountFromValues(near)).toBe(15);
+    for (const n of allNames) near[n] = n === 'weight' ? '   ' : 'v';
+    expect(filledCountFromValues(near)).toBe(13);
     expect(filledCountFromValues(near) === CANONICAL_FIELD_COUNT).toBe(false);
 
-    // Fill the last one → gate OPEN (16/16). Non-canonical keys never count.
-    const full = { ...near, gtin: '03400000000000', extra_key: 'ignored' };
-    expect(filledCountFromValues(full)).toBe(16);
+    // Fill the last one → gate OPEN (14/14). Non-canonical keys never count.
+    const full = { ...near, weight: '1 kg', extra_key: 'ignored' };
+    expect(filledCountFromValues(full)).toBe(14);
   });
 
   it('the review draft (edits) overlays the run count in both directions', () => {
@@ -229,18 +229,18 @@ describe('fieldCompleteness', () => {
     ])).toBe(2);
   });
 
-  it('a run can reach the full /16 when every canonical field is present', () => {
-    // Build all 16 canonical fields as present — the score caps at 16.
+  it('a run can reach the full /14 when every canonical field is present', () => {
+    // Build all 14 canonical fields as present — the score caps at 14.
     const fields = [
       'commercial_designation', 'scientific_name', 'producer_name', 'reseller_brand',
       'production_method', 'fishing_gear_or_farming_method', 'FAO_area', 'origin_country',
       'health_mark', 'batch_number', 'expiry_date', 'packaging_date',
       'storage_temperature', 'weight', 'allergens', 'gtin',
     ].map((n) => field(n));
-    expect(filledCountFromRun(fields)).toBe(16);
+    expect(filledCountFromRun(fields)).toBe(14);
   });
 
-  it('scores non-fish profiles against their own closed 21-field contract', () => {
+  it('scores non-fish profiles against their own closed 19-field contract', () => {
     const boucherieFields = [
       'commercial_designation', 'animal_species', 'animal_category', 'cut_name',
       'producer_name', 'reseller_brand', 'origin_country', 'birth_country',
@@ -248,11 +248,11 @@ describe('fieldCompleteness', () => {
       'health_mark', 'slaughterhouse_approval', 'cutting_plant_approval', 'gtin',
       'packaging_date', 'expiry_date', 'storage_temperature', 'allergens', 'weight',
     ].map((name) => field(name));
-    expect(filledCountFromRun(boucherieFields, undefined, 'boucherie')).toBe(21);
+    expect(filledCountFromRun(boucherieFields, undefined, 'boucherie')).toBe(19);
     // Fish-only fields do not inflate another trade's score.
     expect(
       filledCountFromRun([...boucherieFields, field('scientific_name')], undefined, 'boucherie'),
-    ).toBe(21);
+    ).toBe(19);
   });
 });
 

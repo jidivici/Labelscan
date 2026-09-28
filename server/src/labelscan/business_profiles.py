@@ -22,7 +22,9 @@ COMMON_FIELDS_V1 = (
     "gtin",
 )
 
-COMMON_FIELDS = tuple(field for field in COMMON_FIELDS_V1 if field != "price")
+COMMON_FIELDS_V2 = tuple(field for field in COMMON_FIELDS_V1 if field != "price")
+RETIRED_FIELDS = frozenset({"expiry_date", "gtin"})
+COMMON_FIELDS = tuple(field for field in COMMON_FIELDS_V2 if field not in RETIRED_FIELDS)
 
 
 @dataclass(frozen=True)
@@ -91,7 +93,7 @@ def _profiles(version: str, common_fields: tuple[str, ...]) -> dict[str, TradePr
                 "production_method",
                 "fishing_gear_or_farming_method",
             ),
-            required_fields=("scientific_name", "expiry_date", "production_method"),
+            required_fields=tuple(f for f in ("scientific_name", "expiry_date", "production_method") if f != "expiry_date" or f in common_fields),
         ),
         "boucherie": TradeProfile(
             code="boucherie",
@@ -109,7 +111,7 @@ def _profiles(version: str, common_fields: tuple[str, ...]) -> dict[str, TradePr
                 "slaughterhouse_approval",
                 "cutting_plant_approval",
             ),
-            required_fields=("animal_species", "cut_name", "expiry_date"),
+            required_fields=tuple(f for f in ("animal_species", "cut_name", "expiry_date") if f != "expiry_date" or f in common_fields),
         ),
         "charcuterie_traiteur": TradeProfile(
             code="charcuterie_traiteur",
@@ -127,24 +129,17 @@ def _profiles(version: str, common_fields: tuple[str, ...]) -> dict[str, TradePr
                 "use_instructions",
                 "reheating_instructions",
             ),
-            required_fields=("commercial_designation", "expiry_date", "ingredients"),
+            required_fields=tuple(f for f in ("commercial_designation", "expiry_date", "ingredients") if f != "expiry_date" or f in common_fields),
         ),
     }
 
 
-# V2 is the active production contract. V1 remains resolvable for immutable historical
-# ingestions and append-only catalogue rows created before the price field was retired.
-TRADE_PROFILES: dict[str, TradeProfile] = _profiles("2", COMMON_FIELDS)
+# V3 retires DLC/GTIN for new captures. Immutable V1/V2 records keep their contract.
+TRADE_PROFILES: dict[str, TradeProfile] = _profiles("3", COMMON_FIELDS)
 LEGACY_TRADE_PROFILES: dict[tuple[str, str], TradeProfile] = {
-    (code, "1"): TradeProfile(
-        code=profile.code,
-        display_name=profile.display_name,
-        version="1",
-        common_fields=profile.common_fields,
-        specific_fields=profile.specific_fields,
-        required_fields=profile.required_fields,
-    )
-    for code, profile in _profiles("1", COMMON_FIELDS_V1).items()
+    (code, version): profile
+    for version, fields in (("1", COMMON_FIELDS_V1), ("2", COMMON_FIELDS_V2))
+    for code, profile in _profiles(version, fields).items()
 }
 
 

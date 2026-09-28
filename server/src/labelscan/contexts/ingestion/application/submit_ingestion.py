@@ -51,7 +51,7 @@ class SubmitIngestionCommand:
     store_id: str | None = None
     business_portal_id: str | None = None
     trade_code_snapshot: str = "poissonnerie"
-    trade_profile_version: str = "2"
+    trade_profile_version: str = "3"
     sanitized_image_bytes: bytes | None = None
     sanitized_content_type: str = "image/jpeg"
 

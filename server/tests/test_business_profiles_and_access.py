@@ -55,15 +55,15 @@ def test_three_versioned_trade_profiles_share_the_common_contract() -> None:
         "boucherie",
         "charcuterie_traiteur",
     }
-    assert {profile.version for profile in TRADE_PROFILES.values()} == {"2"}
+    assert {profile.version for profile in TRADE_PROFILES.values()} == {"3"}
     assert all(
         profile.fields[: len(COMMON_FIELDS)] == COMMON_FIELDS
         for profile in TRADE_PROFILES.values()
     )
     assert {code: len(profile.fields) for code, profile in TRADE_PROFILES.items()} == {
-        "poissonnerie": 16,
-        "boucherie": 21,
-        "charcuterie_traiteur": 21,
+        "poissonnerie": 14,
+        "boucherie": 19,
+        "charcuterie_traiteur": 19,
     }
     assert all(profile.required_fields for profile in TRADE_PROFILES.values())
     assert "FAO_area" in trade_profile("poissonnerie").specific_fields

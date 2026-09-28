@@ -63,8 +63,9 @@ function fieldsFromValues(
   values: Record<string, string | null>,
   validation: ArrivalDetail['validation'] = {},
   tradeCode?: string | null,
+  version?: string,
 ): ArticleField[] {
-  const canonical = businessProfileFor(tradeCode).fields;
+  const canonical = businessProfileFor(tradeCode, version).fields;
   // Profile fields first, then unexpected historical keys verbatim so old records
   // remain inspectable after profile evolution.
   const names = [...canonical, ...Object.keys(values).filter((name) => !canonical.includes(name))];
@@ -100,10 +101,12 @@ export async function listCatalogArticles(): Promise<Article[]> {
       commercial_designation: arrival.product_name,
       reseller_brand: arrival.supplier_name,
       batch_number: arrival.lot_code,
-      expiry_date: arrival.use_by,
       packaging_date: arrival.packaging_date,
-      gtin: arrival.gtin,
     };
+    if (arrival.trade_profile_version !== '3') {
+      values.expiry_date = arrival.use_by;
+      values.gtin = arrival.gtin;
+    }
     if (arrival.profession_code === 'poissonnerie') {
       values.scientific_name = arrival.scientific_name;
       values.FAO_area = arrival.fao_area_code;
@@ -122,7 +125,7 @@ export async function listCatalogArticles(): Promise<Article[]> {
       photo_base_rotation_degrees: arrival.photo_base_rotation_degrees ?? -90,
       barcode_raw: arrival.gtin,
       ingestion_status: arrival.status,
-      fields: fieldsFromValues(values, {}, arrival.profession_code),
+      fields: fieldsFromValues(values, {}, arrival.profession_code, arrival.trade_profile_version),
       saved_at: arrival.recorded_at,
       saved_by: null,
       business_portal_id: arrival.business_portal_id,
@@ -154,6 +157,7 @@ export async function getCatalogArticle(batchId: string): Promise<Article | null
         arrival.fields,
         arrival.validation,
         arrival.profession_code,
+        arrival.trade_profile_version,
       ),
       saved_at: arrival.updated_at,
       saved_by: null,

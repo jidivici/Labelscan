@@ -76,3 +76,21 @@ bash server/scripts/run_local_proofs.sh
 ## Lire le code
 
 [Couches et domaines](../docs/GUIDE-DU-DEPOT.md#serveur) · [Une revue de bout en bout](../docs/GUIDE-DU-DEPOT.md#parcours-code) · [Données et API](../docs/GUIDE-DU-DEPOT.md#donnees-api)
+
+## Retrait DLC / GTIN (profil V3)
+
+La migration `0039_retire_dlc_gtin`, après `0038_hygiene_checks`, bascule les
+valeurs par défaut des nouveaux enregistrements vers le profil V3. Exécuter
+`python -m alembic upgrade head` au déploiement, puis démarrer l’API et les workers
+avec cette version du code et mettre à jour les clients mobiles/web.
+
+Les nouveaux scans ne collectent plus `expiry_date` (DLC/DDM) ni `gtin`. Les profils
+V1/V2 restent résolus avec leurs champs d’origine : articles, revues en cours,
+valeurs, preuves et audit existants sont conservés. Les colonnes historiques et
+les anciennes migrations restent donc nécessaires. Le lecteur de code-barres
+continue d’alimenter les champs conservés, notamment le lot, le poids et la date
+de conditionnement. Les données de démonstration photographiques restent en V2.
+
+Le `downgrade` rétablit les valeurs par défaut V2 sans supprimer les articles V3 ;
+il ne suffit donc pas à rendre ces articles compatibles avec un ancien serveur
+qui ne connaît pas le profil V3.

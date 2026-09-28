@@ -290,7 +290,7 @@ def test_atomic_review_replays_without_duplicate_and_updates_projection(
                 {"run_id": run_id},
             ).mappings()
         }
-    assert finalized_fields["gtin"] == ("NC", "human", "present")
+    assert finalized_fields["weight"] == ("NC", "human", "present")
 
 
 def test_final_review_registers_a_batch_when_the_initial_run_needed_review(
@@ -408,7 +408,7 @@ def test_atomic_review_rejects_key_reuse_with_different_payload(
 
 def test_atomic_review_requires_exact_contract(atomic_client, engine):
     fields = _fields()
-    fields.pop("gtin")
+    fields.pop("weight")
     response = atomic_client.post(
         f"/v1/ingestions/{uuid.uuid4()}/reviews",
         json={"fields": fields},
@@ -416,12 +416,12 @@ def test_atomic_review_requires_exact_contract(atomic_client, engine):
     )
     assert response.status_code == 400
     assert response.json()["error_code"] == "VALIDATION_ERROR"
-    assert "gtin" in response.json()["detail"]
+    assert "weight" in response.json()["detail"]
 
 
 def test_atomic_review_rejects_empty_values(atomic_client, engine):
     fields = _fields()
-    fields["gtin"] = None
+    fields["weight"] = None
     response = atomic_client.post(
         f"/v1/ingestions/{uuid.uuid4()}/reviews",
         json={"fields": fields},
@@ -429,7 +429,7 @@ def test_atomic_review_rejects_empty_values(atomic_client, engine):
     )
     assert response.status_code == 400
     assert response.json()["error_code"] == "VALIDATION_ERROR"
-    assert "gtin" in response.json()["detail"]
+    assert "weight" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(

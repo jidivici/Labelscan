@@ -27,6 +27,7 @@ import json
 import math
 import random
 import time
+from dataclasses import replace
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Protocol
@@ -458,6 +459,10 @@ class ExtractionConsumer:
             raise LookupError("ingestion tenant does not match its outbox event")
         active_rule_set = self._rule_set_for(profile)
         gs1 = parse_gs1(barcode_raw)
+        if "expiry_date" not in profile.fields:
+            gs1 = replace(gs1, expiry_date=None, best_before=None)
+        if "gtin" not in profile.fields:
+            gs1 = replace(gs1, gtin=None)
         known = tuple(gs1_resolved_field_names(gs1))  # prompt hint (advisory only)
 
         # Bounded provider retry: a transient OCR/LLM failure is retried up to a
@@ -532,6 +537,7 @@ class ExtractionConsumer:
                 corr,
                 trace,
                 organization_id=organization_id,
+                allowed_fields=frozenset(profile.fields),
             )
         except Exception as e:  # noqa: BLE001 — preview only, never fatal
             _log.warning(
@@ -721,7 +727,11 @@ class ExtractionConsumer:
         )
 
     def _rule_set_for(self, profile: TradeProfile) -> RuleSet:
-        if profile.code == "poissonnerie":
+        if (
+            profile.code == "poissonnerie"
+            and profile.version in {"1", "2"}
+            and not self._rule_set.version.startswith("trade-profile:")
+        ):
             return RuleSet(
                 version=self._rule_set.version,
                 required_fields=self._rule_set.required_fields,
@@ -1016,6 +1026,7 @@ class ExtractionConsumer:
         corr,
         trace,
         organization_id=None,
+        allowed_fields=None,
     ) -> None:
         """Tier 3 wave 2: commit the deterministic preview + the ocr_done transit.
 
@@ -1029,7 +1040,9 @@ class ExtractionConsumer:
         get a preview — precisely the scans wave 2 exists for.
         """
         interim = tuple(
-            f for f in extract_interim_fields(ocr.full_text) if f.name not in gs1_known
+            f for f in extract_interim_fields(ocr.full_text)
+            if f.name not in gs1_known
+            and (allowed_fields is None or f.name in allowed_fields)
         )
         with self._engine.begin() as c:
             if organization_id:

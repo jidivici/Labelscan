@@ -5,7 +5,7 @@ from __future__ import annotations
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
-from labelscan.business_profiles import TRADE_PROFILES
+from labelscan.business_profiles import LEGACY_TRADE_PROFILES, TRADE_PROFILES
 from labelscan.contexts.traceability.application.catalog_ports import (
     CatalogFilter,
     CatalogRepository,
@@ -18,8 +18,9 @@ from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.http.access import AccessContext, postgres_scope
 
 _PROFILE_SIZE_SQL = "\n".join(
-    f"        WHEN '{code}' THEN {len(profile.fields)}"
-    for code, profile in TRADE_PROFILES.items()
+    f"        WHEN projection.trade_code_snapshot = '{profile.code}' "
+    f"AND projection.trade_profile_version = '{profile.version}' THEN {len(profile.fields)}"
+    for profile in (*TRADE_PROFILES.values(), *LEGACY_TRADE_PROFILES.values())
 )
 
 _COMPLETENESS_SQL = f"""
@@ -30,7 +31,7 @@ LEAST(100, ROUND(
         WHERE field.value <> 'null'::jsonb
           AND field.value <> '\"\"'::jsonb
     ) /
-    CASE projection.trade_code_snapshot
+    CASE
 {_PROFILE_SIZE_SQL}
         ELSE {len(TRADE_PROFILES["poissonnerie"].fields)}
     END

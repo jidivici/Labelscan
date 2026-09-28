@@ -458,7 +458,7 @@ export function ArticleDetailScreen() {
       ),
     [article, tradeCode],
   );
-  const articleProfile = businessProfileFor(articleTradeCode);
+  const articleProfile = businessProfileFor(articleTradeCode, article?.trade_profile_version);
   const groupedFields = useMemo(
     () => groupFields(article?.fields ?? [], articleProfile.groups),
     [article, articleProfile.groups],
@@ -732,7 +732,9 @@ export function ArticleDetailScreen() {
       label: 'N° DE LOT',
       value: displayFinalFieldValue('batch_number', lot?.value ?? null),
     },
-    { icon: 'calendar-alert' as IconName, label: 'DATE LIMITE', value: expiryDate },
+    articleProfile.fields.includes('expiry_date')
+      ? { icon: 'calendar-alert' as IconName, label: 'DATE LIMITE', value: expiryDate }
+      : null,
     {
       icon: 'map-marker-outline' as IconName,
       label: 'ORIGINE',

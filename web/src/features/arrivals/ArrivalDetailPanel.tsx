@@ -27,6 +27,8 @@ function formatDate(value: string): string {
 }
 
 function fieldLabel(key: string): string {
+  if (key === 'gtin') return 'Code-barres (GTIN) — historique';
+  if (key === 'expiry_date') return 'Date limite — historique';
   return key.replaceAll('_', ' ').replace(/^./, (letter) => letter.toLocaleUpperCase('fr-FR'));
 }
 
@@ -108,7 +110,7 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
     const additionalFields = Object.keys(detail.fields)
       .filter((key) => key !== 'price' && !knownFields.has(key) && Boolean(detail.fields[key]?.trim()))
       .sort((left, right) => left.localeCompare(right, 'fr'))
-      .map((key) => ({ key, label: fieldLabel(key), format: 'text' as const }));
+      .map((key) => ({ key, label: fieldLabel(key), format: key === 'expiry_date' ? 'date' as const : 'text' as const }));
     return additionalFields.length > 0
       ? [...configured, { id: 'additional', title: 'Informations complémentaires', fields: additionalFields }]
       : configured;

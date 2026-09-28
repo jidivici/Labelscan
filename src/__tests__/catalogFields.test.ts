@@ -64,7 +64,7 @@ describe('catalogue field visibility', () => {
     });
 
     const [article] = await listCatalogArticles();
-    const expected = businessProfileFor('poissonnerie').fields;
+    const expected = businessProfileFor('poissonnerie', '2').fields;
 
     expect(article.fields.map((field) => field.field_name)).toEqual(expected);
     expect(article.fields).toHaveLength(expected.length);
