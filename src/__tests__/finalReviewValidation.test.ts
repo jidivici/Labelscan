@@ -92,6 +92,15 @@ describe('validateFinalReviewValues', () => {
     })).toEqual([]);
   });
 
+  it.each([
+    'FAO 27 IV & autres ss zones',
+    'FAO: 27.8.b.1 / VIII — autres sous-zones',
+    'FAO 27 (golfe de Gascogne); 37',
+  ])('preserves the printed FAO designation %s through final review', (value) => {
+    expect(canonicalizeFinalReviewValue('FAO_area', value)).toBe(value);
+    expect(validateFinalReviewValues({ FAO_area: value })).toEqual([]);
+  });
+
   it('mirrors the backend country alphabet without standalone combining marks', () => {
     expect(validateFinalReviewValues({ origin_country: 'Côte d’Ivoire' })).toEqual([]);
     expect(validateFinalReviewValues({ origin_country: 'क\u093f' })).toEqual([

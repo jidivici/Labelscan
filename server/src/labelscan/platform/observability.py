@@ -44,6 +44,7 @@ _EXTRA_FIELDS = (
     # id / reason enum only — NEVER prompt contents, OCR text, or secrets.
     "model",
     "reason",
+    "field_name",  # closed extraction-contract name, never a label value
     "prompt_version",
     "schema_hash",
     "cache_identity",
