@@ -45,6 +45,7 @@ from labelscan.contexts.ingestion.application.extraction_ports import (
     RetryableProviderOutputError,
 )
 from labelscan.contexts.ingestion.domain.extraction import (
+    MODEL_OUTPUT_REVIEW_WARNING,
     GateOutcome,
     GateVerdict,
     LlmField,
@@ -561,6 +562,7 @@ class ExtractionConsumer:
         llm_known = tuple(sorted(set(known) | {field.name for field in deterministic}))
 
         _llm_t0 = time.monotonic()
+        manual_review_fallback = False
         try:
             llm = self._with_provider_retry(
                 lambda: self._ensure_llm(
@@ -577,15 +579,46 @@ class ExtractionConsumer:
                 )
             )
         except _ProviderExhausted as e:
-            self._persist_failed(
-                worker_conn,
-                ingestion_id,
-                corr,
-                trace,
-                error=str(e),
-                rule_set_version=active_rule_set.version,
+            if not isinstance(e.__cause__, RetryableProviderOutputError):
+                self._persist_failed(
+                    worker_conn,
+                    ingestion_id,
+                    corr,
+                    trace,
+                    error=str(e),
+                    rule_set_version=active_rule_set.version,
+                )
+                return
+            # OCR succeeded but repeated model output is unusable. Keep the image,
+            # OCR and deterministic fields; make a manual reviewable run. This is
+            # explicitly NOT an image-quality verdict or a successful model result.
+            manual_review_fallback = True
+            llm = LlmResult(
+                raw_json=b"{}",
+                fields=tuple(
+                    LlmField(
+                        name=name,
+                        value=None,
+                        llm_confidence=0.0,
+                        evidence=(),
+                        validation_status="invalid",
+                        warnings=(MODEL_OUTPUT_REVIEW_WARNING,),
+                    )
+                    for name in profile.fields
+                ),
+                extractor_version="manual-review/invalid-model-output/v1",
+                prompt_version="manual-review/invalid-model-output/v1",
+                model=self._llm.model,
             )
-            return
+            _log.warning(
+                "llm_output_manual_review",
+                extra={
+                    "ingestion_id": ingestion_id,
+                    "reason": "invalid_model_output",
+                    "correlation_id": corr,
+                    "trace_id": trace,
+                },
+            )
         llm_ms = (time.monotonic() - _llm_t0) * 1000.0
         # The two external-call durations, side by side — so the dominant cost (almost
         # always the LLM) is measurable per ingestion (docs/LATENCY-REVIEW.md §6).
@@ -617,6 +650,7 @@ class ExtractionConsumer:
         recoverable = self._recoverable_free_text(verdict, llm_known)
         if (
             self._escalation_enabled
+            and not manual_review_fallback
             and self._escalation_llm is not None
             and recoverable
         ):

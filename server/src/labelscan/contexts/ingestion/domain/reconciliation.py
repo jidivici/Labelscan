@@ -298,7 +298,14 @@ def adjusted_outcome(
     per_field = {
         n
         for n in verdict.inconsistent
-        if n not in ("expiry_date", "packaging_date") and n not in gs1_ok
+        if n not in gs1_ok
+        and (
+            n not in ("expiry_date", "packaging_date")
+            or (
+                n in by_name
+                and by_name[n].validation_status in {"invalid", "ambiguous", "unnormalizable"}
+            )
+        )
     }
     exp, pkg = by_name.get("expiry_date"), by_name.get("packaging_date")
     date_inconsistent = bool(

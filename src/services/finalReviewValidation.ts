@@ -53,7 +53,7 @@ const TEMPERATURE = /^(?:(<=|>=|≤|≥)\s*)?(-?\d+(?:[.,]\d+)?)(?:\s*(?:-|–|�
 const HEALTH_MARK = /^[A-Z]{2}[ A-Z0-9.\-/]{1,61}$/;
 // Mirror Python's Unicode-aware `[^\W_]` FAO contract: the printed designation may
 // contain words (including accents), digits and the limited regulatory punctuation.
-const FAO_AREA = /^[\p{L}\p{N}](?:[\p{L}\p{N}]|[ .,/()'\-]){0,119}$/u;
+const FAO_AREA = /^[\p{L}\p{N}](?:[\p{L}\p{N}]|[ .,/()'’&:;+–—\-]){0,119}$/u;
 const COUNTRY = /^\p{L}[\p{L}\p{N}_ .\-'’]{0,79}$/u;
 const BIDI_CONTROLS = new Set([
   '\u061c',
