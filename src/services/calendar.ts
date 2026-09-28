@@ -27,6 +27,12 @@ export function todayKey(): string {
   return dayKey(new Date().toISOString());
 }
 
+/** Calendar arithmetic preserves local midnight on 23/25-hour DST days. */
+export function millisecondsUntilNextLocalMidnight(now = new Date()): number {
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  return midnight.getTime() - now.getTime();
+}
+
 /** Articles saved per local day, keyed YYYY-MM-DD. Drives the heat map. */
 export function countByDay(articles: Article[]): Record<string, number> {
   const counts: Record<string, number> = {};

@@ -11,7 +11,7 @@
  * bottom-right FAB.
  */
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -40,6 +40,7 @@ import type { RootStackParamList } from '../navigation/RootNavigator';
 import { useCatalogArticles } from '../services/catalogApi';
 import { exportAsJSON, exportAsCSV } from '../services/export';
 import { useArticleSearch } from '../hooks/useArticleSearch';
+import { useArrivalDay } from '../hooks/useArrivalDay';
 import { useScanQueue } from '../hooks/useScanQueue';
 import { sortPendingScansByAttention } from '../services/pendingScanOrder';
 import { discardScan, retryScan, type PendingScan } from '../services/scanQueue';
@@ -90,7 +91,15 @@ export function ArticleListScreen() {
 
   // The home list is day-scoped, starting on today. Search intentionally remains
   // global across the operator's permitted store.
-  const [selectedDay, setSelectedDay] = useState<string>(() => todayKey());
+  const { today, selectedDay, setSelectedDay } = useArrivalDay();
+  const previousToday = useRef(today);
+  useEffect(() => {
+    if (previousToday.current === today) return;
+    previousToday.current = today;
+    // A search left open overnight must not hide the new day's arrivals.
+    setQuery('');
+    void refetch();
+  }, [today, setQuery, refetch]);
   const dayCounts = useMemo(() => countByDay(articles), [articles]);
   const dayScoped = useMemo(
     () => (searching ? results : results.filter((a) => dayKey(a.saved_at) === selectedDay)),
@@ -226,7 +235,7 @@ export function ArticleListScreen() {
             <Text style={[typography.titleLarge, styles.sectionTitle]} numberOfLines={1}>
               {searching
                 ? 'Résultats'
-                : selectedDay === todayKey()
+                : selectedDay === today
                   ? 'Aujourd’hui'
                   : formatDayKey(selectedDay)}
             </Text>
@@ -236,9 +245,9 @@ export function ArticleListScreen() {
                 : `${dayScoped.length} arrivage${dayScoped.length !== 1 ? 's' : ''}`}
             </Text>
           </View>
-          {!searching && selectedDay !== todayKey() ? (
+          {!searching && selectedDay !== today ? (
             <Pressable
-              onPress={() => setSelectedDay(todayKey())}
+              onPress={() => setSelectedDay(today)}
               style={styles.todayButton}
               android_ripple={{ color: colors.primaryContainer }}
               accessibilityRole="button"
@@ -257,6 +266,8 @@ export function ArticleListScreen() {
     scanInterim,
     searching,
     selectedDay,
+    today,
+    setSelectedDay,
     dayScoped.length,
     handleListHeaderLayout,
     handleOpenScan,
@@ -339,7 +350,7 @@ export function ArticleListScreen() {
       setSelectedDay(key);
       closeCalendar();
     },
-    [closeCalendar],
+    [closeCalendar, setSelectedDay],
   );
 
   // A validated review places its card in this cache immediately. Avoid refetching
@@ -603,7 +614,7 @@ export function ArticleListScreen() {
               </Text>
             </View>
           ) : visiblePendingScans.length === 0 ? (
-            selectedDay === todayKey() ? (
+            selectedDay === today ? (
               <EmptyState onAction={openCapture} />
             ) : (
               <View style={styles.emptyArrival}>
