@@ -41,7 +41,6 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onDateRangeChan
       <div className="filter-grid">
         <label className="field"><span>Fournisseur</span><input value={filters.supplier} onChange={(event) => onUpdate('supplier', event.target.value)} placeholder="Nom du fournisseur" /></label>
         <label className="field"><span>Lot</span><input value={filters.lotCode} onChange={(event) => onUpdate('lotCode', event.target.value)} placeholder="Numéro de lot" /></label>
-        <label className="field"><span>GTIN</span><input value={filters.gtin} onChange={(event) => onUpdate('gtin', event.target.value)} placeholder="Code GTIN" /></label>
         <DateRangeCalendar label="Arrivage" from={filters.dateFrom} to={filters.dateTo} disableFuture onChange={onDateRangeChange} />
       </div>
     </div>
@@ -69,7 +68,6 @@ export function FilterPanel({ portal, filters, stores, onUpdate, onDateRangeChan
           className="filter-dropdown"
           options={[
             { value: 'recorded_at', label: 'Date d’enregistrement' },
-            { value: 'expiry_date', label: 'Date d’expiration' },
             { value: 'product_name', label: 'Produit' },
             { value: 'supplier', label: 'Fournisseur' },
             { value: 'lot_code', label: 'Lot' },

@@ -380,7 +380,7 @@ def seed() -> None:
     demo_passwords = load_demo_passwords()
     image_dir = Path(os.environ.get("LABELSCAN_DEMO_IMAGE_DIR", "/app/demo/images"))
     image_content: dict[str, tuple[str, bytes]] = {}
-    demo_contract = set(trade_profile("poissonnerie").fields)
+    demo_contract = set(trade_profile("poissonnerie", "2").fields)
     for arrival in ARRIVALS:
         if set(arrival.fields) != demo_contract or any(
             value is None or not str(value).strip() for value in arrival.fields.values()

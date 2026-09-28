@@ -18,10 +18,8 @@ const PROFILE_FIELDS = [
   'batch_number',
   'origin_country',
   'health_mark',
-  'gtin',
   'preparation_date',
   'packaging_date',
-  'expiry_date',
   'conditioning_type',
   'storage_mode',
   'storage_temperature',
@@ -41,13 +39,13 @@ const PORTAL_FILTER_FIELDS = [
 ] as const;
 
 describe('charcuterieTraiteurPortal', () => {
-  it('exposes every field from the 21-field V2 extraction profile exactly once', () => {
+  it('exposes every field from the 19-field V3 extraction profile exactly once', () => {
     const configuredFields = charcuterieTraiteurPortal.detailSections.flatMap((section) =>
       section.fields.map((field) => field.key),
     );
 
-    expect(configuredFields).toHaveLength(21);
-    expect(new Set(configuredFields).size).toBe(21);
+    expect(configuredFields).toHaveLength(19);
+    expect(new Set(configuredFields).size).toBe(19);
     expect(configuredFields).toEqual(PROFILE_FIELDS);
   });
 
@@ -105,7 +103,6 @@ describe('charcuterieTraiteurPortal', () => {
   it('provides operational expiration columns', () => {
     expect(charcuterieTraiteurPortal.secondaryColumns.map((column) => column.source)).toEqual([
       'packaging_date',
-      'use_by',
     ]);
   });
 

@@ -7,6 +7,7 @@ provenance, audit metadata, and status exactly as stored.
 from __future__ import annotations
 
 import uuid
+from dataclasses import replace
 from datetime import date
 
 import pytest
@@ -44,8 +45,10 @@ AUTH = bearer(
 @pytest.fixture
 def client(engine, raw_store):
     app = create_app()
-    app.dependency_overrides[get_submit_ingestion] = lambda: SubmitIngestion(
-        raw_store, SqlIngestionRepository(engine)
+    # These fixtures exercise the historical expiry-alert chain.
+    submit = SubmitIngestion(raw_store, SqlIngestionRepository(engine))
+    app.dependency_overrides[get_submit_ingestion] = lambda: (
+        lambda cmd: submit(replace(cmd, trade_profile_version="2"))
     )
     app.dependency_overrides[get_engine] = lambda: engine
     return TestClient(app)

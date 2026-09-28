@@ -1,7 +1,7 @@
 /**
  * Field-completeness scoring for the home screen's "En cours" cards (workflow v1).
  *
- * The backend extracts a closed, profile-specific V2 field set.
+ * The backend extracts a closed, profile-specific V3 field set.
  * This module derives, from EITHER the final run's ExtractionField[] OR the Tier-3
  * interim preview (Record<field_name, value>), two presentational signals:
  *
@@ -18,7 +18,7 @@ import { fieldOrderForTrade } from './fieldOrder';
 import { allowsNotCommunicated } from './finalReviewValidation';
 import type { ExtractionField, ValidationStatus } from '../types/api';
 
-/** The active poissonnerie V2 denominator shown in the UI. */
+/** The active poissonnerie V3 denominator shown in the UI. */
 export const CANONICAL_FIELD_COUNT = fieldOrderForTrade('poissonnerie').length;
 export const NOT_COMMUNICATED_VALUE = 'NC';
 
@@ -146,10 +146,11 @@ export function filledCountFromInterim(
 export function filledCountFromValues(
   values: Record<string, string> | null | undefined,
   tradeCode?: string | null,
+  version?: string,
 ): number {
   if (!values) return 0;
   let count = 0;
-  for (const name of fieldOrderForTrade(tradeCode)) {
+  for (const name of fieldOrderForTrade(tradeCode, version)) {
     if (isFilledValue(values[name], name, values)) count += 1;
   }
   return count;
@@ -179,11 +180,11 @@ export function isProductNameKnownFromInterim(
 export const PRODUCT_NAME_FIELD = 'commercial_designation';
 
 /** Count what the operator sees, including a prefilled proposal awaiting confirmation. */
-export function displayedFieldCount(values: Record<string, string>, tradeCode?: string | null): number {
+export function displayedFieldCount(values: Record<string, string>, tradeCode?: string | null, version?: string): number {
   return filledCountFromValues({
     ...values,
     allergens: values.allergens?.trim() ? values.allergens : reviewAllergenSuggestion(values, tradeCode) ?? '',
-  }, tradeCode);
+  }, tradeCode, version);
 }
 
 export function reviewAllergenSuggestion(values: Record<string, string>, tradeCode?: string | null): string | null {

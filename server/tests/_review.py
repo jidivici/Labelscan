@@ -29,7 +29,10 @@ def finalize_poissonnerie(
 ) -> str:
     """Confirm a fish-label ingestion exactly as the mobile reviewer does."""
 
-    fields = {name: "NC" for name in trade_profile("poissonnerie").fields}
+    with engine.connect() as conn:
+        version = conn.execute(text("SELECT trade_profile_version FROM ingestion.ingestion WHERE id = :id"), {"id": ingestion_id}).scalar_one()
+    profile = trade_profile("poissonnerie", version)
+    fields = {name: "NC" for name in profile.fields}
     fields.update(
         {
             "commercial_designation": "Atlantic Cod",
@@ -42,6 +45,7 @@ def finalize_poissonnerie(
             "production_method": "wild_caught",
         }
     )
+    fields = {name: value for name, value in fields.items() if name in profile.fields}
     with engine.connect() as conn:
         organization_id = str(
             conn.execute(

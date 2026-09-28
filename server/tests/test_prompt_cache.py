@@ -177,7 +177,7 @@ def test_cached_prefix_excludes_dynamic_and_secrets():
 
 def test_all_prompt_examples_obey_the_closed_field_contract():
     profile = trade_profile("poissonnerie")
-    examples = _SYSTEM_TEXT.split("EXPECTED JSON:")[1:]
+    examples = clp._system_text_for(profile).split("EXPECTED JSON:")[1:]
     assert len(examples) == 4
 
     for example in examples:
@@ -214,7 +214,7 @@ def test_cache_enabled_sets_breakpoint_and_logs_usage(monkeypatch, caplog):
     assert isinstance(system, list) and len(system) == 1
     # exactly one cache_control breakpoint, at the end of the static system block.
     assert system[0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
-    assert system[0]["text"] == _SYSTEM_TEXT
+    assert system[0]["text"] == clp._system_text_for(trade_profile("poissonnerie"))
     # the dynamic OCR text is in messages, NOT in the cached system block.
     assert _RUNTIME_OCR not in system[0]["text"]
 
@@ -222,7 +222,7 @@ def test_cache_enabled_sets_breakpoint_and_logs_usage(monkeypatch, caplog):
     assert rec.cache_creation_input_tokens == 512
     assert rec.cache_read_input_tokens == 0
     assert rec.model == "claude-haiku-4-5"
-    assert rec.prompt_version == _PROMPT_VERSION
+    assert rec.prompt_version == clp._profile_prompt_version(trade_profile("poissonnerie"))
     assert rec.schema_hash == _schema_hash(
         _output_schema(tuple(trade_profile("poissonnerie").fields))
     )
@@ -397,7 +397,7 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
 
     invalid = json.loads(_REPLY)
     expiry = next(
-        field for field in invalid["fields"] if field["name"] == "expiry_date"
+        field for field in invalid["fields"] if field["name"] == "packaging_date"
     )
     expiry.update(
         value="2026-08",

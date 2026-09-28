@@ -108,7 +108,7 @@ export function ArrivalsPage() {
     </header>
 
     <section className="catalog-toolbar" aria-label="Recherche et affichage">
-      <label className="search-field"><span className="search-icon" aria-hidden="true">⌕</span><span className="sr-only">Rechercher</span><input type="search" value={filters.query} onChange={(event) => update('query', event.target.value)} placeholder={portal?.labels.searchPlaceholder ?? 'Produit, lot, fournisseur, GTIN…'} /></label>
+      <label className="search-field"><span className="search-icon" aria-hidden="true">⌕</span><span className="sr-only">Rechercher</span><input type="search" value={filters.query} onChange={(event) => update('query', event.target.value)} placeholder={portal?.labels.searchPlaceholder ?? 'Produit, lot, fournisseur…'} /></label>
       <button type="button" className={`button secondary ${filtersOpen ? 'active' : ''}`} onClick={() => setFiltersOpen((open) => !open)} aria-expanded={filtersOpen}>Filtres{activeFilterCount > 0 && <span className="filter-count">{activeFilterCount}</span>}</button>
       <div className="view-toggle" aria-label="Mode d’affichage">
         <button type="button" className={filters.view === 'cards' ? 'active' : ''} onClick={() => update('view', 'cards')} aria-label="Vue cartes" aria-pressed={filters.view === 'cards'}>▦ <span>Cartes</span></button>

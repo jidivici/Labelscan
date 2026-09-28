@@ -10,13 +10,11 @@ const COMMON_FIELDS = [
   'reseller_brand',
   'batch_number',
   'origin_country',
-  'expiry_date',
   'packaging_date',
   'storage_temperature',
   'allergens',
   'health_mark',
   'weight',
-  'gtin',
 ] as const;
 
 const BOUCHERIE_FIELDS = [
@@ -47,9 +45,7 @@ const ORDERED_FIELDS = [
   'health_mark',
   'slaughterhouse_approval',
   'cutting_plant_approval',
-  'gtin',
   'packaging_date',
-  'expiry_date',
   'storage_temperature',
   'allergens',
   'weight',
@@ -76,11 +72,11 @@ const POISSONNERIE_FIELDS = [
 ] as const;
 
 describe('boucherie portal', () => {
-  it('exposes the complete version 2 detail contract for the trade', () => {
+  it('exposes the complete version 3 detail contract for the trade', () => {
     const fields = boucheriePortal.detailSections.flatMap((section) => section.fields.map((field) => field.key));
 
-    expect(fields).toHaveLength(21);
-    expect(new Set(fields).size).toBe(21);
+    expect(fields).toHaveLength(19);
+    expect(new Set(fields).size).toBe(19);
     expect(fields).toEqual(ORDERED_FIELDS);
     expect(new Set(fields)).toEqual(new Set([...COMMON_FIELDS, ...BOUCHERIE_FIELDS]));
     expect(fields).not.toEqual(expect.arrayContaining([...POISSONNERIE_FIELDS]));
@@ -117,8 +113,7 @@ describe('boucherie portal', () => {
   });
 
   it('uses professional column and empty-state language', () => {
-    expect(boucheriePortal.secondaryColumns.map((column) => [column.source, column.label])).toEqual([
-      ['use_by', 'Date limite de consommation'],
+    expect(boucheriePortal.secondaryColumns).toEqual([
     ]);
     expect(boucheriePortal.labels).toMatchObject({
       pageTitle: 'Réceptions boucherie',

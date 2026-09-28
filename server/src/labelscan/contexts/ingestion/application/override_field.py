@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from labelscan.business_profiles import TRADE_PROFILES
+from labelscan.business_profiles import LEGACY_TRADE_PROFILES, TRADE_PROFILES
 from labelscan.contexts.ingestion.application.ports import (
     AuditContext,
     FieldOverrideRepository,
@@ -42,7 +42,7 @@ _LEGACY_FIELD_NAMES = frozenset({"product_name", "supplier_name", "price"})
 FIELD_NAMES: frozenset[str] = (
     frozenset(
         field_name
-        for profile in TRADE_PROFILES.values()
+        for profile in (*TRADE_PROFILES.values(), *LEGACY_TRADE_PROFILES.values())
         for field_name in profile.fields
     )
     | _LEGACY_FIELD_NAMES

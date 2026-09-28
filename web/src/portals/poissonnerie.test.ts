@@ -18,9 +18,7 @@ const CANONICAL_FIELDS = [
   'fishing_gear_or_farming_method',
   'batch_number',
   'health_mark',
-  'gtin',
   'packaging_date',
-  'expiry_date',
   'storage_temperature',
   'allergens',
   'weight',
@@ -48,7 +46,7 @@ describe('poissonneriePortal', () => {
     expect(poissonneriePortal.labels.emptyDescription).toContain('filtres actifs');
   });
 
-  it('keeps the 16 canonical métier fields unique, complete and ordered like mobile', () => {
+  it('keeps the 14 canonical métier fields unique, complete and ordered like mobile', () => {
     const configuredFields = poissonneriePortal.detailSections.flatMap(({ fields }) =>
       fields.map(({ key }) => key),
     );
@@ -57,7 +55,7 @@ describe('poissonneriePortal', () => {
     );
 
     expect(canonicalConfiguredFields).toEqual([...CANONICAL_FIELDS]);
-    expect(new Set(canonicalConfiguredFields).size).toBe(16);
+    expect(new Set(canonicalConfiguredFields).size).toBe(14);
   });
 
   it('renders historical designation and supplier values from legacy records', () => {
@@ -108,7 +106,6 @@ describe('poissonneriePortal', () => {
     expect(poissonneriePortal.secondaryColumns).toEqual([
       { key: 'scientific-name', label: 'Nom scientifique', source: 'scientific_name' },
       { key: 'fao-area', label: 'Zone FAO', source: 'fao_area_code' },
-      { key: 'use-by', label: 'À consommer avant', source: 'use_by', format: 'date' },
     ]);
   });
 });

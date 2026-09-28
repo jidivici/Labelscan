@@ -47,6 +47,7 @@ export interface ExtractionRunSummary {
 
 /** GET /v1/ingestions/{id} → status projection (subset of server IngestionView). */
 export interface IngestionStatusResponse {
+  trade_profile_version?: string;
   ingestion_id: string;
   status: IngestionStatus;
   barcode_raw: string | null;

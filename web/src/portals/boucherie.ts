@@ -44,7 +44,6 @@ export const boucheriePortal = {
         { key: 'health_mark', label: 'Estampille sanitaire' },
         { key: 'slaughterhouse_approval', label: 'Agrément abattoir' },
         { key: 'cutting_plant_approval', label: 'Agrément atelier de découpe' },
-        { key: 'gtin', label: 'Code-barres (GTIN)' },
       ],
     },
     COMMON_DATES_CONSERVATION_SECTION,
@@ -63,7 +62,6 @@ export const boucheriePortal = {
     { field: 'cutting_plant_approval', label: 'Agrément atelier de découpe', type: 'text', placeholder: 'Ex. FR 12.345.679 CE' },
   ],
   secondaryColumns: [
-    { key: 'expiry', label: 'Date limite de consommation', source: 'use_by', format: 'date' },
   ],
   labels: {
     pageTitle: 'Réceptions boucherie',

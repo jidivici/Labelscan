@@ -2656,6 +2656,9 @@ components:
       title: IngestionStatus
     IngestionView:
       properties:
+        trade_profile_version:
+          type: string
+          title: Trade Profile Version
         ingestion_id:
           type: string
           title: Ingestion Id
@@ -2727,6 +2730,7 @@ components:
           title: Audit
       type: object
       required:
+      - trade_profile_version
       - ingestion_id
       - status
       - image_ref

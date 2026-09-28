@@ -531,7 +531,7 @@ export function ReviewScreen() {
   const ingestionId = scan?.ingestionId ?? null;
   const photoUri = scan?.photoUri;
   const barcodeRaw = scan?.barcodeRaw;
-  const reviewProfile = businessProfileFor(scan?.tradeCode ?? tradeCode);
+  const reviewProfile = businessProfileFor(scan?.tradeCode ?? tradeCode, ingestion?.trade_profile_version);
   const fieldGroups = reviewProfile.groups;
   const fieldOrder = reviewProfile.fields;
   const currentScopeKey = useMemo(
@@ -733,8 +733,8 @@ export function ReviewScreen() {
     [effectiveValues, reviewProfile.code],
   );
   const filledCount = useMemo(
-    () => displayedFieldCount(effectiveValues, reviewProfile.code),
-    [effectiveValues, reviewProfile.code],
+    () => displayedFieldCount(effectiveValues, reviewProfile.code, reviewProfile.version),
+    [effectiveValues, reviewProfile.code, reviewProfile.version],
   );
 
   // GS1 wins on lot/DLC at T+0; the backend reconciles the same way, so the values stay
@@ -999,7 +999,7 @@ export function ReviewScreen() {
   // Save is gated on full profile completion: the arrivage is only recorded — and counted —
   // once every field is filled. Below that the button stays disabled and reads "Compléter
   // (n/total)"; the modifications made so far are still persisted on leave.
-  const complete = filledCountFromValues(effectiveValues, reviewProfile.code) === fieldOrder.length;
+  const complete = filledCountFromValues(effectiveValues, reviewProfile.code, reviewProfile.version) === fieldOrder.length;
   const waitingForSync = scan?.reviewSyncStatus === 'pending';
   const canSave =
     !requiresRecapture &&

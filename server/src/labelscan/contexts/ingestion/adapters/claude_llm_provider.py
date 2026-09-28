@@ -16,6 +16,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import time
 
 from labelscan.business_profiles import TradeProfile, trade_profile
@@ -733,6 +734,24 @@ EXPECTED JSON:
 Return only the JSON object."""
 
 
+def _seafood_v3_text() -> str:
+    prompt = _SYSTEM_TEXT.replace("expiry_date, ", "").replace(", gtin.", ".").replace("16 strings", "14 strings").replace("16 above", "14 above")
+    start = prompt.index("Route dates by their EXPLICIT nearby label")
+    end = prompt.index("- storage_temperature:", start)
+    prompt = prompt[:start] + (
+        'Use only explicit packing/conditioning date cues: "emballé le", '
+        '"conditionné le", "date de conditionnement", "packed on", "pack date". '
+        'Never substitute a use-by, best-before, capture or production date.\n'
+    ) + prompt[end:]
+    start = prompt.index("- gtin:")
+    end = prompt.index("EMPTY OR UNREADABLE OCR:", start)
+    prompt = prompt[:start] + prompt[end:]
+    # Examples retain their OCR source but omit fields outside the V3 contract.
+    prompt = re.sub(r'\{"name":"expiry_date"[^\n]*?\}(?:,|(?=\]))', '', prompt)
+    prompt = prompt.replace(',]}', ']}')
+    return prompt
+
+
 _TRADE_GUIDANCE = {
     "boucherie": """\
 BOUCHERIE FIELD ROUTING:
@@ -776,9 +795,11 @@ CHARCUTERIE / TRAITEUR FIELD ROUTING:
 def _system_text_for(profile: TradeProfile) -> str:
     if profile.code == "poissonnerie" and profile.version == "2":
         return _SYSTEM_TEXT
+    if profile.code == "poissonnerie" and profile.version == "3":
+        return _seafood_v3_text()
     names = ", ".join(profile.fields)
     required = ", ".join(profile.required_fields)
-    return f"""\
+    prompt = f"""\
 You are a deterministic information-extraction function for ONE French food label in
 the {profile.display_name} trade. Exhaustively extract explicit label information while
 remaining strictly evidence-grounded. A fabricated value is a defect, and an explicitly
@@ -844,6 +865,15 @@ GROUNDING AND COMMON FIELD ROUTING:
 
 {_TRADE_GUIDANCE.get(profile.code, "Apply the trade traceability rules without inventing values.")}
 Return only the JSON object."""
+    if profile.version == "3":
+        start = prompt.index("- expiry_date is only")
+        end = prompt.index("- storage_temperature", start)
+        prompt = prompt[:start] + "- packaging_date is only an explicitly labelled packing/conditioning date. Use YYYY-MM-DD when unambiguous; never use a use-by date.\n" + prompt[end:]
+        start = prompt.index("- gtin comes only")
+        end = prompt.index("\n\n", start)
+        prompt = prompt[:start] + prompt[end:]
+        prompt = prompt.replace("separate from packaging_date and expiry_date.", "separate from packaging_date.")
+    return prompt
 
 
 def _profile_prompt_version(profile: TradeProfile) -> str:
@@ -934,10 +964,10 @@ class ClaudeLlmExtractor:
         known_field_names: tuple[str, ...] = (),
         *,
         trade_code: str = "poissonnerie",
-        trade_profile_version: str = "2",
+        trade_profile_version: str = "3",
     ) -> LlmResult:
         profile = trade_profile(trade_code, trade_profile_version)
-        # Only the detailed V2 seafood prompt has a measured cacheable prefix.
+        # Detailed seafood prompts are measured before enabling their cache prefix.
         # Historical/compact prompts remain uncached instead of being silently marked
         # below the model-specific token floor.
         system_text = _system_text_for(profile)
@@ -947,7 +977,7 @@ class ClaudeLlmExtractor:
         cache_requested = (
             _PROMPT_CACHE_ENABLED
             and profile.code == "poissonnerie"
-            and profile.version == "2"
+            and profile.version in {"2", "3"}
         )
         cache_prefix_tokens: int | None = None
         if not cache_requested:

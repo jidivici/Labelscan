@@ -111,7 +111,7 @@ def test_charcuterie_prompt_reads_wrapped_ingredients_and_explicit_preservatives
 
 
 def test_seafood_prompt_preserves_compound_lots_and_marks_origin_fallback_for_review() -> None:
-    prompt = _system_text_for(trade_profile("poissonnerie"))
+    prompt = _system_text_for(trade_profile("poissonnerie", "2"))
     assert '"107083 - 21526"' in prompt
     assert "Initiales de l'estampille sanitaire — à vérifier" in prompt
     assert "Audit BOTH fields independently" in prompt
@@ -329,7 +329,7 @@ def test_sql_final_review_persists_the_authoritative_ingestion_profile(
             },
         )
 
-    fields = {name: "NC" for name in trade_profile(trade_code).fields}
+    fields = {name: "NC" for name in trade_profile(trade_code, "2").fields}
     result = FinalizeReview(SqlReviewRepository(engine))(
         FinalizeReviewCommand(
             ingestion_id=ingestion_id,

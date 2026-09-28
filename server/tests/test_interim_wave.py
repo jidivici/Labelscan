@@ -54,6 +54,7 @@ def client(engine, raw_store):
 
 def _cmd(content: bytes, barcode_raw: str | None = None) -> SubmitIngestionCommand:
     return SubmitIngestionCommand(
+        trade_profile_version="2",
         image_bytes=content,
         content_type="image/jpeg",
         actor_id=ACTOR_ID,

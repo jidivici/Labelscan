@@ -208,6 +208,7 @@ class InterimFieldView(BaseModel):
 
 
 class IngestionView(BaseModel):
+    trade_profile_version: str
     ingestion_id: str
     status: str
     image_ref: str
@@ -337,7 +338,7 @@ def get_ingestion(
                 text(
                     "SELECT id::text AS id, status, image_ref, checksum_sha256, barcode_raw, "
                     "client_captured_at::text AS cca, server_received_at::text AS sra, "
-                    "correlation_id, trace_id FROM ingestion.ingestion AS ingestion "
+                    "correlation_id, trace_id, trade_profile_version FROM ingestion.ingestion AS ingestion "
                     "WHERE ingestion.id = :id AND " + scope
                 ),
                 {
@@ -423,6 +424,7 @@ def get_ingestion(
     max_attempt = max((r["attempt_no"] for r in runs), default=None)
     recapture_required = _requires_recapture(row["status"], latest_fields)
     return IngestionView(
+        trade_profile_version=row["trade_profile_version"],
         ingestion_id=row["id"],
         status=row["status"],
         image_ref=row["image_ref"],
