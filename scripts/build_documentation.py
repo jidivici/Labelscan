@@ -10,6 +10,7 @@ The Markdown and the diagram definitions below are the authoring sources.
 from __future__ import annotations
 
 import hashlib
+import argparse
 import html
 import json
 import math
@@ -19,22 +20,161 @@ import re
 import shutil
 import subprocess
 import tempfile
+import zipfile
 from urllib.parse import quote
 
 from reportlab.lib import colors
-from reportlab.lib.enums import TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
-from reportlab.platypus import Paragraph, Preformatted, Spacer, Table, TableStyle
+from reportlab.platypus import Flowable, Paragraph, Preformatted, Table, TableStyle
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 OUT = ROOT / "output/pdf/LabelScan_Documentation_Technique.pdf"
 NAVY, TEAL, INK, MUTED = "#102D3B", "#078B7D", "#223F4B", "#647985"
 PALE, BLUE, PAPER = "#EAF7F3", "#EAF1FB", "#FBFCFB"
+THEMES = {
+    "usages": ("USAGES", "#137C72", "#E7F5F0"),
+    "architecture": ("ARCHITECTURE", "#2461A5", "#EAF0FB"),
+    "donnees": ("DONNÉES", "#7159A7", "#F0ECF9"),
+    "api": ("CONTRAT API", "#A86718", "#FFF2DE"),
+    "plateforme": ("PLATEFORME", "#486273", "#EDF2F5"),
+}
+PUBLIC_FILES = (
+    'README.md','docs/README.md','docs/TECHNICAL-DOCUMENTATION-FR.md',
+    'docs/GUIDE-DU-DEPOT.md','server/README.md','server/demo/README.md','deploy/README.md',
+    'docs/diagrams/01-composants.png','docs/diagrams/02-sequence.png',
+    'docs/diagrams/03-etats.png','docs/diagrams/04-modele.png',
+    'docs/diagrams/labelscan.excalidraw','docs/backend/openapi.v1.yaml',
+    'output/pdf/LabelScan_Documentation_Technique.pdf','scripts/build_documentation.py',
+)
+
+
+def page_theme(index):
+    if 3 <= index <= 8 or index == 27:
+        return THEMES['usages']
+    if 9 <= index <= 14 or index in (28,29,31):
+        return THEMES['architecture']
+    if 15 <= index <= 17 or index in (30,33):
+        return THEMES['donnees']
+    if 18 <= index <= 20:
+        return THEMES['api']
+    return THEMES['plateforme']
+
+
+class EditorialGrid(Flowable):
+    """Render source table cells as cards or unframed two-column definitions."""
+    def __init__(self, rows, theme, mode='cards'):
+        super().__init__()
+        self.rows,self.theme,self.mode = rows,theme,mode
+        self.spaceAfter=18
+
+    def wrap(self, available_width, available_height):
+        self.width=available_width
+        self.columns=3 if self.mode=='metrics' else 2
+        self.gap=12
+        self.cell_width=(self.width-(self.columns-1)*self.gap)/self.columns
+        self.padding=0 if self.mode=='definitions' else 12
+        self.parts=[]
+        title_style=ParagraphStyle('tile-title',fontName='Doc-Bold',fontSize=10.4,leading=14,textColor=colors.HexColor(self.theme[1]))
+        detail_style=ParagraphStyle('tile-detail',fontName='Doc',fontSize=9.3,leading=13.5,textColor=colors.HexColor(INK))
+        number_style=ParagraphStyle('tile-number',fontName='Doc-Bold',fontSize=30,leading=37,textColor=colors.HexColor(NAVY))
+        for row in self.rows[1:]:
+            blocks=[Paragraph(inline(row[0]),title_style)]
+            if self.mode=='metrics':
+                blocks += [Paragraph(inline(row[1])+f' <font size="9">{self.rows[0][1].lower()}</font>',number_style),Paragraph(inline(row[2]),detail_style)]
+            else:
+                blocks += [Paragraph((f'<b>{inline(self.rows[0][i])}</b><br/>' if len(row)>2 else '')+inline(v),detail_style) for i,v in enumerate(row[1:],1)]
+            measurements=[(b,b.wrap(self.cell_width-2*self.padding,10000)[1]) for b in blocks]
+            height=sum(h for _,h in measurements)+6*(len(blocks)-1)+2*self.padding+8
+            self.parts.append((measurements,height))
+        self.row_heights=[max(h for _,h in self.parts[i:i+self.columns]) for i in range(0,len(self.parts),self.columns)]
+        self.height=sum(self.row_heights)+self.gap*(len(self.row_heights)-1)
+        return self.width,self.height
+
+    def draw(self):
+        c=self.canv;top=self.height
+        for row_index,height in enumerate(self.row_heights):
+            for col,(blocks,_) in enumerate(self.parts[row_index*self.columns:(row_index+1)*self.columns]):
+                x=col*(self.cell_width+self.gap)
+                if self.mode!='definitions':
+                    c.setFillColor(colors.HexColor(self.theme[2]));c.roundRect(x,top-height,self.cell_width,height,7,fill=1,stroke=0)
+                    c.setFillColor(colors.HexColor(self.theme[1]));c.rect(x+12,top-6,25,2,fill=1,stroke=0)
+                else:
+                    c.setStrokeColor(colors.HexColor('#DDE5E9'));c.setLineWidth(.5);c.line(x,top-height+5,x+self.cell_width,top-height+5)
+                y=top-self.padding-3
+                for paragraph,ph in blocks:
+                    paragraph.drawOn(c,x+self.padding,y-ph);y-=ph+6
+            top-=height+self.gap
+
+
+class ProcessRail(Flowable):
+    """Numbered timeline retaining both action and result from each source row."""
+    def __init__(self, rows, theme):
+        super().__init__();self.rows,self.theme=rows,theme;self.spaceAfter=18
+
+    def wrap(self,width,height):
+        self.width=width;self.parts=[]
+        title_style=ParagraphStyle('step-title',fontName='Doc-Bold',fontSize=10.2,leading=14,textColor=colors.HexColor(NAVY))
+        detail_style=ParagraphStyle('step-detail',fontName='Doc',fontSize=9.1,leading=13,textColor=colors.HexColor(INK))
+        self.action_width=(width-62)*.44;self.result_width=(width-62)*.56
+        for row in self.rows[1:]:
+            title=Paragraph(inline(re.sub(r'^\d+\s*[·.]\s*','',row[0])),title_style)
+            action=Paragraph(inline(row[1]),detail_style)
+            result=Paragraph(inline(row[2]),detail_style)
+            th=title.wrap(width-42,10000)[1]
+            ah=action.wrap(self.action_width,10000)[1];rh=result.wrap(self.result_width,10000)[1]
+            self.parts.append((title,action,result,th,ah,rh,th+max(ah,rh)+19))
+        self.height=sum(p[-1] for p in self.parts)+20
+        return width,self.height
+
+    def draw(self):
+        c=self.canv;top=self.height
+        c.setFont('Doc-Bold',7.5);c.setFillColor(colors.HexColor(self.theme[1]))
+        c.drawString(40,top-7,self.rows[0][1].upper());c.drawString(56+self.action_width,top-7,self.rows[0][2].upper())
+        top-=20
+        for i,(title,action,result,th,ah,rh,height) in enumerate(self.parts):
+            c.setStrokeColor(colors.HexColor('#D6E2E5'));c.setLineWidth(1)
+            if i<len(self.parts)-1:c.line(12,top-14,12,top-height-4)
+            c.setFillColor(colors.HexColor(self.theme[1]));c.circle(12,top-9,11,fill=1,stroke=0)
+            c.setFillColor(colors.white);c.setFont('Doc-Bold',9);c.drawCentredString(12,top-12,str(i+1))
+            title.drawOn(c,40,top-th)
+            action.drawOn(c,40,top-th-5-ah);result.drawOn(c,56+self.action_width,top-th-5-rh)
+            top-=height
+
+
+def editorial_table(rows,theme,cell,width):
+    first=rows[0][0]
+    if first=='Surface':return EditorialGrid(rows,theme)
+    if first=='Profil':return EditorialGrid(rows,theme,'metrics')
+    if first=='Terme':return EditorialGrid(rows,theme,'definitions')
+    if first=='Étape' and rows[0][1]=='Action':return ProcessRail(rows,theme)
+    cols=len(rows[0]);ratios=[.29,.71] if cols==2 else [.24,.38,.38]
+    if first=='Réf.':ratios=[.09,.43,.48]
+    if first=='Étape':ratios=[.18,.37,.45]
+    if first=='Adresse locale':ratios=[.49,.51]
+    if first=='Opération' and rows[0][1]=='Échange principal':ratios=[.47,.53]
+    quiet=first in ('Réf.','Partie','Donnée conservée')
+    technical=first in ('Opération','Famille','Adresse locale')
+    header=ParagraphStyle('table-header',parent=cell,fontName='Doc-Bold',textColor=colors.HexColor(theme[1]) if quiet else colors.white)
+    label=ParagraphStyle('table-label',parent=cell,fontName='Doc-Bold',textColor=colors.HexColor(theme[1]))
+    data=[]
+    for r,row in enumerate(rows):
+        data.append([Paragraph(inline(v),header if r==0 else (label if col==0 and not technical else cell)) for col,v in enumerate(row)])
+    flow=Table(data,colWidths=[width*r for r in ratios],hAlign='LEFT')
+    commands=[('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),9),('RIGHTPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8),('LINEBELOW',(0,1),(-1,-1),.35,colors.HexColor('#DDE5E9'))]
+    commands += [('BACKGROUND',(0,0),(-1,0),colors.HexColor(theme[2] if quiet else theme[1]))]
+    if quiet:
+        commands += [('LINEBELOW',(0,0),(-1,0),1,colors.HexColor(theme[1]))]
+    elif technical:
+        commands += [('BACKGROUND',(0,1),(0,-1),colors.HexColor(theme[2]))]
+    else:
+        commands += [('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor(theme[2])])]
+    flow.setStyle(TableStyle(commands));flow.spaceAfter=16
+    return flow
 
 
 def register_fonts():
@@ -84,6 +224,19 @@ class Diagram:
 
     def dot(self, x, y):
         self.items.append(dict(type="dot", x=x, y=y))
+
+    def validate_text_bounds(self):
+        """Check the shared canvas, including the editable text box padding."""
+        for item in self.items:
+            if item['type'] != 'text':
+                continue
+            lines = item['text'].split('\n')
+            font = 'Doc-Bold' if item['bold'] else 'Doc'
+            width = max(pdfmetrics.stringWidth(line, font, item['size']) for line in lines) + 6
+            left = item['x'] - (width / 2 if item['anchor'] == 'middle' else 0)
+            bottom = item['y'] + len(lines) * item['size'] * 1.3
+            if left < 0 or left + width > self.width or item['y'] < 0 or bottom > self.height:
+                raise RuntimeError(f"Diagram text overflow in {self.slug}: {item['text']}")
 
     def svg(self):
         out = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {self.width} {self.height}" role="img" aria-labelledby="title">', f'<title id="title">{html.escape(self.title)}</title>', '<rect width="100%" height="100%" fill="#ffffff"/>']
@@ -178,7 +331,7 @@ def diagrams():
     d = Diagram("01-composants", "UML - composants et connexions LabelScan", 720)
     d.text(28, 16, "CLIENTS", 17, color=TEAL, bold=True)
     d.text(354, 16, "SERVICES LABELSCAN", 17, color=TEAL, bold=True)
-    d.text(770, 16, "DONNÉES / FOURNISSEURS", 15, color=TEAL, bold=True)
+    d.text(755, 16, "DONNÉES / FOURNISSEURS", 15, color=TEAL, bold=True)
     d.box(25,80,230,112,"Mobile Expo","Capture et revue")
     d.box(25,300,230,112,"Back-office","Catalogue et comptes")
     d.box(350,185,245,112,"API FastAPI","Routes / services",BLUE)
@@ -212,7 +365,7 @@ def diagrams():
     s.text(10,345,"02  EXTRACTION ASYNCHRONE",16,color=TEAL,bold=True)
     msg(4,3,405,"Réserver l'événement")
     s.box(760,425,225,75,"OCR / LLM",fill="#FFF4E4")
-    s.text(740,508,"Appels fournisseurs par le worker",16,color=MUTED)
+    s.text(710,508,"Appels fournisseurs par le worker",16,color=MUTED)
     msg(4,3,563,"Run + champs + état")
     s.text(10,590,"03  REVUE HUMAINE",16,color=TEAL,bold=True)
     msg(0,1,648,"POST /{id}/reviews")
@@ -270,6 +423,17 @@ def diagrams():
     m.text(340,677,"0..*",19)
     m.text(381,725,"contient",18,color=MUTED)
     m.text(20,817,"Plein : clé étrangère. Pointillé : lien par identifiant. ? : valeur nullable.",18,color=MUTED)
+    # Stable semantic palette across the editable board, PNGs and print views.
+    for diagram in (d,s,st,m):
+        for item in diagram.items:
+            if item['type']=='rect':
+                item['fill']={PALE:THEMES['usages'][2],BLUE:THEMES['architecture'][2],'#FFF4E4':THEMES['api'][2]}.get(item['fill'],item['fill'])
+    for item in d.items:
+        if item['type']=='rect' and item['x']==750 and item['y'] in (80,300):item['fill']=THEMES['donnees'][2]
+    for item in s.items:
+        if item['type']=='rect' and item['x'] in (415,622.5):item['fill']=THEMES['donnees'][2]
+    for item in m.items:
+        if item['type']=='rect':item['fill']=THEMES['donnees'][2] if item['y']>=300 else THEMES['architecture'][2]
     return [d,s,st,m]
 
 
@@ -312,7 +476,8 @@ def render_document(ds):
     layouts=[]
     # Cover uses the same palette as the UML set.
     c.setFillColor(colors.HexColor(NAVY)); c.rect(0,0,w,h,fill=1,stroke=0)
-    c.setFillColor(colors.HexColor(TEAL)); c.rect(0,h-13,w,13,fill=1,stroke=0)
+    for i,theme in enumerate(THEMES.values()):
+        c.setFillColor(colors.HexColor(theme[1]));c.rect(i*w/5,h-13,w/5,13,fill=1,stroke=0)
     c.setFillColor(colors.HexColor("#A9DCCE")); c.setFont("Doc-Bold",10)
     c.drawString(48,h-78,"DOCUMENTATION TECHNIQUE")
     c.setFillColor(colors.white); c.setFont("Doc-Bold",48); c.drawString(44,h-205,"LabelScan")
@@ -327,12 +492,18 @@ def render_document(ds):
     for x,n,label in [(48,"3","métiers"),(221,"2","interfaces"),(394,"1","parcours partagé")]:
         c.setFillColor(colors.HexColor("#92D6C7"));c.setFont("Doc-Bold",28);c.drawString(x,177,n)
         c.setFillColor(colors.white);c.setFont("Doc",10);c.drawString(x,153,label)
+    for x,label,theme in zip((48,133,255,347,419),('Usages','Architecture','Données','API','Plateforme'),THEMES.values()):
+        c.setFillColor(colors.HexColor(theme[2]));c.circle(x+3,107,3,fill=1,stroke=0)
+        c.setFont('Doc',8);c.drawString(x+12,104,label)
     c.setFillColor(colors.HexColor("#ADC3C9"));c.setFont("Doc",9);c.drawString(48,62,"Édition septembre 2026 · Architecture, usages & guide du dépôt")
     c.showPage()
     for index,chunk in enumerate(chunks[1:],start=2):
+        theme=page_theme(index)
+        subhead.textColor=colors.HexColor(theme[1])
         c.setFillColor(colors.HexColor(PAPER));c.rect(0,0,w,h,fill=1,stroke=0)
-        c.setFillColor(colors.HexColor(TEAL));c.rect(left,h-51,28,3,fill=1,stroke=0)
-        c.setFont("Doc-Bold",8);c.setFillColor(colors.HexColor(MUTED));c.drawString(left+39,h-51,"LABELSCAN  /  DOCUMENTATION TECHNIQUE")
+        c.setFillColor(colors.HexColor(theme[1]));c.rect(left,h-51,28,3,fill=1,stroke=0)
+        c.setFont("Doc-Bold",8);c.drawString(left+39,h-51,'LABELSCAN  /  '+('GUIDE DU DÉPÔT' if index>=25 else theme[0]))
+        c.setFillColor(colors.HexColor(theme[1]));c.rect(w-5,h-110,5,55,fill=1,stroke=0)
         c.setStrokeColor(colors.HexColor("#D7E4E6"));c.setLineWidth(.6);c.line(left,47,w-left,47)
         c.setFont("Doc",8);c.setFillColor(colors.HexColor(MUTED));c.drawString(left,31,"LabelScan · Septembre 2026");c.drawRightString(w-left,31,f"{index:02d} / {total:02d}")
         y=h-85
@@ -363,13 +534,7 @@ def render_document(ds):
                     row=[v.strip() for v in lines[pos].strip().strip('|').split('|')]
                     if not all(re.fullmatch(r'[:\- ]+',v or '-') for v in row):rows.append(row)
                     pos+=1
-                cols=len(rows[0]);ratios=[.29,.71] if cols==2 else [.24,.38,.38]
-                if rows[0][0]=='Réf.':ratios=[.09,.43,.48]
-                if rows[0][0]=='Profil':ratios=[.22,.14,.64]
-                if rows[0][0]=='Étape':ratios=[.18,.37,.45]
-                flow=Table([[Paragraph(inline(v),cell) for v in row] for row in rows],colWidths=[content_width*r for r in ratios],hAlign='LEFT')
-                flow.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor(PALE)),('LINEBELOW',(0,0),(-1,0),1,colors.HexColor(TEAL)),('ROWBACKGROUNDS',(0,1),(-1,-1),[colors.white,colors.HexColor('#F4F7F8')]),('LINEBELOW',(0,1),(-1,-1),.3,colors.HexColor('#DEE8E9')),('VALIGN',(0,0),(-1,-1),'TOP'),('LEFTPADDING',(0,0),(-1,-1),9),('RIGHTPADDING',(0,0),(-1,-1),9),('TOPPADDING',(0,0),(-1,-1),8),('BOTTOMPADDING',(0,0),(-1,-1),8)]))
-                flow.spaceAfter=16
+                flow=editorial_table(rows,theme,cell,content_width)
             elif re.match(r'^(?:- |\d+\. )', line):
                 label, text = re.match(r'^(-|\d+\.) (.*)', line).groups()
                 flow=Paragraph(inline(text),body,bulletText='•' if label=='-' else label)
@@ -386,7 +551,7 @@ def render_document(ds):
             if isinstance(flow,Preformatted):
                 if any(pdfmetrics.stringWidth(t,'Doc-Mono',9)>content_width-20 for t in flow.lines):
                     raise RuntimeError(f"Code line overflow page {index}")
-                c.setFillColor(colors.HexColor(PALE))
+                c.setFillColor(colors.HexColor(theme[2]))
                 c.roundRect(left,y-fh-7,content_width,fh+14,5,fill=1,stroke=0)
                 flow.drawOn(c,left+10,y-fh)
             else:
@@ -419,8 +584,13 @@ def export_previews(ds, destination, font_dir):
 
 
 def main():
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--package',action='store_true',help='Also create the 15-file documentation ZIP under output/')
+    args=parser.parse_args()
     font_dir = register_fonts()
     ds=diagrams()
+    for diagram in ds:
+        diagram.validate_text_bounds()
     destination=DOCS/'diagrams';destination.mkdir(parents=True,exist_ok=True)
     elements=[]
     for i,d in enumerate(ds):
@@ -428,7 +598,16 @@ def main():
     board={"type":"excalidraw","version":2,"source":"https://excalidraw.com","elements":elements,"appState":{"gridSize":None,"viewBackgroundColor":"#ffffff"},"files":{}}
     (destination/'labelscan.excalidraw').write_text(json.dumps(board,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
     export_previews(ds,destination,font_dir)
-    print(json.dumps(render_document(ds),ensure_ascii=False,indent=2))
+    result=render_document(ds)
+    if args.package:
+        package=ROOT/'output/LabelScan_Documentation_Proposition.zip'
+        with zipfile.ZipFile(package,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as archive:
+            for relative in PUBLIC_FILES:
+                info=zipfile.ZipInfo(relative,date_time=(2026,9,13,0,0,0))
+                info.compress_type=zipfile.ZIP_DEFLATED;info.external_attr=0o100644 << 16
+                archive.writestr(info,(ROOT/relative).read_bytes())
+        result.update(package=str(package.relative_to(ROOT)),package_files=len(PUBLIC_FILES))
+    print(json.dumps(result,ensure_ascii=False,indent=2))
 
 
 if __name__=='__main__':

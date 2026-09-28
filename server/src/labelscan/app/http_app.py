@@ -9,6 +9,9 @@ from fastapi import FastAPI
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from labelscan.app.ops_router import router as ops_router
+from labelscan.contexts.haccp.adapters.http.hygiene_router import (
+    router as hygiene_router,
+)
 from labelscan.contexts.haccp.adapters.http.lifecycle_router import (
     router as alerts_lifecycle_router,
 )
@@ -106,6 +109,7 @@ def create_app() -> FastAPI:
     )  # read: GET /v1/ingestions/{id}, /v1/extraction-runs/{id}
     app.include_router(batches_read_router)  # read: GET /v1/batches/{id}
     app.include_router(catalog_router)  # store-scoped: GET /v1/arrivals
+    app.include_router(hygiene_router)
     app.include_router(alerts_read_router)  # read: GET /v1/alerts
     app.include_router(
         alerts_lifecycle_router

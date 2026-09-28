@@ -28,6 +28,7 @@ EXPECTED_LOGICAL_TABLES = {
     "audit.audit_log",
     "haccp.alert",
     "haccp.control_plan",
+    "haccp.hygiene_check",
     "haccp.temperature_log",
     "identity.app_user",
     "identity.auth_session",
@@ -70,6 +71,7 @@ EXPECTED_RLS_POLICIES = {
         "ALL",
     ),
     ("haccp.alert", "haccp_alert_tenant_policy", "ALL"),
+    ("haccp.hygiene_check", "hygiene_check_tenant", "ALL"),
     ("identity.app_user", "identity_app_user_tenant_policy", "ALL"),
     ("identity.auth_session", "identity_auth_session_tenant_policy", "ALL"),
     ("identity.business_portal", "identity_business_portal_tenant_policy", "ALL"),
@@ -117,6 +119,7 @@ EXPECTED_TABLE_GRANTS = {
     ("labelscan_app", "audit.audit_log"): {"SELECT"},
     ("labelscan_app", "haccp.alert"): {"INSERT", "SELECT", "UPDATE"},
     ("labelscan_app", "haccp.control_plan"): {"INSERT", "SELECT"},
+    ("labelscan_app", "haccp.hygiene_check"): {"INSERT", "SELECT"},
     ("labelscan_app", "haccp.temperature_log"): {"INSERT", "SELECT"},
     ("labelscan_app", "identity.app_user"): {"INSERT", "SELECT", "UPDATE"},
     ("labelscan_app", "identity.auth_session"): {"INSERT", "SELECT", "UPDATE"},
@@ -267,7 +270,7 @@ def test_consolidated_baseline_preserves_the_complete_catalog(conn) -> None:
         .tuples()
         .all()
     )
-    assert trigger_counts == {"audit_on_insert": 19, "deny_mutation": 32}
+    assert trigger_counts == {"audit_on_insert": 19, "deny_mutation": 34}
 
     partition_triggers = {
         (row.relation, row.tgname)
