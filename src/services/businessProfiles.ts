@@ -210,6 +210,23 @@ export function businessProfileFor(tradeCode: string | null | undefined, version
   return isTradeCode(tradeCode) ? profiles[tradeCode] : profiles.poissonnerie;
 }
 
+/** Retired data remains stored, but is never shown or requested in the current UI. */
+export const HIDDEN_FIELDS = new Set(['expiry_date', 'gtin', 'barcode_raw', 'price']);
+
+export function visibleBusinessProfileFor(tradeCode: string | null | undefined, version?: string | null): BusinessProfile {
+  const contract = businessProfileFor(tradeCode, version);
+  const groups = contract.groups.map((group) => ({
+    ...group,
+    fields: group.fields.filter((name) => !HIDDEN_FIELDS.has(name)),
+  }));
+  return {
+    ...contract,
+    groups,
+    fields: groups.flatMap((group) => group.fields),
+    requiredFields: contract.requiredFields.filter((name) => !HIDDEN_FIELDS.has(name)),
+  };
+}
+
 const SPECIFIC_FIELD_TRADE = new Map<string, TradeCode>();
 for (const code of Object.keys(BUSINESS_PROFILES) as TradeCode[]) {
   const profileFields = BUSINESS_PROFILES[code].fields;

@@ -25,7 +25,7 @@ export function DetailSections({ sections, fields }: {
     .map((section) => ({
       ...section,
       fields: section.fields.filter(
-        (field) => field.key !== 'price' && (
+        (field) => !['price', 'gtin', 'expiry_date', 'barcode_raw'].includes(field.key) && (
           !['historical-data', 'additional'].includes(section.id)
           || Boolean(fields[field.key]?.trim())
         ),

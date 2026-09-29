@@ -33,13 +33,7 @@ function EmptyIllustration() {
           <View style={[styles.corner, styles.cornerTopRight]} />
           <View style={[styles.corner, styles.cornerBottomLeft]} />
           <View style={[styles.corner, styles.cornerBottomRight]} />
-          <View style={styles.barcode}>
-            <View style={[styles.bar, styles.barTall]} />
-            <View style={[styles.bar, styles.barThin]} />
-            <View style={[styles.bar, styles.barMedium]} />
-            <View style={[styles.bar, styles.barTall]} />
-            <View style={[styles.bar, styles.barThin]} />
-          </View>
+          <MaterialCommunityIcons name="tag-text-outline" size={64} color={colors.secondary} />
         </Animated.View>
       </View>
     </View>
@@ -165,29 +159,6 @@ const styles = StyleSheet.create({
     borderRightWidth: 1.5,
     borderBottomWidth: 1.5,
     borderBottomRightRadius: radius.sm,
-  },
-  barcode: {
-    position: 'absolute',
-    height: 68,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-  },
-  bar: {
-    width: 9,
-    borderRadius: 1,
-    backgroundColor: colors.secondary,
-  },
-  barTall: {
-    height: 68,
-  },
-  barMedium: {
-    width: 10,
-    height: 56,
-  },
-  barThin: {
-    width: 6,
-    height: 68,
   },
   copy: {
     alignItems: 'center',

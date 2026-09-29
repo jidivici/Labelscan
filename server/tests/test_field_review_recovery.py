@@ -89,6 +89,7 @@ def test_printed_area_preserved_without_geographic_inference(area):
 @pytest.mark.parametrize("bad", [
     candidate("packaging_date", "2026-09"),
     candidate("packaging_date", "2026-02-31"),
+    candidate("packaging_date", "04/05/26"),
     candidate("weight", "0 kg"),
     candidate("storage_temperature", "entre frais et froid"),
     candidate("origin_country", "France", evidence=[" "]),
@@ -218,3 +219,19 @@ def test_pipeline_opens_review_and_keeps_image_even_without_valid_model_fields(
     finalize_poissonnerie(engine, ingestion.ingestion_id)
     with engine.connect() as conn:
         assert conn.execute(text("SELECT status FROM ingestion.ingestion WHERE id=:id"), {"id": ingestion.ingestion_id}).scalar_one() == "confirmed"
+
+
+@pytest.mark.parametrize(("raw", "expected"), [
+    ("20/JUN/26", "2026-06-20"),
+    ("Jun 20, 2026", "2026-06-20"),
+    ("06/20/2026", "2026-06-20"),
+])
+def test_model_dates_normalize_only_when_order_is_unambiguous(raw, expected):
+    fields = _validated_fields(
+        {"fields": [*good_candidates(), candidate("packaging_date", raw)]},
+        trade_profile("poissonnerie"),
+    )
+    date_field = next(f for f in fields if f["name"] == "packaging_date")
+    assert date_field["value"] == expected
+    assert date_field["evidence"] == [raw]
+    assert date_field["validation_status"] == "normalized"

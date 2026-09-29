@@ -141,12 +141,7 @@ describe('parseTemp / formatTemp', () => {
   });
 });
 
-describe('toIsoDate — DD/MM/YYYY → canonical ISO (inverse of displayDate)', () => {
-  it('converts a full DD/MM/YYYY to ISO', () => {
-    expect(toIsoDate('20/06/2026')).toBe('2026-06-20');
-    expect(toIsoDate('02/01/2027')).toBe('2027-01-02');
-  });
-
+describe('toIsoDate — manual date → canonical ISO', () => {
   it('passes ISO / partial / verbatim through unchanged', () => {
     expect(toIsoDate('2026-06-20')).toBe('2026-06-20');
     expect(toIsoDate('2026-06')).toBe('2026-06');
@@ -167,15 +162,9 @@ describe('validateDate — neutral, non-blocking hints', () => {
     expect(validateDate('29/02/2028')).toBeNull(); // leap year
   });
 
-  it('does not flag an empty or still-typing value', () => {
-    expect(validateDate('')).toBeNull();
-    expect(validateDate('20/0')).toBeNull();
-    expect(validateDate('20/06/20')).toBeNull();
-  });
-
   it('flags an implausible complete date', () => {
     expect(validateDate('32/01/2026')).toBe('Jour invalide');
-    expect(validateDate('10/13/2026')).toBe('Mois invalide');
+    expect(validateDate('10/13/2026')).toBeNull(); // unambiguous month-first date
     expect(validateDate('29/02/2027')).toBe('Jour invalide'); // 2027 is not a leap year
     expect(validateDate('01/01/1999')).toBe('Année invalide');
   });

@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 
 from labelscan.business_profiles import field_spec
+from labelscan.contexts.ingestion.domain.label_dates import normalize_label_date
 
 MAX_FIELD_VALUE_CHARS = 512
 MAX_NOTE_CHARS = 2_000
@@ -136,32 +137,27 @@ def _valid_gtin(value: str) -> bool:
     return len(value) in _GTIN_LENGTHS and value.isascii() and value.isdigit()
 
 
-def _valid_iso_date(value: str) -> bool:
-    try:
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
-            return False
-        date.fromisoformat(value)
-    except ValueError:
-        return False
-    return True
-
-
 def validate_human_field_value(field_name: str, value: str | None) -> str | None:
     if value is None or not value.strip():
         return None
+    spec = field_spec(field_name)
     normalized = _normalize_safe_text(
         value,
         label=f"field '{field_name}'",
-        max_chars=min(MAX_FIELD_VALUE_CHARS, field_spec(field_name).max_length),
+        max_chars=64 if spec.kind == "date" else min(MAX_FIELD_VALUE_CHARS, spec.max_length),
         allow_newlines=True,
     )
     # NC is the explicit, audited "non communiqué" value accepted by the final
     # review workflow.  It is never confused with a machine-extracted value.
     if normalized.upper() == "NC":
         return "NC"
-    spec = field_spec(field_name)
-    if spec.kind == "date" and not _valid_iso_date(normalized):
-        raise ValueError(f"field '{field_name}' must be a complete YYYY-MM-DD date")
+    if spec.kind == "date":
+        parsed = normalize_label_date(normalized, numeric_order="DMY")
+        if parsed is None:
+            raise ValueError(f"field '{field_name}' must be a complete valid calendar date")
+        normalized = parsed
+    if spec.kind == "fao_area":
+        normalized = re.sub(r"[ \t\r\n\u00a0]+", " ", normalized)
     if spec.kind == "enum" and normalized not in spec.enum:
         raise ValueError(
             f"field '{field_name}' must be one of {', '.join(spec.enum)} or NC"

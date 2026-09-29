@@ -106,3 +106,21 @@ n’est requis. Les anciens scans restent dans leur profil d’origine ; la nouv
 validation peut également isoler un GTIN invalide lors d’un rejeu historique V2.
 Le déploiement et la relance des scans existants sont des opérations distinctes
 de cette préparation, non effectuées ici.
+
+
+## Intégration des règles de saisie et d’extraction
+
+La fusion avec la branche de revue conserve ce prompt autonome et la récupération
+par champ. Le prompt poissonnerie passe à `prompt-v3.1.0` avec une désignation
+commerciale courte, une recherche dédiée de l’estampille ovale/circulaire et une
+seconde lecture des zones FAO, sans perdre leurs niveaux ni leurs qualificatifs.
+
+Le champ `packaging_date`, affiché « Date de l’étiquette », privilégie l’emballage,
+puis la production/fabrication/préparation, puis la pêche, récolte, congélation ou
+abattage. Les dates de péremption restent exclues. Les formats français, anglais
+et compacts sont acceptés lorsqu’ils désignent une date complète valide.
+
+La saisie humaine conserve l’ordre français par défaut. La normalisation des
+propositions IA n’utilise pas ce défaut : `04/05/26` reste à vérifier. Une date
+ambiguë n’annule pas les autres champs valides. Les chiffres de taille du prompt
+ci-dessus décrivent la version initiale 3.0.0, pas cette version intégrée.

@@ -452,9 +452,7 @@ export function CameraScreen() {
       if (barcodeExpiryRef.current) clearTimeout(barcodeExpiryRef.current);
       barcodeExpiryRef.current = setTimeout(() => {
         lastBarcodeRef.current = null;
-        if (mountedRef.current) setFrameState('ready');
       }, BARCODE_CAPTURE_FRESH_MS);
-      setFrameState('barcodeFound');
     },
     []
   );

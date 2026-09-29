@@ -528,13 +528,11 @@ def _export_row(product: CatalogProduct) -> dict[str, object]:
         "store_code": product.store_code,
         "product_name": product.product_name,
         "scientific_name": product.scientific_name,
-        "gtin": product.gtin,
         "lot_code": product.lot_code,
         "supplier_name": product.supplier_name,
         "status": product.status,
         "fao_area_code": product.fao_area_code,
         "production_method": product.production_method,
-        "use_by": product.use_by,
         "packaging_date": product.packaging_date,
         "recorded_at": product.recorded_at,
         "profession_code": product.profession_code,
@@ -652,9 +650,9 @@ def export_arrivals(
 
     output = io.StringIO(newline="")
     fieldnames = list(_export_row(products[0]).keys()) if products else [
-        "batch_id", "store_code", "product_name", "scientific_name", "gtin",
+        "batch_id", "store_code", "product_name", "scientific_name",
         "lot_code", "supplier_name", "status", "fao_area_code", "production_method",
-        "use_by", "packaging_date", "recorded_at", "profession_code",
+        "packaging_date", "recorded_at", "profession_code",
         "trade_profile_version",
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames, lineterminator="\n")

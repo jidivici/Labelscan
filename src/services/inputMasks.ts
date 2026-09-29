@@ -10,7 +10,7 @@
  * (Consistent with the evidence gate — docs/TECHNICAL-DOCUMENTATION-FR.md#contrat-ia.)
  */
 
-/** Fields the operator types as a calendar date (number-pad + DD/MM/YYYY mask). */
+/** Fields the operator types as a calendar date. */
 export const DATE_FIELDS = new Set(['expiry_date', 'packaging_date', 'preparation_date']);
 
 export function isDateField(fieldName: string): boolean {
@@ -131,20 +131,101 @@ export function validateHealthMark(value: string): string | null {
   return /\d/.test(v) ? null : 'Une estampille contient normalement un numéro';
 }
 
-// ── Date canonicalization (storage = ISO; display = DD/MM/YYYY) ──────────────────
+// ── Date canonicalization (storage = ISO; accept multiple manual formats) ─────────
+
+const MONTHS: Record<string, number> = {
+  jan: 1, janv: 1, january: 1, janvier: 1,
+  feb: 2, february: 2, fev: 2, fevr: 2, fevrier: 2, février: 2,
+  mar: 3, march: 3, mars: 3,
+  apr: 4, april: 4, avr: 4, avril: 4,
+  may: 5, mai: 5,
+  jun: 6, june: 6, juin: 6,
+  jul: 7, july: 7, juil: 7, juillet: 7,
+  aug: 8, august: 8, aout: 8, août: 8,
+  sep: 9, sept: 9, september: 9, septembre: 9,
+  oct: 10, october: 10, octobre: 10,
+  nov: 11, november: 11, novembre: 11,
+  dec: 12, december: 12, decembre: 12, décembre: 12,
+};
+
+type ParsedDate = { iso: string | null; complete: boolean; error: string | null };
+
+function dateFromParts(year: number, month: number, day: number): ParsedDate {
+  if (month < 1 || month > 12) return { iso: null, complete: true, error: 'Mois invalide' };
+  if (year < 1 || year > 9999) return { iso: null, complete: true, error: 'Année invalide' };
+  if (day < 1 || day > new Date(year, month, 0).getDate()) {
+    return { iso: null, complete: true, error: 'Jour invalide' };
+  }
+  if (year < 2000 || year > 2100) return { iso: null, complete: true, error: 'Année invalide' };
+  return {
+    iso: `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`,
+    complete: true,
+    error: null,
+  };
+}
+
+function parseDateInput(value: string): ParsedDate {
+  const v = value.trim();
+  if (!v) return { iso: null, complete: false, error: null };
+
+  if (/^\d{8}$/.test(v)) {
+    const leadingYear = +v.slice(0, 4);
+    if (leadingYear >= 2000 && leadingYear <= 2100 && +v.slice(4, 6) <= 12) {
+      return dateFromParts(leadingYear, +v.slice(4, 6), +v.slice(6));
+    }
+    return dateFromParts(+v.slice(4), +v.slice(2, 4), +v.slice(0, 2));
+  }
+
+  let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(v);
+  if (m) return dateFromParts(+m[1], +m[2], +m[3]);
+  m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})$/.exec(v);
+  if (m) {
+    const first = +m[1];
+    const second = +m[2];
+    const year = +m[3] + (m[3].length === 2 ? 2000 : 0);
+    if (year < 2000 || year > 2100) return { iso: null, complete: true, error: 'Année invalide' };
+    if (first > 12 && second <= 12) return dateFromParts(year, second, first);
+    if (second > 12 && first <= 12) return dateFromParts(year, first, second);
+    // The app is French-localized: when both leading components can be months,
+    // preserve the established DD/MM/YYYY interpretation. Month-first dates with
+    // an unambiguous day (e.g. 06/20/2026) are handled by the branch above.
+    return dateFromParts(year, second, first);
+  }
+
+  const normalized = v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  const textual = [
+    /^(\d{1,2})(?:st|nd|rd|th|er)?[ ./-]+([a-z]+)\.?[ ,./-]+(\d{4}|\d{2})$/,
+    /^([a-z]+)\.?[ ,./-]+(\d{1,2})(?:st|nd|rd|th)?[,]?[ ./-]+(\d{4}|\d{2})$/,
+  ];
+  for (const [index, pattern] of textual.entries()) {
+    m = pattern.exec(normalized);
+    if (!m) continue;
+    const monthToken = (index === 0 ? m[2] : m[1]).replace(/\.$/, '');
+    const month = MONTHS[monthToken];
+    if (month == null) return { iso: null, complete: true, error: 'Mois invalide' };
+    const day = +(index === 0 ? m[1] : m[2]);
+    const year = +m[3] + (m[3].length === 2 ? 2000 : 0);
+    return dateFromParts(year, month, day);
+  }
+
+  const looksComplete = /^\d{1,4}[-/.]\d{1,2}[-/.]\d{4}$/.test(v) ||
+    /^\d{1,2}\s+[a-zA-ZÀ-ÿ.]+\s+\d{4}$/.test(v) ||
+    /^[a-zA-ZÀ-ÿ.]+\s+\d{1,2},?\s+\d{4}$/.test(v);
+  return {
+    iso: null,
+    complete: looksComplete,
+    error: looksComplete ? 'Format de date non reconnu.' : null,
+  };
+}
 
 /**
- * DD/MM/YYYY → canonical ISO "YYYY-MM-DD". Already-ISO, partial ("YYYY-MM"), or an
- * unparseable string passes through UNCHANGED (never lose what the operator typed). The
- * exact inverse of displayDate; pure, structural reformat only (validity is validateDate's
- * job). Storing ISO keeps the backend chronological gate (expiry < packaging, ISO lexical
- * order) and the display format from drifting apart (audit §7.2 step 4 / §4.4).
+ * Convert supported manual date formats into canonical ISO. Unrecognized or partial
+ * input passes through unchanged so the operator's text is never silently discarded.
+ * Storing ISO keeps the backend chronological gate (expiry < packaging, ISO lexical order).
  */
 export function toIsoDate(value: string): string {
-  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
-  if (!m) return value.trim();
-  const [, dd, mm, yyyy] = m;
-  return `${yyyy}-${mm}-${dd}`;
+  const parsed = parseDateInput(value);
+  return parsed.iso ?? value.trim();
 }
 
 // ── Real-time validity hints — NEUTRAL and NON-BLOCKING (Clean UI: never red/blocking) ──
@@ -152,31 +233,9 @@ export function toIsoDate(value: string): string {
 // valid, empty, or still being typed. The operator stays in control: these never block the
 // save and never auto-correct a value (no-fabrication — the operator reads the label).
 
-/** Validity hint for a DD/MM/YYYY or ISO date. Partial input is not "invalid" (returns null). */
+/** Validity hint for supported date formats. Partial input is not flagged while typing. */
 export function validateDate(value: string): string | null {
-  const v = value.trim();
-  if (v === '') return null;
-  const fr = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(v);
-  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v);
-  let day: number;
-  let month: number;
-  let year: number;
-  if (fr) {
-    day = +fr[1];
-    month = +fr[2];
-    year = +fr[3];
-  } else if (iso) {
-    year = +iso[1];
-    month = +iso[2];
-    day = +iso[3];
-  } else {
-    return null; // partial / mid-typing → not flagged yet
-  }
-  if (month < 1 || month > 12) return 'Mois invalide';
-  if (year < 2000 || year > 2100) return 'Année invalide';
-  // new Date(year, month, 0) = last day of the 1-indexed `month` (handles leap years).
-  if (day < 1 || day > new Date(year, month, 0).getDate()) return 'Jour invalide';
-  return null;
+  return parseDateInput(value).error;
 }
 
 /** Validity hint for a temperature range: min must not exceed max; flag gross outliers. */

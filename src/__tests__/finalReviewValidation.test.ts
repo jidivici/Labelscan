@@ -27,7 +27,7 @@ describe('validateFinalReviewValues', () => {
     expect(isValidGtin('3017620422004')).toBe(true);
     expect(isValidGtin('30176204220')).toBe(false);
     expect(validateFinalReviewValues({
-      expiry_date: '31/08/2026',
+      expiry_date: '32/Aug/2026',
       packaging_date: '2026-08',
       preparation_date: '2026-02-31',
       gtin: '30176204220',

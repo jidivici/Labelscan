@@ -45,7 +45,7 @@ def test_expiry_date_order_ambiguous_is_skipped():
 
 
 def test_bare_date_without_label_is_not_attributed():
-    assert _as_dict("Pêché le 16/06/2026 en Atlantique") == {}
+    assert _as_dict("16/06/2026 en Atlantique") == {}
 
 
 def test_packaging_date_fr_label():
