@@ -178,13 +178,10 @@ def test_cached_prefix_excludes_dynamic_and_secrets():
 def test_all_prompt_examples_obey_the_closed_field_contract():
     profile = trade_profile("poissonnerie")
     examples = clp._system_text_for(profile).split("EXPECTED JSON:")[1:]
-    assert len(examples) == 4
+    assert len(examples) == 2
 
     for example in examples:
-        encoded = example.split("\n(Note:", 1)[0]
-        encoded = encoded.split("\n\nEXAMPLE ", 1)[0]
-        encoded = encoded.split("\n\nReturn only", 1)[0].strip()
-        decoded = json.loads(encoded)
+        decoded, _ = json.JSONDecoder().raw_decode(example.lstrip())
         fields = _validated_fields(decoded, profile)
         assert len(fields) <= len(profile.fields)
         assert all(field["validation_status"] != "missing" for field in fields)
@@ -379,21 +376,20 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
     invalid = json.loads(_REPLY)
     invalid["fields"][0]["value"] = None
     invalid["fields"][0]["confidence"] = 0.2
-    with pytest.raises(RetryableProviderOutputError, match="absent-value"):
-        _validated_fields(invalid, profile)
+    assert _validated_fields(invalid, profile)[0]["validation_status"] == "invalid"
 
     invalid = json.loads(_REPLY)
     invalid["fields"][1]["evidence"] = ["x"] * 17
-    with pytest.raises(RetryableProviderOutputError, match="evidence"):
-        _validated_fields(invalid, profile)
+    assert _validated_fields(invalid, profile)[1]["validation_status"] == "invalid"
 
     invalid = json.loads(_REPLY)
     scientific = next(
         field for field in invalid["fields"] if field["name"] == "scientific_name"
     )
     scientific["evidence"] = ["   "]
-    with pytest.raises(RetryableProviderOutputError, match="evidence"):
-        _validated_fields(invalid, profile)
+    result = {f["name"]: f for f in _validated_fields(invalid, profile)}
+    assert result["scientific_name"]["value"] is None
+    assert result["scientific_name"]["validation_status"] == "invalid"
 
     invalid = json.loads(_REPLY)
     expiry = next(
@@ -405,8 +401,9 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
         evidence=["2026-08"],
         validation_status="normalized",
     )
-    with pytest.raises(RetryableProviderOutputError, match="non-canonical"):
-        _validated_fields(invalid, profile)
+    result = {f["name"]: f for f in _validated_fields(invalid, profile)}
+    assert result["packaging_date"]["value"] is None
+    assert result["packaging_date"]["validation_status"] == "invalid"
 
     invalid = json.loads(_REPLY)
     scientific = next(
@@ -418,8 +415,9 @@ def test_local_contract_enforces_bounds_and_absent_invariants():
         evidence=["NC"],
         validation_status="present",
     )
-    with pytest.raises(RetryableProviderOutputError, match="non-canonical"):
-        _validated_fields(invalid, profile)
+    result = {f["name"]: f for f in _validated_fields(invalid, profile)}
+    assert result["scientific_name"]["value"] is None
+    assert result["scientific_name"]["validation_status"] == "invalid"
 
 
 def test_sparse_contract_accepts_subset_and_defaults_optional_diagnostics():

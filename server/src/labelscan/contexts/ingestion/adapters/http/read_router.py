@@ -28,6 +28,10 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
+from labelscan.contexts.ingestion.domain.extraction import (
+    MODEL_FIELD_REVIEW_WARNING,
+    MODEL_OUTPUT_REVIEW_WARNING,
+)
 from labelscan.contexts.ingestion.domain.status import IngestionStatus
 from labelscan.platform.db.tenant_context import set_tenant_context
 from labelscan.platform.http.access import (
@@ -253,6 +257,14 @@ class ExtractionRunView(BaseModel):
 def _requires_recapture(status: str, fields: list[FieldView] | None) -> bool:
     """True only for a completed review path that yielded zero usable values."""
     if fields is None or status not in {"needs_review", "ocr_skipped_garbage"}:
+        return False
+    # A model-format failure says nothing about photo quality. Even with no
+    # usable proposals, the existing photo must remain available for manual entry.
+    if status == "needs_review" and any(
+        warning in {MODEL_FIELD_REVIEW_WARNING, MODEL_OUTPUT_REVIEW_WARNING}
+        for field in fields
+        for warning in field.warnings or []
+    ):
         return False
     return not any(
         field.value is not None

@@ -28,7 +28,9 @@ _TEMPERATURE = re.compile(
     re.IGNORECASE,
 )
 _HEALTH_MARK = re.compile(r"^[A-Z]{2}[ A-Z0-9.\-/]{1,61}$")
-_FAO_AREA = re.compile(r"^[^\W_](?:[^\W_]|[ .,:;/()'’–\-]){0,119}$", re.UNICODE)
+# This is a printed designation, not a numeric code or a geographic lookup.
+# Preserve legitimate qualifiers ("IV & autres ss zones") and typography.
+_FAO_AREA = re.compile(r"^[^\W_](?:[^\W_]|[ .,/()'’&:;+–—\-]){0,119}$", re.UNICODE)
 _COUNTRY = re.compile(r"^[^\W\d_][\w .\-'’]{0,79}$", re.UNICODE)
 # Directional overrides can make stored values look like different text in the UI,
 # logs and exports.  They have no legitimate place on a product label form.

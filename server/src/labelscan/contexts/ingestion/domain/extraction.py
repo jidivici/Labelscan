@@ -33,6 +33,8 @@ _FAO_ORIGIN_TERMS = re.compile(
 )
 _HEALTH_MARK_PREFIX = re.compile(r"^([A-Z]{2})\b")
 _ORIGIN_PREFIX_WARNING = "Initiales de l'estampille sanitaire — à vérifier"
+MODEL_FIELD_REVIEW_WARNING = "Valeur non exploitable automatiquement : vérifiez ce champ sur l’étiquette."
+MODEL_OUTPUT_REVIEW_WARNING = "Analyse automatique indisponible : complétez la fiche à partir de l’étiquette."
 
 
 @dataclass(frozen=True)
@@ -290,6 +292,14 @@ def evaluate(
                     and f.name not in inconsistent
                 ):
                     inconsistent.append(f.name)
+
+        # A rejected/ambiguous OPTIONAL field also requires review, even when its
+        # value was cleared by the adapter. It must not disappear as 'missing'.
+        if (
+            vstatus in ("invalid", "unnormalizable", "ambiguous")
+            and f.name not in inconsistent
+        ):
+            inconsistent.append(f.name)
 
         # Storage invariant (ck_evidence_iff_value): evidence exists iff value exists.
         # A null value — e.g. validation_status='ambiguous' (model declined to pick
