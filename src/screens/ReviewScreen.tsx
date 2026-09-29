@@ -46,7 +46,6 @@ import {
 } from '../services/outbox';
 import { drainOutbox } from '../services/outboxDrain';
 import {
-  maskDate,
   isDateField,
   displayDate,
   toIsoDate,
@@ -336,8 +335,8 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
   const displayedDraft = allergenSuggestionPending ? (suggestion as string) : draft;
   // Bind this row's field name once; the affix inputs and the suggestion chip emit through it.
   const emit = (text: string) => onChange(field.field_name, text);
-  // Date fields: number-pad + a DD/MM/YYYY mask (auto "/"). An INPUT helper that
-  // formats the digits the operator reads off the label — it never computes a date.
+  // Date fields accept the date formats shown on the label; submit normalization
+  // converts supported formats to canonical ISO without altering the live draft.
   const isDate = isDateField(field.field_name);
   const allowsNC = allowsNotCommunicated(field.field_name);
   const isNotCommunicated = draft.trim().toUpperCase() === NOT_COMMUNICATED_VALUE;
@@ -353,7 +352,7 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
       emit(text);
       return;
     }
-    emit(isDate ? maskDate(text) : isHealthMark ? maskHealthMark(text) : text);
+    emit(isHealthMark ? maskHealthMark(text) : text);
   };
   // History autocomplete (workflow v2.1): chips shown ONLY while this row's input is
   // focused, so the 16 other rows never render suggestion clutter. suggestForField
@@ -428,9 +427,9 @@ const EditableFieldRow = React.memo(function EditableFieldRow({
           onChangeText={handleChange}
           onFocus={(event) => handleFocus(event.target)}
           onBlur={() => setFocused(false)}
-          keyboardType={isDate ? 'number-pad' : 'default'}
-          maxLength={isDate ? 10 : undefined}
-          placeholder={isDate ? 'JJ/MM/AAAA' : empty ? 'Saisir la valeur' : 'Valeur extraite'}
+          keyboardType="default"
+          maxLength={isDate ? 40 : undefined}
+          placeholder={isDate ? 'Ex. 20 juin 2026 ou 2026-06-20' : empty ? 'Saisir la valeur' : 'Valeur extraite'}
           placeholderTextColor={colors.onSurfaceVariant}
           style={[
             typography.bodyMedium,
@@ -811,11 +810,8 @@ export function ReviewScreen() {
       const savedFields: ArticleField[] = fieldOrder.map((name): ArticleField => {
         const extractedField = fieldsByName.get(name);
         const rawNext = normalizeFinalReviewValue(effectiveValues[name]);
-        // Dates are stored CANONICAL ISO (the operator types DD/MM/YYYY; we keep
-        // YYYY-MM-DD) so storage, display (displayDate) and the backend chronological gate
-        // stay in sync. toIsoDate is the exact inverse of the displayDate that seeds the
-        // field, so the persisted value renders back to what the operator saw (audit §7.2
-        // step 4 / §4.3 / §4.4).
+        // Dates are stored as canonical ISO for backend chronological comparisons. Accept
+        // recognized date formats typed from the label and normalize at this boundary.
         const dateCanonical =
           rawNext !== NOT_COMMUNICATED_VALUE && isDateField(name)
             ? toIsoDate(rawNext)

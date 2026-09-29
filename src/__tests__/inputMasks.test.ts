@@ -175,7 +175,7 @@ describe('validateDate — neutral, non-blocking hints', () => {
 
   it('flags an implausible complete date', () => {
     expect(validateDate('32/01/2026')).toBe('Jour invalide');
-    expect(validateDate('10/13/2026')).toBe('Mois invalide');
+    expect(validateDate('10/13/2026')).toBeNull(); // unambiguous month-first date
     expect(validateDate('29/02/2027')).toBe('Jour invalide'); // 2027 is not a leap year
     expect(validateDate('01/01/1999')).toBe('Année invalide');
   });

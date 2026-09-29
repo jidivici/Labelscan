@@ -56,6 +56,8 @@ anthropic_model(_MODEL)
 # stalled provider call cannot hang the extraction worker. On expiry the SDK
 # raises anthropic.APITimeoutError, which the consumer treats as transient.
 _REQUEST_TIMEOUT_S = 120.0
+# v3.8.0 — targeted recovery for oval/circular sanitary marks, multilingual/fragmented
+# FAO catch-area wording, and English month-name dates.
 # v3.7.0 — FAO catch-area wording is never accepted as origin_country. If no explicit
 # country remains after that check, the health-mark prefix is proposed as an ambiguous
 # value that the operator must confirm.
@@ -106,7 +108,7 @@ _REQUEST_TIMEOUT_S = 120.0
 # Also added ABSOLUTE RULE 7 (LANGUAGE): on multilingual labels prefer the FRENCH wording,
 # SELECTED verbatim, never translated. (v1.1.0 added the SEAFOOD / HACCP DOMAIN CONTEXT
 # block.) Both keep the cached prefix above Haiku's 4096-token floor.
-_PROMPT_VERSION = "seafood-label-extraction/v3.7.0"
+_PROMPT_VERSION = "seafood-label-extraction/v3.8.0"
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -430,6 +432,9 @@ the field rules permit. Do not silently discard it because spelling or separator
 4. Before setting ANY field to missing, search the whole OCR text a second time for its \
 field labels, synonyms, abbreviations and likely value block. Missing means that this audit \
 found no explicit candidate anywhere on the label.
+5. Give extra attention to the sanitary mark, FAO catch area and explicitly labelled dates. \
+Search their likely OCR fragments across the entire block, including isolated lines and \
+fragments split by punctuation or line breaks. Do not stop after finding the species or lot.
 
 CLOSED FIELD SET ("name" is exactly one of these 16 strings, each appearing at most once):
 commercial_designation, scientific_name, producer_name, reseller_brand, batch_number, \
@@ -546,9 +551,24 @@ an "engin de pêche" gear label, a "zone de pêche" / FAO catch area, or regulat
 does NOT make a product wild (see the production_method PRECEDENCE rule below).
 - Scientific names look like "Genus species" (e.g. Gadus morhua, Salmo salar): extract \
 one ONLY when it is printed; never derive it from a common name.
-- HEALTH MARK (estampille sanitaire): an oval mark "<country> <digits> CE/UE" or a short code \
-like "GB BB004" is almost always present — capture it verbatim in health_mark. Its country is \
-the establishment's, NOT the catch / farm origin (ABSOLUTE RULE 8).
+- HEALTH MARK (estampille sanitaire): prioritize a dedicated whole-label search for the \
+oval/circular approval stamp. OCR may omit the border or split the contents across lines; \
+recognize the printed sequence by its pattern: a two-letter country prefix, one or more \
+approval-number groups containing digits, and a final CE/UE/EC/EG suffix, or the UK form \
+"GB" plus its establishment code. The mark may be isolated from words such as "Approval" or \
+"Establishment". Join only adjacent OCR fragments that together form one clear mark; retain \
+all printed digits and separators, and cite each exact fragment. Do not mistake a nearby date, \
+origin, lot or FAO number for part of the mark. If different mark candidates appear, preserve \
+the ambiguity for review instead of choosing one. Its country is the establishment's, NOT the \
+catch / farm origin (ABSOLUTE RULE 8).
+- FAO_area is a priority traceability field. Search the entire OCR block specifically for \
+"FAO", "FAO area", "area", "zone", "catch area", "fishing area", "zone de pêche", \
+"zone FAO", "sous-zone", "sub-area", "division", "area code" and equivalent wording. \
+The cue and designation may be on adjacent lines or the value may be split across OCR lines. \
+Capture an explicitly associated numeric code (including dotted levels), Roman-numeral \
+sub-zone, or official area wording at the full precision printed. Keep qualifiers and all \
+sub-zones; never take a nearby lot, date, species code or approval number as the FAO value. \
+A sea name alone remains ambiguous; never derive a code from geography.
 - A 3-letter FAO SPECIES code printed next to a name (e.g. WHG = whiting, TRR = trout, HKE = \
 hake) is NOT a scientific_name and NOT an FAO_area — do not extract it into either.
 - CALIBRE / GRADING and pack counts ("150+", "180/300 g", "2-3 Kg", "4/5", "8 COLIS DE \
@@ -574,8 +594,10 @@ cue is printed; extract its name only.
 quoting each piece in "evidence". It never proves origin; use its initials in origin_country only \
 as the explicit ambiguous "à vérifier" fallback in ABSOLUTE RULE 8.
 - expiry_date, packaging_date: "value" is an ISO-8601 date string "YYYY-MM-DD" ONLY when \
-day, month and year are all unambiguous (textual months like "20 Jun 2026", or \
-already-ISO "2026-06-20"). A numeric date with a component >12 is NOT ambiguous - that \
+day, month and year are all unambiguous. Accept English and other textual-month forms \
+regardless of ordering or separators (e.g. "20 Jun 2026", "Jun 20, 2026", "20-JUN-26", \
+"20 June 2026") by using the explicit month name to determine the month; do not force these \
+through DD/MM/YYYY parsing. Accept already-ISO "2026-06-20". A numeric date with a component >12 is NOT ambiguous - that \
 component is the day, which fixes the order ("16.06.26" -> 2026-06-16, "17/06/2026" -> \
 2026-06-17, "22.06.26" -> 2026-06-22). Order is ambiguous ONLY when BOTH leading components \
 are <=12 (e.g. "04/05/2026" could be 4 May or 5 April): then "value" is null, \
@@ -584,12 +606,15 @@ Route dates by their EXPLICIT nearby label, never by visual position: "DLC", "D.
 limite de consommation", "date limite d'utilisation optimale", "à consommer jusqu'au/avant le", \
 "use by", "expiry date" and "best before" -> expiry_date; "emballé le", "emballage le", \
 "conditionné le", "conditionnement le", "mis en emballage", "mis sous vide", "mis en \
-barquette", "date d'emballage", "date de conditionnement", "date de conditionnage", "packed on" \
-and "pack date" -> packaging_date. A bare word such as \
+barquette", "date d'emballage", "date de conditionnement", "date de conditionnage", "packed on", \
+"pack date", "production date", "date of production", "produced on", "date produced", \
+"manufactured on", "manufacturing date" and "date of manufacture" -> packaging_date. Treat these \
+production/manufacture labels as the production date and place them in the existing \
+packaging_date field; do not create another field. A bare word such as \
 "emballage" or "conditionnement" without a date cue is NOT a date. Never copy one printed date \
 into both fields. If each label has its own date, preserve each mapping even when the lines are \
-adjacent. A "capture" / "abattage" / "production" date maps to NO field (do not force it into \
-packaging_date). For a month+year-only date, \
+adjacent. A capture / catch / slaughter date is not a packaging/production date and maps to no \
+field. For a month+year-only date, \
 the day is unknown: return value null, confidence 0, evidence [], validation_status \
 "ambiguous", and explain the reduced precision in a warning.
 - storage_temperature: "value" is a short Celsius string, e.g. "0-4 C", "<=4 C", \
@@ -618,7 +643,9 @@ packing / conditioning / dispatch country ("conditionné" / "emballé" / "expéd
 postal address) and the health-mark country are NOT the origin. When an explicit country is \
 printed ("Origine : Norvège", "Pays d'origine : France", "Elevé en France"), use that country; \
 otherwise use the Rule 8 review fallback when a health mark is available.
-- FAO_area: capture the FAO catch-area designation EXACTLY AS PRINTED, copied verbatim, \
+- FAO_area: perform the dedicated whole-label second search for FAO cues even after the \
+prominent product fields are found. Capture the FAO catch-area designation EXACTLY AS PRINTED, \
+copied verbatim, \
 keeping EVERY level shown — major area, sub-area / sous-zone, division and sub-division. \
 This covers BOTH a numeric code ("27", "27.7", "27.8.b.1" — copy the MOST precise one \
 printed; never truncate "27.8.b.1" to "27") AND the official worded / Roman-numeral form \
@@ -739,9 +766,13 @@ def _seafood_v3_text() -> str:
     start = prompt.index("Route dates by their EXPLICIT nearby label")
     end = prompt.index("- storage_temperature:", start)
     prompt = prompt[:start] + (
-        'Use only explicit packing/conditioning date cues: "emballé le", '
-        '"conditionné le", "date de conditionnement", "packed on", "pack date". '
-        'Never substitute a use-by, best-before, capture or production date.\n'
+        'Use only explicit packing/conditioning/production date cues: "emballé le", '
+        '"conditionné le", "date de conditionnement", "packed on", "pack date", '
+        '"production date", "date of production", "produced on", "manufactured on". '
+        'Store a production/manufacture date in the existing packaging_date field. Parse '
+        'textual English month forms by the month name (e.g. "Jun 20, 2026" or '
+        '"20-JUN-26") and return YYYY-MM-DD when day, month and year are unambiguous. '
+        'Never substitute a use-by/best-before or capture/catch date.\n'
     ) + prompt[end:]
     start = prompt.index("- gtin:")
     end = prompt.index("EMPTY OR UNREADABLE OCR:", start)
@@ -879,6 +910,8 @@ Return only the JSON object."""
 def _profile_prompt_version(profile: TradeProfile) -> str:
     if profile.code == "poissonnerie" and profile.version == "2":
         return _PROMPT_VERSION
+    if profile.code == "poissonnerie" and profile.version == "3":
+        return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v2.1.0"
     return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v2.0.0"
 
 

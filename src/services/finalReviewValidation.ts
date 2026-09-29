@@ -1,5 +1,7 @@
 /** Client-side mirror of the backend's versioned FieldSpec review contract. */
 
+import { isDateField, toIsoDate } from './inputMasks';
+
 type FieldKind =
   | 'text'
   | 'date'
@@ -122,6 +124,7 @@ export function canonicalizeFinalReviewValue(
 ): string {
   let value = (rawValue ?? '').normalize('NFC').trim();
   if (value.toUpperCase() === 'NC') return 'NC';
+  if (isDateField(fieldName)) value = toIsoDate(value);
   if (fieldName === 'production_method') {
     const localized = value.toLocaleLowerCase('fr-FR');
     if (localized === 'pêche sauvage') value = 'wild_caught';
@@ -188,7 +191,7 @@ export function validateFinalReviewValues(
     }
 
     if (spec.kind === 'date' && !validIsoDate(value)) {
-      errors.push({ fieldName, message: 'Saisissez une date complète au format JJ/MM/AAAA.' });
+      errors.push({ fieldName, message: 'Saisissez une date complète valide (ex. 20 juin 2026 ou 2026-06-20).' });
     } else if (spec.kind === 'enum' && !PRODUCTION_METHODS.has(value)) {
       errors.push({ fieldName, message: 'Choisissez Pêche sauvage ou Élevage.' });
     } else if (spec.kind === 'gtin' && !isValidGtin(value)) {
