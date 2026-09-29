@@ -46,7 +46,7 @@ export const charcuterieTraiteurPortal = {
       title: 'Dates, conditionnement et conservation',
       fields: [
         { key: 'preparation_date', label: 'Date de préparation', format: 'date' },
-        { key: 'packaging_date', label: 'Date de conditionnement', format: 'date' },
+        { key: 'packaging_date', label: 'Date de l’étiquette', format: 'date' },
         { key: 'conditioning_type', label: 'Conditionnement' },
         { key: 'storage_mode', label: 'Chaîne de conservation' },
         { key: 'storage_temperature', label: 'Température de conservation', format: 'temperature' },
@@ -82,7 +82,7 @@ export const charcuterieTraiteurPortal = {
     { field: 'additives', label: 'Additifs', type: 'text', placeholder: 'Ex. E250, nitrite' },
   ],
   secondaryColumns: [
-    { key: 'packaging-date', label: 'Conditionné le', source: 'packaging_date', format: 'date' },
+    { key: 'packaging-date', label: 'Date de l’étiquette', source: 'packaging_date', format: 'date' },
   ],
   labels: {
     pageTitle: 'Réceptions Charcuterie–Traiteur',

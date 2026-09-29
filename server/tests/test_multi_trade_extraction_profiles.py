@@ -7,7 +7,11 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from labelscan.business_profiles import TRADE_PROFILES, trade_profile
+from labelscan.business_profiles import (
+    HIDDEN_REVIEW_FIELDS,
+    TRADE_PROFILES,
+    trade_profile,
+)
 from labelscan.contexts.ingestion.adapters.claude_llm_provider import (
     _output_schema,
     _system_text_for,
@@ -257,10 +261,12 @@ def test_consumer_uses_ingestion_profile_without_fish_requirements(
     assert llm.last_trade_profile_version == "1"
 
 
-@pytest.mark.parametrize("trade_code", ["boucherie", "charcuterie_traiteur"])
+@pytest.mark.parametrize("trade_code", ["poissonnerie", "boucherie", "charcuterie_traiteur"])
+@pytest.mark.parametrize("hide_retired", [False, True])
 def test_sql_final_review_persists_the_authoritative_ingestion_profile(
     engine,
     trade_code: str,
+    hide_retired: bool,
 ) -> None:
     ingestion_id = str(uuid.uuid4())
     run_id = str(uuid.uuid4())
@@ -329,7 +335,19 @@ def test_sql_final_review_persists_the_authoritative_ingestion_profile(
             },
         )
 
-    fields = {name: "NC" for name in trade_profile(trade_code, "2").fields}
+        conn.execute(text("""
+            INSERT INTO ingestion.extracted_field (
+                extraction_run_id, field_name, value, evidence, provenance,
+                source_raw_artifact_id, validation_status, warnings,
+                combined_confidence, confidence_band, source
+            ) SELECT :run_id, 'gtin', '"4006381333931"'::jsonb,
+                '["4006381333931"]'::jsonb, '{"source":"gs1"}'::jsonb,
+                id, 'present', '[]'::jsonb, 0.98, 'high', 'gs1'
+              FROM ingestion.raw_artifact WHERE ingestion_id = :ingestion_id
+        """), {"run_id": run_id, "ingestion_id": ingestion_id})
+
+    fields = {name: "NC" for name in trade_profile(trade_code, "2").fields
+              if not hide_retired or name not in HIDDEN_REVIEW_FIELDS}
     result = FinalizeReview(SqlReviewRepository(engine))(
         FinalizeReviewCommand(
             ingestion_id=ingestion_id,
@@ -351,4 +369,17 @@ def test_sql_final_review_persists_the_authoritative_ingestion_profile(
                 {"run_id": result.run_id},
             ).scalars()
         )
-    assert stored == set(fields)
+        original = conn.execute(text(
+            "SELECT value, evidence, provenance, source, combined_confidence "
+            "FROM ingestion.extracted_field WHERE extraction_run_id = :run AND field_name = 'gtin'"
+        ), {"run": run_id}).one()
+        reviewed = conn.execute(text(
+            "SELECT value, evidence, provenance, source, combined_confidence "
+            "FROM ingestion.extracted_field WHERE extraction_run_id = :run AND field_name = 'gtin'"
+        ), {"run": result.run_id}).one()
+        if hide_retired:
+            assert reviewed == original
+        else:
+            assert reviewed.source == "human"
+            assert reviewed.value == "NC"
+    assert stored == set(fields) | ({"gtin"} if hide_retired else set())

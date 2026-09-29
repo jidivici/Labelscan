@@ -27,8 +27,6 @@ function formatDate(value: string): string {
 }
 
 function fieldLabel(key: string): string {
-  if (key === 'gtin') return 'Code-barres (GTIN) — historique';
-  if (key === 'expiry_date') return 'Date limite — historique';
   return key.replaceAll('_', ' ').replace(/^./, (letter) => letter.toLocaleUpperCase('fr-FR'));
 }
 
@@ -108,9 +106,9 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
     const configured = detailPortal?.detailSections ?? [];
     const knownFields = new Set(configured.flatMap((section) => section.fields.map((field) => field.key)));
     const additionalFields = Object.keys(detail.fields)
-      .filter((key) => key !== 'price' && !knownFields.has(key) && Boolean(detail.fields[key]?.trim()))
+      .filter((key) => !['price', 'gtin', 'expiry_date', 'barcode_raw'].includes(key) && !knownFields.has(key) && Boolean(detail.fields[key]?.trim()))
       .sort((left, right) => left.localeCompare(right, 'fr'))
-      .map((key) => ({ key, label: fieldLabel(key), format: key === 'expiry_date' ? 'date' as const : 'text' as const }));
+      .map((key) => ({ key, label: fieldLabel(key), format: 'text' as const }));
     return additionalFields.length > 0
       ? [...configured, { id: 'additional', title: 'Informations complémentaires', fields: additionalFields }]
       : configured;
@@ -124,7 +122,7 @@ export function ArrivalDetailPanel({ stores }: { stores: Store[] }) {
   const productionMethod = productionMethodLabel(detail?.fields.production_method);
   const summaryFacts = detail ? [
     lot ? { label: 'N° de lot', value: lot } : null,
-    display(detail.fields.expiry_date) ? { label: 'Date limite', value: formatDate(display(detail.fields.expiry_date)!) } : null,
+    display(detail.fields.packaging_date) ? { label: 'Date de l’étiquette', value: formatDate(display(detail.fields.packaging_date)!) } : null,
     display(detail.fields.origin_country) ? { label: 'Origine', value: display(detail.fields.origin_country)! } : null,
     display(detail.fields.FAO_area) ? { label: 'Zone FAO', value: display(detail.fields.FAO_area)! } : null,
   ].filter((fact): fact is { label: string; value: string } => fact !== null) : [];

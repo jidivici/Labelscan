@@ -72,3 +72,17 @@ describe('DetailSections', () => {
     expect(screen.queryByText('8.95 EUR')).not.toBeInTheDocument();
   });
 });
+
+it('masque GTIN et DLC même dans une section historique renseignée', () => {
+  render(<DetailSections sections={[{
+    id: 'historical-data', title: 'Historique', fields: [
+      { key: 'gtin', label: 'Code-barres', format: 'text' },
+      { key: 'expiry_date', label: 'DLC', format: 'date' },
+      { key: 'packaging_date', label: 'Date de l’étiquette', format: 'date' },
+    ],
+  }]} fields={{ gtin: '1234567890123', expiry_date: '2026-12-31', packaging_date: '2026-09-29' }} />);
+  expect(screen.queryByText('Code-barres')).not.toBeInTheDocument();
+  expect(screen.queryByText('1234567890123')).not.toBeInTheDocument();
+  expect(screen.queryByText('DLC')).not.toBeInTheDocument();
+  expect(screen.getByText('Date de l’étiquette')).toBeInTheDocument();
+});

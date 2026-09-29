@@ -89,6 +89,8 @@ def test_json_export_uses_allowlist_and_tenant_context() -> None:
     assert response.status_code == 200
     row = response.json()[0]
     assert row["product_name"] == "Cabillaud"
+    assert "gtin" not in row
+    assert "use_by" not in row
     assert "captured_by_user_id" not in row
     assert "photo_available" not in row
     assert "token" not in json.dumps(row).casefold()

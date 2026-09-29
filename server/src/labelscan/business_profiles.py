@@ -24,6 +24,7 @@ COMMON_FIELDS_V1 = (
 
 COMMON_FIELDS_V2 = tuple(field for field in COMMON_FIELDS_V1 if field != "price")
 RETIRED_FIELDS = frozenset({"expiry_date", "gtin"})
+HIDDEN_REVIEW_FIELDS = RETIRED_FIELDS | {"price"}
 COMMON_FIELDS = tuple(field for field in COMMON_FIELDS_V2 if field not in RETIRED_FIELDS)
 
 

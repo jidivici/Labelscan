@@ -65,7 +65,7 @@ export const ArticleCard = React.memo(function ArticleCard({
   const producer = fieldValue('producer_name') || fieldValue('reseller_brand');
   const productionMethod = displayFieldValue('production_method', fieldValue('production_method'));
   const origin = fieldValue('origin_country');
-  const title = commonName(article) || article.barcode_raw || 'NC';
+  const title = commonName(article) || 'Produit à renseigner';
   const description =
     [scientificName || producer, productionMethod, origin].filter(Boolean).join(' · ') ||
     'NC';

@@ -18,7 +18,7 @@ const FIELD_LABELS_FR: Record<string, string> = {
   production_method: 'Méthode de production',
   fishing_gear_or_farming_method: "Engin de pêche / d'élevage",
   expiry_date: 'Date limite de consommation',
-  packaging_date: "Date d'emballage",
+  packaging_date: "Date de l’étiquette",
   storage_temperature: 'Température de conservation',
   allergens: 'Allergènes',
   health_mark: 'Estampille sanitaire',

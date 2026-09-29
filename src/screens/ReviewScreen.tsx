@@ -34,7 +34,7 @@ import {
   persistConfirmedPhoto,
 } from '../services/storage';
 import { queryClient } from '../services/queryClient';
-import { businessProfileFor } from '../services/businessProfiles';
+import { visibleBusinessProfileFor } from '../services/businessProfiles';
 import { catalogQueryKey } from '../services/catalogApi';
 import { ProductionMethodSelector } from '../components/ProductionMethodSelector';
 import { buildFieldHistory, suggestForField, type FieldHistory } from '../services/fieldHistory';
@@ -530,7 +530,7 @@ export function ReviewScreen() {
   const ingestionId = scan?.ingestionId ?? null;
   const photoUri = scan?.photoUri;
   const barcodeRaw = scan?.barcodeRaw;
-  const reviewProfile = businessProfileFor(scan?.tradeCode ?? tradeCode, ingestion?.trade_profile_version);
+  const reviewProfile = visibleBusinessProfileFor(scan?.tradeCode ?? tradeCode, ingestion?.trade_profile_version);
   const fieldGroups = reviewProfile.groups;
   const fieldOrder = reviewProfile.fields;
   const currentScopeKey = useMemo(
@@ -699,8 +699,8 @@ export function ReviewScreen() {
 
   // Effective value of each canonical field = the operator's draft if present, else the
   // display-formatted extracted value. For farmed seafood, a FAO catch area does not
-  // apply: project the explicit final-review value NC unless the operator entered a
-  // different FAO value. This is exactly what handleSave persists, so the counter and
+  // apply: use NC only when no printed or manually entered FAO value is available.
+  // Preserve any actual FAO value. This is exactly what handleSave persists, so the counter and
   // the backend payload cannot diverge.
   const effectiveValues = useMemo(() => {
     const out: Record<string, string> = {};
@@ -719,7 +719,7 @@ export function ReviewScreen() {
     if (
       reviewProfile.code === 'poissonnerie' &&
       canonicalizeFinalReviewValue('production_method', out.production_method) === 'farmed' &&
-      !(edits.FAO_area?.trim())
+      !out.FAO_area?.trim()
     ) {
       out.FAO_area = NOT_COMMUNICATED_VALUE;
     }

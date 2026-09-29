@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from labelscan.business_profiles import (
+    HIDDEN_REVIEW_FIELDS,
     LEGACY_TRADE_PROFILES,
     TRADE_PROFILES,
     trade_profile,
@@ -86,8 +87,9 @@ class FinalizeReview:
             raise ValueError("photo base rotation must be -90 or 0 degrees")
         submitted = set(command.fields)
         contracts = [
-            set(profile.fields)
+            fields
             for profile in (*TRADE_PROFILES.values(), *LEGACY_TRADE_PROFILES.values())
+            for fields in (set(profile.fields), set(profile.fields) - HIDDEN_REVIEW_FIELDS)
         ]
         if submitted not in contracts:
             # Report the closest versioned contract. This preserves the useful

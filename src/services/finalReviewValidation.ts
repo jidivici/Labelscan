@@ -55,7 +55,7 @@ const TEMPERATURE = /^(?:(<=|>=|≤|≥)\s*)?(-?\d+(?:[.,]\d+)?)(?:\s*(?:-|–|�
 const HEALTH_MARK = /^[A-Z]{2}[ A-Z0-9.\-/]{1,61}$/;
 // Mirror Python's Unicode-aware `[^\W_]` FAO contract: the printed designation may
 // contain words (including accents), digits and the limited regulatory punctuation.
-const FAO_AREA = /^[\p{L}\p{N}](?:[\p{L}\p{N}]|[ .,/()'\-]){0,119}$/u;
+const FAO_AREA = /^[\p{L}\p{N}](?:[\p{L}\p{N}]|[ .,:;/()'’–\-]){0,119}$/u;
 const COUNTRY = /^\p{L}[\p{L}\p{N}_ .\-'’]{0,79}$/u;
 const BIDI_CONTROLS = new Set([
   '\u061c',
@@ -103,7 +103,7 @@ function validIsoDate(value: string): boolean {
   const year = Number(match[1]);
   const month = Number(match[2]);
   const day = Number(match[3]);
-  if (year < 1 || month < 1 || month > 12 || day < 1) return false;
+  if (year < 2000 || year > 2100 || month < 1 || month > 12 || day < 1) return false;
   return day <= new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
@@ -125,6 +125,7 @@ export function canonicalizeFinalReviewValue(
   let value = (rawValue ?? '').normalize('NFC').trim();
   if (value.toUpperCase() === 'NC') return 'NC';
   if (isDateField(fieldName)) value = toIsoDate(value);
+  if (fieldName === 'FAO_area') value = value.replace(/[ \t\r\n\u00a0]+/g, ' ');
   if (fieldName === 'production_method') {
     const localized = value.toLocaleLowerCase('fr-FR');
     if (localized === 'pêche sauvage') value = 'wild_caught';

@@ -26,7 +26,6 @@ function professionLabel(arrival: Arrival): string | null {
 function productTitle(arrival: Arrival): string {
   return arrival.product_name?.trim()
     || (arrival.lot_code?.trim() ? `Lot ${arrival.lot_code}` : '')
-    || arrival.gtin?.trim()
     || arrival.batch_id;
 }
 
@@ -68,7 +67,7 @@ export function ArrivalTable({ arrivals, stores, portal }: { arrivals: Arrival[]
       const detailPath = `/o/${organizationSlug}/portails/${profession}/arrivages/${arrival.batch_id}${query}`;
       const openDetail = () => navigate(detailPath);
       return <tr key={arrival.batch_id} className="arrival-row" role="link" tabIndex={0} aria-label={`Voir ${productTitle(arrival)}`} onClick={openDetail} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openDetail(); } }}>
-      <td><div className="product-cell"><ArrivalImage batchId={arrival.batch_id} available={arrival.photo_available} rotationDegrees={arrival.photo_rotation_degrees} baseRotationDegrees={arrival.photo_base_rotation_degrees} /><span><strong>{productTitle(arrival)}</strong>{(arrival.scientific_name || arrival.gtin) && <small>{arrival.scientific_name || arrival.gtin}</small>}</span></div></td>
+      <td><div className="product-cell"><ArrivalImage batchId={arrival.batch_id} available={arrival.photo_available} rotationDegrees={arrival.photo_rotation_degrees} baseRotationDegrees={arrival.photo_base_rotation_degrees} /><span><strong>{productTitle(arrival)}</strong>{arrival.scientific_name && <small>{arrival.scientific_name}</small>}</span></div></td>
       {showProfession && <td>{professionLabel(arrival) && <span className="profession-badge">{professionLabel(arrival)}</span>}</td>}
       {showLot && <td>{arrival.lot_code?.trim() && <span className="lot-code">{arrival.lot_code}</span>}</td>}
       {showStore && <td>{storeLabel(stores, arrival.store_code)}</td>}

@@ -2,7 +2,7 @@
  * FrameOverlay — label-placement guide drawn over the camera viewfinder.
  *
  * A large centered window (where the operator places the whole label) with a light
- * focus veil outside it, corner brackets and a discreet "barcode detected" badge.
+ * focus veil outside it and corner brackets.
  *
  * The window is both the placement guide and the crop region: the full photo is
  * captured, then cropped to this frame before it is sent to the backend (see
@@ -12,7 +12,6 @@
 
 import React, { useEffect } from 'react';
 import { StyleSheet, View, Text } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
@@ -22,7 +21,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { colors, spacing, radius, typography } from '../theme';
 
-export type FrameState = 'ready' | 'barcodeFound' | 'capturing' | 'error';
+export type FrameState = 'ready' | 'capturing' | 'error';
 
 interface FrameOverlayProps {
   state: FrameState;
@@ -41,7 +40,6 @@ const CAPTION_BACKGROUND = 'rgba(0,0,0,0.58)';
 // High-contrast brackets (white) at rest for sunlight; tinted by state otherwise.
 const bracketColor: Record<FrameState, string> = {
   ready: colors.onPrimary,
-  barcodeFound: colors.success,
   capturing: colors.primary,
   error: colors.error,
 };
@@ -79,7 +77,7 @@ export function FrameOverlay({
       <View style={[styles.scrim, { top: frameTop, left: 0, width: frameLeft, height: frameHeight }]} />
       <View style={[styles.scrim, { top: frameTop, left: frameLeft + frameWidth, right: 0, height: frameHeight }]} />
 
-      {/* Frame window: corner brackets + barcode badge */}
+      {/* Frame window: corner brackets */}
       <View
         style={{
           position: 'absolute',
@@ -95,13 +93,6 @@ export function FrameOverlay({
           <View style={[styles.cornerBL, { borderColor: color }]} />
           <View style={[styles.cornerBR, { borderColor: color }]} />
         </Animated.View>
-
-        {state === 'barcodeFound' ? (
-          <View style={styles.badge}>
-            <MaterialCommunityIcons name="barcode-scan" size={14} color={colors.onPrimary} />
-            <Text style={[typography.labelMedium, styles.badgeText]}>Code-barres détecté</Text>
-          </View>
-        ) : null}
       </View>
 
       {state === 'error' ? (
@@ -157,21 +148,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: CORNER_THICKNESS,
     borderRightWidth: CORNER_THICKNESS,
     borderBottomRightRadius: radius.lg,
-  },
-  badge: {
-    position: 'absolute',
-    bottom: spacing.sm,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-    backgroundColor: colors.success,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.sm,
-  },
-  badgeText: {
-    color: colors.onPrimary,
   },
   caption: {
     position: 'absolute',

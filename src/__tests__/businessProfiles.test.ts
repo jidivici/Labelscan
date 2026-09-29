@@ -1,6 +1,7 @@
 import {
   BUSINESS_PROFILES,
   businessProfileFor,
+  visibleBusinessProfileFor,
   inferTradeCodeFromFields,
   isTradeCode,
 } from '../services/businessProfiles';
@@ -110,5 +111,18 @@ describe('DLC / GTIN retirement', () => {
     expect(historical.fields).toEqual(expect.arrayContaining(['expiry_date', 'gtin']));
     expect(historical.requiredFields).toContain('expiry_date');
     expect(historical.fields.length).toBe(current.fields.length + 2);
+  });
+});
+
+describe('visible historical contracts', () => {
+  it.each(['1', '2', '3'])('hides retired fields for version %s without changing stored contracts', (version) => {
+    for (const trade of ['poissonnerie', 'boucherie', 'charcuterie_traiteur']) {
+      const visible = visibleBusinessProfileFor(trade, version);
+      expect(visible.fields).not.toContain('gtin');
+      expect(visible.fields).not.toContain('expiry_date');
+      expect(visible.fields).not.toContain('price');
+      expect(visible.requiredFields.every(name => visible.fields.includes(name))).toBe(true);
+      if (version !== '3') expect(businessProfileFor(trade, version).fields).toContain('gtin');
+    }
   });
 });

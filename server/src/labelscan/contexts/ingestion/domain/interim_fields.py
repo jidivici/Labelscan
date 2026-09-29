@@ -25,6 +25,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from labelscan.contexts.ingestion.domain.label_dates import (
+    DATE_PATTERN,
+    normalize_label_date,
+)
+
 
 @dataclass(frozen=True)
 class InterimField:
@@ -46,11 +51,6 @@ def _norm(text: str) -> str:
 
 
 # ── dates ─────────────────────────────────────────────────────────────────────
-
-# ISO first (already canonical), then numeric D<sep>M<sep>Y in FR label order.
-_ISO_DATE = r"(20\d{2})-(\d{2})-(\d{2})"
-_NUM_DATE = r"(\d{1,2})[./-](\d{1,2})[./-](\d{2}(?:\d{2})?)"
-_DATE_ALT = f"(?:{_ISO_DATE}|{_NUM_DATE})"
 
 # Label keys, matched on the normalized (lowercase, accent-folded) text. The date
 # must follow within a few junk characters (": le ", " - ") — a date elsewhere on
@@ -88,34 +88,42 @@ _PACKAGING_KEYS = (
 )
 
 
-def _valid_ymd(year: int, month: int, day: int) -> str | None:
-    if not (2000 <= year <= 2099 and 1 <= month <= 12 and 1 <= day <= 31):
-        return None
-    return f"{year:04d}-{month:02d}-{day:02d}"
-
-
-def _normalize_date_match(m: re.Match) -> str | None:
-    if m.group(1) is not None:  # ISO branch
-        return _valid_ymd(int(m.group(1)), int(m.group(2)), int(m.group(3)))
-    a, b = int(m.group(4)), int(m.group(5))
-    y = m.group(6)
-    year = int(y) + 2000 if len(y) == 2 else int(y)
-    # Prompt-contract order rule: a component >12 is the day; both <=12 = ambiguous.
-    if a > 12 and b <= 12:
-        return _valid_ymd(year, b, a)
-    if b > 12 and a <= 12:
-        return _valid_ymd(year, a, b)
-    return None  # both <=12 (order-ambiguous) or both >12 (invalid) — never guess
+_PRODUCTION_KEYS = (
+    r"date de (?:production|fabrication|preparation)",
+    r"(?:produit|fabrique|prepare) le", r"production date", r"date of production",
+    r"produced on", r"date produced", r"manufactured on", r"manufacturing date",
+    r"date of manufacture", r"preparation date", r"prepared on", r"mfg(?: date)?",
+)
+_OTHER_DATE_KEYS = (
+    r"date de (?:peche|capture|recolte|congelation|abattage)",
+    r"(?:peche|capture|recolte|congele|abattu) le",
+    r"(?:catch|capture|harvest|freezing|slaughter) date",
+    r"date of (?:catch|capture|harvest|freezing|slaughter)",
+    r"(?:caught|harvested|frozen|slaughtered) on",
+)
 
 
 def _dates_after_keys(norm_text: str, keys: tuple[str, ...]) -> set[str]:
     found: set[str] = set()
     for key in keys:
-        for m in re.finditer(rf"{key}\s*[:.]?\s*(?:le\s+)?.{{0,6}}?{_DATE_ALT}", norm_text):
-            iso = _normalize_date_match(m)
-            if iso is not None:
-                found.add(iso)
+        for match in re.finditer(rf"\b(?:{key})\b", norm_text):
+            tail = norm_text[match.end():]
+            candidate = re.match(
+                rf"\s*[:.=-]?\s*(?:le\s+)?({DATE_PATTERN})(?![\w/.-])", tail
+            )
+            # An ambiguous/invalid candidate must not disappear in favor of a
+            # different valid candidate. An empty sentinel blocks the preview.
+            iso = normalize_label_date(candidate.group(1)) if candidate else None
+            found.add(iso or "")
     return found
+
+
+def _available_dates(norm_text: str) -> set[str]:
+    for keys in (_PACKAGING_KEYS, _PRODUCTION_KEYS, _OTHER_DATE_KEYS):
+        found = _dates_after_keys(norm_text, keys)
+        if found:
+            return found
+    return set()
 
 
 # ── storage temperature ───────────────────────────────────────────────────────
@@ -307,14 +315,14 @@ def extract_interim_fields(full_text: str) -> tuple[InterimField, ...]:
 
     candidates: dict[str, set[str]] = {
         "expiry_date": _dates_after_keys(norm, _EXPIRY_KEYS),
-        "packaging_date": _dates_after_keys(norm, _PACKAGING_KEYS),
+        "packaging_date": _available_dates(norm),
         "storage_temperature": _temperatures(norm),
         "batch_number": _batches(full_text),
     }
     preview = tuple(
         InterimField(name=name, value=next(iter(values)))
         for name, values in candidates.items()
-        if len(values) == 1
+        if len(values) == 1 and "" not in values
     )
     # The persisted interim schema intentionally stays small. Net weight complements
     # the final run, while the established deterministic preview fields remain the

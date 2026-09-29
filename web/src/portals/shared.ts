@@ -23,7 +23,7 @@ export const COMMON_DATES_CONSERVATION_SECTION: PortalDetailSection = {
   id: 'dates-conservation',
   title: 'Dates et conservation',
   fields: [
-    { key: 'packaging_date', label: 'Date de conditionnement', format: 'date' },
+    { key: 'packaging_date', label: 'Date de l’étiquette', format: 'date' },
     { key: 'storage_temperature', label: 'Température', format: 'temperature' },
     { key: 'allergens', label: 'Allergènes' },
   ],

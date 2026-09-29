@@ -134,8 +134,8 @@ export function validateHealthMark(value: string): string | null {
 // ── Date canonicalization (storage = ISO; accept multiple manual formats) ─────────
 
 const MONTHS: Record<string, number> = {
-  jan: 1, january: 1, janvier: 1,
-  feb: 2, february: 2, fev: 2, fevrier: 2, février: 2,
+  jan: 1, janv: 1, january: 1, janvier: 1,
+  feb: 2, february: 2, fev: 2, fevr: 2, fevrier: 2, février: 2,
   mar: 3, march: 3, mars: 3,
   apr: 4, april: 4, avr: 4, avril: 4,
   may: 5, mai: 5,
@@ -168,35 +168,43 @@ function parseDateInput(value: string): ParsedDate {
   const v = value.trim();
   if (!v) return { iso: null, complete: false, error: null };
 
+  if (/^\d{8}$/.test(v)) {
+    const leadingYear = +v.slice(0, 4);
+    if (leadingYear >= 2000 && leadingYear <= 2100 && +v.slice(4, 6) <= 12) {
+      return dateFromParts(leadingYear, +v.slice(4, 6), +v.slice(6));
+    }
+    return dateFromParts(+v.slice(4), +v.slice(2, 4), +v.slice(0, 2));
+  }
+
   let m = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(v);
   if (m) return dateFromParts(+m[1], +m[2], +m[3]);
-  m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(v);
+  m = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4}|\d{2})$/.exec(v);
   if (m) {
     const first = +m[1];
     const second = +m[2];
-    const year = +m[3];
+    const year = +m[3] + (m[3].length === 2 ? 2000 : 0);
     if (year < 2000 || year > 2100) return { iso: null, complete: true, error: 'Année invalide' };
-    if (first > 12 && second <= 12) return dateFromParts(+m[3], second, first);
-    if (second > 12 && first <= 12) return dateFromParts(+m[3], first, second);
+    if (first > 12 && second <= 12) return dateFromParts(year, second, first);
+    if (second > 12 && first <= 12) return dateFromParts(year, first, second);
     // The app is French-localized: when both leading components can be months,
     // preserve the established DD/MM/YYYY interpretation. Month-first dates with
     // an unambiguous day (e.g. 06/20/2026) are handled by the branch above.
-    return dateFromParts(+m[3], second, first);
+    return dateFromParts(year, second, first);
   }
 
   const normalized = v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
   const textual = [
-    /^(\d{1,2})(?:st|nd|rd|th)?[ .-]+([a-z]+)\.?[ ,.-]+(\d{4})$/,
-    /^([a-z]+)\.?[ ,.-]+(\d{1,2})(?:st|nd|rd|th)?[,]?[ .-]+(\d{4})$/,
+    /^(\d{1,2})(?:st|nd|rd|th|er)?[ ./-]+([a-z]+)\.?[ ,./-]+(\d{4}|\d{2})$/,
+    /^([a-z]+)\.?[ ,./-]+(\d{1,2})(?:st|nd|rd|th)?[,]?[ ./-]+(\d{4}|\d{2})$/,
   ];
   for (const [index, pattern] of textual.entries()) {
     m = pattern.exec(normalized);
     if (!m) continue;
     const monthToken = (index === 0 ? m[2] : m[1]).replace(/\.$/, '');
-    const month = MONTHS[monthToken] ?? MONTHS[monthToken.slice(0, 3)];
+    const month = MONTHS[monthToken];
     if (month == null) return { iso: null, complete: true, error: 'Mois invalide' };
     const day = +(index === 0 ? m[1] : m[2]);
-    const year = +m[3];
+    const year = +m[3] + (m[3].length === 2 ? 2000 : 0);
     return dateFromParts(year, month, day);
   }
 

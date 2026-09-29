@@ -44,7 +44,8 @@ import {
 import { formatFaoDisplay } from '../services/faoDisplay';
 import { commonName } from '../services/articleGrouping';
 import {
-  businessProfileFor,
+  visibleBusinessProfileFor,
+  HIDDEN_FIELDS,
   inferTradeCodeFromFields,
   type FieldGroup,
 } from '../services/businessProfiles';
@@ -107,7 +108,6 @@ const FIELD_ICON: Record<string, IconName> = {
   origin_country: 'flag-outline',
   health_mark: 'shield-check-outline',
   batch_number: 'identifier',
-  expiry_date: 'calendar-alert',
   packaging_date: 'calendar-outline',
   storage_temperature: 'thermometer',
   weight: 'scale-balance',
@@ -169,7 +169,7 @@ interface DisplayFieldGroup {
 
 /** Group saved fields by shared business logic; unexpected legacy fields stay visible. */
 function groupFields(fields: ArticleField[], fieldGroups: readonly FieldGroup[]): DisplayFieldGroup[] {
-  const byName = new Map(fields.filter((field) => field.field_name !== 'price').map((f) => [f.field_name, f]));
+  const byName = new Map(fields.filter((field) => !HIDDEN_FIELDS.has(field.field_name)).map((f) => [f.field_name, f]));
   const groups: DisplayFieldGroup[] = [];
 
   for (const group of fieldGroups) {
@@ -268,10 +268,8 @@ function FieldCard({
   last: boolean;
 }) {
   const name = field.field_name;
-  const display = displayFinalFieldValue(name, field.value);
-  // FAO: show the exact value, with the human "mer + sous-zone" summary as a quiet subtitle.
-  const subtitle = name === 'FAO_area' && field.value ? formatFaoDisplay(field.value) : null;
-  const showSubtitle = !!subtitle && subtitle !== field.value;
+  const display = displayFinalFieldValue(name,
+    name === 'FAO_area' ? formatFaoDisplay(field.value) ?? null : field.value);
   const editable = editing;
   const emit = useCallback((t: string) => onChange(name, t), [onChange, name]);
 
@@ -331,9 +329,6 @@ function FieldCard({
             >
               {display}
             </Text>
-            {showSubtitle ? (
-              <Text style={[typography.bodySmall, styles.cardSubtitle]}>{subtitle}</Text>
-            ) : null}
           </>
         )}
       </View>
@@ -458,7 +453,7 @@ export function ArticleDetailScreen() {
       ),
     [article, tradeCode],
   );
-  const articleProfile = businessProfileFor(articleTradeCode, article?.trade_profile_version);
+  const articleProfile = visibleBusinessProfileFor(articleTradeCode, article?.trade_profile_version);
   const groupedFields = useMemo(
     () => groupFields(article?.fields ?? [], articleProfile.groups),
     [article, articleProfile.groups],
@@ -717,7 +712,6 @@ export function ArticleDetailScreen() {
     fieldValue('production_method') || null,
   );
   const origin = fieldValue('origin_country');
-  const expiryDate = displayFinalFieldValue('expiry_date', fieldValue('expiry_date') || null);
   const explicitDescription = fieldValue('description') || fieldValue('product_description');
   const descriptionParts = [
     tradeDescription,
@@ -732,9 +726,6 @@ export function ArticleDetailScreen() {
       label: 'N° DE LOT',
       value: displayFinalFieldValue('batch_number', lot?.value ?? null),
     },
-    articleProfile.fields.includes('expiry_date')
-      ? { icon: 'calendar-alert' as IconName, label: 'DATE LIMITE', value: expiryDate }
-      : null,
     {
       icon: 'map-marker-outline' as IconName,
       label: 'ORIGINE',

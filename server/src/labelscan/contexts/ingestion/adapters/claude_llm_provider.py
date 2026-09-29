@@ -776,19 +776,45 @@ EXPECTED JSON:
 Return only the JSON object."""
 
 
+_AVAILABLE_DATE_GUIDANCE = """- packaging_date is the single available label-date field. Route by EXPLICIT labels:
+  priority 1: packing/conditioning (emballé le, conditionné le, packed on, pack date);
+  priority 2: production/manufacture/preparation (produit le, fabriqué le, préparé le,
+  production date, date of production, produced on, MFG, manufactured on, prepared on);
+  priority 3: catch/capture/harvest/freezing/slaughter (pêché le, congelé le, caught on,
+  catch date, harvested on, frozen on, freezing date, abattu le).
+  Choose the highest priority actually printed. Quote the date AND its label in evidence.
+  For a fallback, add a warning naming its type (e.g. Date de congélation). Never
+  replace an ambiguous higher-priority date with a lower-priority one. Distinct dates
+  at the same priority are ambiguous: value null, warning quoting the candidates.
+  NEVER use DLC, DDM, DLUO, EXP, expiration, use by, best before, à consommer avant/jusqu'au,
+  or an unlabelled date, even if it is the only date. Never infer dates from a lot code.
+  Normalize complete calendar dates to YYYY-MM-DD. Accept YYYY/MM/DD, DD.MM.YYYY,
+  DD.MM.YY, 20 Jun 2026, Jun 20, 2026, 20/JUN/26, 1st July 2026, YYYYMMDD and DDMMYYYY
+  when the four-digit year is clear. Two-digit years mean 2000–2099. Named French or
+  English months determine the month; English wording alone does not imply US order.
+  Respect an explicit printed DD/MM/YYYY or MM/DD/YYYY format legend. Otherwise a
+  numeric component >12 is the day; when both components <=12 and differ, order is
+  ambiguous. Equal components are unambiguous. Check actual month lengths/leap years.
+  Partial dates (month/year only), impossible dates, and unresolved order yield null,
+  validation_status ambiguous, and a warning with the printed date. Never add a day.
+"""
+
+
 def _seafood_v3_text() -> str:
     prompt = _SYSTEM_TEXT.replace("expiry_date, ", "").replace(", gtin.", ".").replace("16 strings", "14 strings").replace("16 above", "14 above")
-    start = prompt.index("Route dates by their EXPLICIT nearby label")
+    start = prompt.index('- packaging_date: "value"')
     end = prompt.index("- storage_temperature:", start)
-    prompt = prompt[:start] + (
-        'Use only explicit packing/conditioning/production date cues: "emballé le", '
-        '"conditionné le", "date de conditionnement", "packed on", "pack date", '
-        '"production date", "date of production", "produced on", "manufactured on". '
-        'Store a production/manufacture date in the existing packaging_date field. Parse '
-        'textual English month forms by the month name (e.g. "Jun 20, 2026" or '
-        '"20-JUN-26") and return YYYY-MM-DD when day, month and year are unambiguous. '
-        'Never substitute a use-by/best-before or capture/catch date.\n'
-    ) + prompt[end:]
+    prompt = prompt[:start] + _AVAILABLE_DATE_GUIDANCE + prompt[end:]
+    prompt = prompt.replace(
+        "that mapping is done downstream, NEVER by you.",
+        "never infer a numeric code from geographic knowledge.",
+    )
+    prompt = prompt.replace(
+        "- FAO_area: perform",
+        "- FAO_area: join wrapped OCR lines into a single readable value using spaces; "
+        "keep each original fragment in evidence. Keep the complete printed code, "
+        "multiple zones and qualifiers. Then perform",
+    )
     start = prompt.index("- gtin:")
     end = prompt.index("EMPTY OR UNREADABLE OCR:", start)
     prompt = prompt[:start] + prompt[end:]
@@ -914,7 +940,7 @@ Return only the JSON object."""
     if profile.version == "3":
         start = prompt.index("- expiry_date is only")
         end = prompt.index("- storage_temperature", start)
-        prompt = prompt[:start] + "- packaging_date is only an explicitly labelled packing/conditioning date. Use YYYY-MM-DD when unambiguous; never use a use-by date.\n" + prompt[end:]
+        prompt = prompt[:start] + _AVAILABLE_DATE_GUIDANCE + prompt[end:]
         start = prompt.index("- gtin comes only")
         end = prompt.index("\n\n", start)
         prompt = prompt[:start] + prompt[end:]
@@ -926,8 +952,9 @@ def _profile_prompt_version(profile: TradeProfile) -> str:
     if profile.code == "poissonnerie" and profile.version == "2":
         return _PROMPT_VERSION
     if profile.code == "poissonnerie" and profile.version == "3":
-        return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v2.2.0"
-    return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v2.0.0"
+        return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v2.3.0"
+    version = "2.1.0" if profile.version == "3" else "2.0.0"
+    return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v{version}"
 
 
 def _user_prompt(ocr_text: str, known_field_names: tuple[str, ...]) -> str:

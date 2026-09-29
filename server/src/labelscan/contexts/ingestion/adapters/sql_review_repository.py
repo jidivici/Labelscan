@@ -5,10 +5,10 @@ from __future__ import annotations
 import hashlib
 import json
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.engine import Engine
 
-from labelscan.business_profiles import trade_profile
+from labelscan.business_profiles import HIDDEN_REVIEW_FIELDS, trade_profile
 from labelscan.contexts.ingestion.application.finalize_review import (
     InvalidReviewFields,
     ReviewIdempotencyConflict,
@@ -130,7 +130,7 @@ class SqlReviewRepository(ReviewRepository):
             )
             expected_fields = set(profile.fields)
             submitted_fields = set(fields)
-            if submitted_fields != expected_fields:
+            if submitted_fields not in (expected_fields, expected_fields - HIDDEN_REVIEW_FIELDS):
                 raise InvalidReviewFields(
                     missing=expected_fields - submitted_fields,
                     extra=submitted_fields - expected_fields,
@@ -240,6 +240,29 @@ class SqlReviewRepository(ReviewRepository):
                 ),
                 field_rows,
             )
+            # Retired fields are not reviewed. Preserve their original provenance
+            # for historical contracts instead of attributing them to the operator.
+            omitted_fields = expected_fields - submitted_fields
+            if omitted_fields:
+                conn.execute(
+                    text("""
+                        INSERT INTO ingestion.extracted_field (
+                            extraction_run_id, field_name, value, evidence, provenance,
+                            source_raw_artifact_id, validation_status, warnings,
+                            llm_confidence, ocr_confidence, combined_confidence,
+                            confidence_band, source
+                        )
+                        SELECT :run_id, field_name, value, evidence, provenance,
+                            source_raw_artifact_id, validation_status, warnings,
+                            llm_confidence, ocr_confidence, combined_confidence,
+                            confidence_band, source
+                        FROM ingestion.extracted_field
+                        WHERE extraction_run_id = :parent_id
+                          AND field_name IN :omitted_fields
+                    """).bindparams(bindparam("omitted_fields", expanding=True)),
+                    {"run_id": run_id, "parent_id": latest["id"],
+                     "omitted_fields": sorted(omitted_fields)},
+                )
             conn.execute(
                 text(
                     "UPDATE ingestion.ingestion SET status = 'confirmed', "
