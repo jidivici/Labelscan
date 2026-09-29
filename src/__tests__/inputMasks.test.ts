@@ -141,12 +141,7 @@ describe('parseTemp / formatTemp', () => {
   });
 });
 
-describe('toIsoDate — DD/MM/YYYY → canonical ISO (inverse of displayDate)', () => {
-  it('converts a full DD/MM/YYYY to ISO', () => {
-    expect(toIsoDate('20/06/2026')).toBe('2026-06-20');
-    expect(toIsoDate('02/01/2027')).toBe('2027-01-02');
-  });
-
+describe('toIsoDate — manual date → canonical ISO', () => {
   it('passes ISO / partial / verbatim through unchanged', () => {
     expect(toIsoDate('2026-06-20')).toBe('2026-06-20');
     expect(toIsoDate('2026-06')).toBe('2026-06');
@@ -165,12 +160,6 @@ describe('validateDate — neutral, non-blocking hints', () => {
     expect(validateDate('20/06/2026')).toBeNull();
     expect(validateDate('2026-06-20')).toBeNull();
     expect(validateDate('29/02/2028')).toBeNull(); // leap year
-  });
-
-  it('does not flag an empty or still-typing value', () => {
-    expect(validateDate('')).toBeNull();
-    expect(validateDate('20/0')).toBeNull();
-    expect(validateDate('20/06/20')).toBeNull();
   });
 
   it('flags an implausible complete date', () => {

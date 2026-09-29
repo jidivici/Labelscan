@@ -178,7 +178,10 @@ function parseDateInput(value: string): ParsedDate {
     if (year < 2000 || year > 2100) return { iso: null, complete: true, error: 'Année invalide' };
     if (first > 12 && second <= 12) return dateFromParts(+m[3], second, first);
     if (second > 12 && first <= 12) return dateFromParts(+m[3], first, second);
-    return { iso: null, complete: true, error: 'Date numérique ambiguë : utilisez AAAA-MM-JJ ou écrivez le mois en lettres.' };
+    // The app is French-localized: when both leading components can be months,
+    // preserve the established DD/MM/YYYY interpretation. Month-first dates with
+    // an unambiguous day (e.g. 06/20/2026) are handled by the branch above.
+    return dateFromParts(+m[3], second, first);
   }
 
   const normalized = v.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
@@ -197,7 +200,7 @@ function parseDateInput(value: string): ParsedDate {
     return dateFromParts(year, month, day);
   }
 
-  const looksComplete = /^\d{1,4}[-/.]\d{1,2}[-/.]\d{1,4}$/.test(v) ||
+  const looksComplete = /^\d{1,4}[-/.]\d{1,2}[-/.]\d{4}$/.test(v) ||
     /^\d{1,2}\s+[a-zA-ZÀ-ÿ.]+\s+\d{4}$/.test(v) ||
     /^[a-zA-ZÀ-ÿ.]+\s+\d{1,2},?\s+\d{4}$/.test(v);
   return {
