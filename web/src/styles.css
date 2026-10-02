@@ -516,9 +516,9 @@ tbody tr:hover { background: #fafcfb; }
   input, select, textarea { font-size: 16px; }
   button, a, input, select, textarea { touch-action: manipulation; }
   .field { gap: 5px; }
-  .field input, .field select, .manager-portal-trigger { min-height: 42px; padding-block: 8px; border-radius: 9px; }
-  .manager-portal-trigger { font-size: 14px; }
-  .manager-portal-option { min-height: 34px; padding-block: 7px; font-size: 12px; }
+  .field input, .field select { min-height: 42px; padding-block: 8px; border-radius: 9px; }
+  .manager-portal-trigger { min-height: 38px; padding-block: 6px; border-radius: 8px; font-size: 13px; }
+  .manager-portal-option { min-height: 32px; padding-block: 6px; font-size: 11px; }
   .password-input button { min-height: 30px; }
   .page-stack { gap: 18px; }
   .page-header { min-height: 0; align-items: flex-start; gap: 14px; }
