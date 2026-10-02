@@ -14,7 +14,8 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "httpx>=0.27",
     "anthropic>=0.40",
-    "pyjwt>=2.8",
+    "pyjwt>=2.15.1",
+    "urllib3>=2.8.0",  # Security floor shared by boto3/botocore and HTTP clients.
     "boto3>=1.35",
     "pillow>=12.1",
 ]
