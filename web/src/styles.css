@@ -517,6 +517,7 @@ tbody tr:hover { background: #fafcfb; }
   button, a, input, select, textarea { touch-action: manipulation; }
   .field { gap: 5px; }
   .field input, .field select { min-height: 42px; padding-block: 8px; border-radius: 9px; }
+  .compact-field { width: min(100%, 250px); }
   .manager-portal-trigger { min-height: 38px; padding-block: 6px; border-radius: 8px; font-size: 13px; }
   .manager-portal-option { min-height: 32px; padding-block: 6px; font-size: 11px; }
   .password-input button { min-height: 30px; }
