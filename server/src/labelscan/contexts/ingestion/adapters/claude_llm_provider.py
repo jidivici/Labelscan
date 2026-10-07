@@ -948,8 +948,22 @@ __AVAILABLE_LABEL_DATE_GUIDANCE__
   precedence over generic pêche wording in a heading about gear. Conflicting
   explicit wild/farmed statements mean null/ambiguous. A gear or area alone is not
   a production-method statement.
-- fishing_gear_or_farming_method: printed gear or farming method, e.g. Chalut or
-  bassins. Never infer it from the species, zone or production method.
+- fishing_gear_or_farming_method: copy the explicitly printed fishing gear, e.g.
+  Chalut. For farmed products, this field MUST capture the explicitly
+  printed farming-site identifier (number/code identifying the farm or rearing site),
+  even when no farming method is printed. Look for "identifiant du lieu d'élevage",
+  "site d'élevage", "n° d'élevage", "code ferme", "farm ID", "farm number" or
+  "farming site"; the identifier may be on the next OCR line. Copy the identifier
+  verbatim, retaining letters, leading zeros and separators, and cite its exact OCR
+  evidence. Prefer that site identifier when a farming method is also printed.
+  If no site identifier is printed, copy the explicit farming method, e.g. bassins.
+  A lot number, sanitary approval mark, company address or origin country alone is
+  not a farming-site identifier; keep those in their own fields. If distinct site
+  identifiers conflict, return null/ambiguous for this field with a French warning.
+  Never invent an identifier or infer a gear/method from species, zone or farmed
+  status. Apply this routing even when production_method is already resolved and
+  must be omitted from your output. Omit this field if neither identifier nor method
+  is printed for a farmed product.
 
 FAO_area — ONE SIMPLE PRINTED DESIGNATION:
 Perform a dedicated second whole-label search for FAO, zone de pêche, catch area,
@@ -990,6 +1004,38 @@ Elevée en France
 Date de conditionnement: 09/2026
 EXPECTED JSON:
 {"fields":[{"name":"commercial_designation","value":"Truite","confidence":0.95,"evidence":["Truite"]},{"name":"scientific_name","value":"Oncorhynchus mykiss","confidence":0.95,"evidence":["Oncorhynchus mykiss"]},{"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Elevée en France"],"validation_status":"normalized"},{"name":"origin_country","value":"France","confidence":0.95,"evidence":["Elevée en France"]},{"name":"packaging_date","value":null,"confidence":0,"evidence":[],"validation_status":"ambiguous","warnings":["Jour de conditionnement absent : à vérifier."]}]}
+
+EXAMPLE — a farm identifier is the requested field even without a farming method:
+OCR TEXT:
+Saumon
+Salmo salar
+Elevé en Norvège
+Identifiant du lieu d'élevage: NO-0042/A
+N° Lot: L-26007
+EXPECTED JSON:
+{"fields":[{"name":"commercial_designation","value":"Saumon","confidence":0.95,"evidence":["Saumon"]},{"name":"scientific_name","value":"Salmo salar","confidence":0.95,"evidence":["Salmo salar"]},{"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Elevé en Norvège"],"validation_status":"normalized"},{"name":"origin_country","value":"Norvège","confidence":0.95,"evidence":["Elevé en Norvège"]},{"name":"fishing_gear_or_farming_method","value":"NO-0042/A","confidence":0.95,"evidence":["Identifiant du lieu d'élevage: NO-0042/A"]},{"name":"batch_number","value":"L-26007","confidence":0.95,"evidence":["N° Lot: L-26007"]}]}
+
+EXAMPLE — a farming-site identifier takes priority over the farming method:
+OCR TEXT:
+Truite
+Oncorhynchus mykiss
+Elevée en France
+Site d'élevage:
+00027-B
+Méthode d'élevage: bassins
+FR 29.072.506 CE
+EXPECTED JSON:
+{"fields":[{"name":"commercial_designation","value":"Truite","confidence":0.95,"evidence":["Truite"]},{"name":"scientific_name","value":"Oncorhynchus mykiss","confidence":0.95,"evidence":["Oncorhynchus mykiss"]},{"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Elevée en France"],"validation_status":"normalized"},{"name":"origin_country","value":"France","confidence":0.95,"evidence":["Elevée en France"]},{"name":"fishing_gear_or_farming_method","value":"00027-B","confidence":0.95,"evidence":["Site d'élevage:","00027-B"]},{"name":"health_mark","value":"FR 29.072.506 CE","confidence":0.95,"evidence":["FR 29.072.506 CE"]}]}
+
+EXAMPLE — keep the farming method when no site identifier is printed:
+OCR TEXT:
+Truite
+Oncorhynchus mykiss
+Elevée en France
+Méthode d'élevage: bassins
+N° Lot: L-00027
+EXPECTED JSON:
+{"fields":[{"name":"commercial_designation","value":"Truite","confidence":0.95,"evidence":["Truite"]},{"name":"scientific_name","value":"Oncorhynchus mykiss","confidence":0.95,"evidence":["Oncorhynchus mykiss"]},{"name":"production_method","value":"farmed","confidence":0.95,"evidence":["Elevée en France"],"validation_status":"normalized"},{"name":"origin_country","value":"France","confidence":0.95,"evidence":["Elevée en France"]},{"name":"fishing_gear_or_farming_method","value":"bassins","confidence":0.95,"evidence":["Méthode d'élevage: bassins"]},{"name":"batch_number","value":"L-00027","confidence":0.95,"evidence":["N° Lot: L-00027"]}]}
 
 Empty/unreadable OCR: return {"fields":[]}. Never invent label content.
 Return only the JSON object."""
@@ -1124,7 +1170,7 @@ def _profile_prompt_version(profile: TradeProfile) -> str:
     if profile.code == "poissonnerie" and profile.version == "2":
         return _PROMPT_VERSION
     if profile.code == "poissonnerie" and profile.version == "3":
-        return "food-label-extraction/poissonnerie/profile-3/prompt-v3.1.0"
+        return "food-label-extraction/poissonnerie/profile-3/prompt-v3.2.0"
     version = "2.1.0" if profile.version == "3" else "2.0.0"
     return f"food-label-extraction/{profile.code}/profile-{profile.version}/prompt-v{version}"
 
