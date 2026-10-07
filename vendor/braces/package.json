@@ -1,0 +1,19 @@
+{
+  "name": "@labelscan/braces",
+  "version": "3.0.3-labelscan.1",
+  "private": true,
+  "description": "Braces 3.0.3 with bounded parser and AST traversal from upstream PR 82",
+  "license": "MIT",
+  "main": "index.js",
+  "engines": {
+    "node": ">=8"
+  },
+  "dependencies": {
+    "fill-range": "^7.1.1"
+  },
+  "upstream": {
+    "repository": "https://github.com/micromatch/braces",
+    "pullRequest": "https://github.com/micromatch/braces/pull/82",
+    "commit": "f6e4d5d12d0223d4ea9d667f1267de3b5ec8dd31"
+  }
+}
