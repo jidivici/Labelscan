@@ -177,14 +177,20 @@ def test_cached_prefix_excludes_dynamic_and_secrets():
 
 def test_all_prompt_examples_obey_the_closed_field_contract():
     profile = trade_profile("poissonnerie")
-    examples = clp._system_text_for(profile).split("EXPECTED JSON:")[1:]
-    assert len(examples) == 2
+    examples = clp._system_text_for(profile).split("OCR TEXT:\n")[1:]
+    assert len(examples) == 5
 
     for example in examples:
-        decoded, _ = json.JSONDecoder().raw_decode(example.lstrip())
+        ocr_text, expected = example.split("EXPECTED JSON:\n", 1)
+        decoded, _ = json.JSONDecoder().raw_decode(expected.lstrip())
         fields = _validated_fields(decoded, profile)
         assert len(fields) <= len(profile.fields)
         assert all(field["validation_status"] != "missing" for field in fields)
+        assert all(
+            evidence in ocr_text
+            for field in fields
+            for evidence in field["evidence"]
+        )
 
 
 def test_user_prompt_carries_ocr_without_hint_when_no_gs1():
